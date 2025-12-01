@@ -37,7 +37,7 @@ const getPost = async (_req, res, isPrivate) => {
 
     return res.json(response);
   } catch (error) {
-    console.error(err);
+    console.error(error);
     res.status(500).send("Server Error when getting the post");
   }
 };
