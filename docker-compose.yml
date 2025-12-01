@@ -1,0 +1,17 @@
+version: "3.8"
+
+services:
+  api:
+    container_name: next-bananaboom-api
+    build: .
+    # 关键点：直接加载你本地的 .env 文件，不用把密码写死在这里
+    env_file:
+      - .env
+    ports:
+      - "5000:5000"
+    # 开发神器：把本地代码挂载进容器，改代码自动重启 (Hot Reload)
+    volumes:
+      - ./:/app
+      - /app/node_modules
+    # 开发环境下，我们覆盖 Dockerfile 的默认命令，改用 nodemon
+    command: npm run dev
