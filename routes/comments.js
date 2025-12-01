@@ -36,7 +36,7 @@ router.post("/:id", auth, async (req, res) => {
     return res.status(400).json({ message: "Please say something" });
 
   const date = getCreateTime();
-  const id = mongoose.Types.ObjectId();
+  const id = new mongoose.Types.ObjectId();
   try {
     const response = new Comment({
       user,
@@ -61,7 +61,7 @@ router.post("/reply/:id", auth, async (req, res) => {
     return res.status(400).json({ message: "Please say something" });
 
   const date = getCreateTime();
-  const id = mongoose.Types.ObjectId();
+  const id = new mongoose.Types.ObjectId();
   try {
     await Comment.updateOne(
       { id: req.params.id },

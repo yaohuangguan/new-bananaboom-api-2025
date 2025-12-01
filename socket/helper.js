@@ -1,5 +1,5 @@
 const mongoose = require("mongoose");
-const id = () => mongoose.Types.ObjectId();
+const id = () => new mongoose.Types.ObjectId();
 
 const getTime = date => {
   return `${date.getHours()}:${("0" + date.getMinutes()).slice(-2)}`;
