@@ -26,12 +26,7 @@ const getPost = async (_req, res, isPrivate) => {
         let array = [].concat(response);
         return res.json(array);
       }
-      fs.writeFile("private_post.txt", response, (err) => {
-        if (err) {
-          console.log(err);
-        }
-        console.log("The file was saved! file name: private_post.txt");
-      });
+      
       return res.json(response);
     }
 
