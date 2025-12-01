@@ -26,7 +26,7 @@ const getPost = async (_req, res, isPrivate) => {
         let array = [].concat(response);
         return res.json(array);
       }
-      
+
       return res.json(response);
     }
 
@@ -90,6 +90,50 @@ router.post("/", auth, async (req, res) => {
   } catch (error) {
     console.error(error.message);
     res.status(500).send("Server Error");
+  }
+});
+
+// --- 新增的 Update 接口 ---
+router.put("/:id", auth, async (req, res) => {
+  const {
+    name,
+    info,
+    author,
+    content,
+    code,
+    code2,
+    isPrivate,
+    codeGroup,
+  } = req.body;
+  
+  let { tags } = req.body;
+
+  try {
+    if (tags && typeof tags === 'string') {
+      tags = tags.trim().split(" ");
+    }
+
+    const updateFields = {
+      name,
+      info,
+      author,
+      content,
+      code,
+      code2,
+      codeGroup,
+      isPrivate,
+      tags 
+    };
+
+    await Post.updateOne(
+      { _id: req.params.id }, 
+      { $set: updateFields }
+    );
+
+    await getPost(req, res, true);
+  } catch (error) {
+    console.error(error.message);
+    res.status(500).send("Server Error when updating post");
   }
 });
 
