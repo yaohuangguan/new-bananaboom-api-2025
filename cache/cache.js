@@ -1,48 +1,41 @@
-const mongoose = require("mongoose");
-//start redis server
-const redis = require("redis");
-const redisUrl = process.env.REDIS_URL || "redis://localhost:6379";
-const client = redis.createClient(redisUrl);
-const utils = require("util");
-//get exec erference of mongo
-const exec = mongoose.Query.prototype.exec;
-//promise the client get function
-client.get = utils.promisify(client.get);
+// 这是一个“内存版”的 Redis 模拟器
+// 专门为了在 Cloud Run 上省钱而设计
+// 它把数据存在内存里，而不是连接外部数据库
 
-//check if we need to cache
-mongoose.Query.prototype.cache = function() {
-  this.useCache = true;
+const memoryStore = new Map();
 
-  return this;
+module.exports = {
+  // 模拟 get
+  get: (key) => {
+    return new Promise((resolve) => {
+      const val = memoryStore.get(key);
+      // console.log(`[MemoryRedis] GET ${key} = ${val}`);
+      resolve(val || null);
+    });
+  },
+
+  // 模拟 set
+  set: (key, value) => {
+    return new Promise((resolve) => {
+      // console.log(`[MemoryRedis] SET ${key}`);
+      memoryStore.set(key, value);
+      resolve('OK');
+    });
+  },
+
+  // 模拟 del
+  del: (key) => {
+    return new Promise((resolve) => {
+      memoryStore.delete(key);
+      resolve(1);
+    });
+  },
+
+  // 模拟 expire (这里我们不做实际过期，简化处理)
+  expire: () => Promise.resolve(1),
+  
+  // 兼容旧代码的接口
+  createClient: () => module.exports,
+  on: () => {}, 
+  connect: () => Promise.resolve()
 };
-
-//rewrite exec
-mongoose.Query.prototype.exec = async function() {
-  if (!this.useCache) {
-    return exec.apply(this, arguments);
-  }
-  console.log("using cache");
-  const query = this.getQuery();
-  const key = JSON.stringify(
-    Object.assign({}, query, {
-      collection: this.mongooseCollection.name
-    })
-  );
-
-  const cachedValue = await client.get(key);
-  if (cachedValue) {
-    const doc = JSON.parse(cachedValue);
-    const arrCheck = Array.isArray(doc)
-      ? doc.map(each => new this.model(each))
-      : new this.model(doc);
-
-    return arrCheck;
-  }
-  const result = await exec.apply(this, arguments);
-  client.set(key, JSON.stringify(result), "EX", 300);
-  return result;
-};
-const clearHash = (key) => {
-  client.del(JSON.stringify(key))
-}
-module.exports = client;
