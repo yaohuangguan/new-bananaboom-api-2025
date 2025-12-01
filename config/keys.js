@@ -4,5 +4,5 @@
 
 module.exports = {
   mongoURI: process.env.MONGO_URI,
-  secretOrKey: process.env.JWT_SECRET || 'secret' // 给个默认值防止报错
+  SECRET_JWT: process.env.SECRET_JWT || 'secret' // 给个默认值防止报错
 };
