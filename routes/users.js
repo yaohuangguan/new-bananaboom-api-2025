@@ -142,37 +142,56 @@ router.post("/logout", auth, async (req, res) => {
   await deleteToken(token);
   res.json("OK");
 });
-router.post("/changeusername/:id", auth, async (req, res) => {
-  const { newDisplayName } = req.body;
-  const { id } = req.params;
-  if (!id) {
-    return res.json({ message: "修改失败" });
+// @route   PUT /api/users/:id
+// @desc    修改个人资料 (名字、头像)
+// @access  Private
+router.put("/:id", auth, async (req, res) => {
+  const { displayName, photoURL } = req.body;
+  const userId = req.params.id;
+
+  // 1. 安全检查：确保用户只能修改自己的资料
+  // req.user.id 来自 auth 中间件解析的 token
+  if (req.user.id !== userId) {
+    return res.status(403).json({ message: "你无权修改他人的资料" });
   }
+
+  // 2. 构建更新对象 (只更新传了的字段)
+  const updateFields = {};
+  if (displayName) updateFields.displayName = displayName;
+  if (photoURL) updateFields.photoURL = photoURL;
+
+  // 如果没有要更新的字段，直接返回
+  if (Object.keys(updateFields).length === 0) {
+    return res.status(400).json({ message: "请提供要修改的名字或头像" });
+  }
+
   try {
-    await User.updateOne({ _id: id }, { displayName: newDisplayName });
-    let updatedUser = await User.findOne(
-      { _id: id },
-      {
-        displayName: 1,
-        email: 1,
-        date: 1,
-        photoURL: 1,
-        vip: 1
-      }
-    );
-    if (updatedUser.vip) {
-      let privateUser = {
-        updatedUser,
-        private_token: "ilovechenfangting",
-        message: "修改成功"
-      };
-      return res.json(privateUser);
+    // 3. 执行更新
+    // { new: true } 表示返回更新后的数据
+    // .select("-password") 表示返回的数据里不要带密码
+    const updatedUser = await User.findByIdAndUpdate(
+      userId,
+      { $set: updateFields },
+      { new: true }
+    ).select("-password -googleId"); // 排除敏感信息
+
+    if (!updatedUser) {
+      return res.status(404).json({ message: "用户不存在" });
     }
-    res.json({ newDisplayName, id, message: "修改成功", updatedUser });
+
+    // 4. 返回标准格式
+    res.json({
+      success: true,
+      message: "修改成功",
+      user: updatedUser
+    });
+
   } catch (error) {
-    res.status(400).json({ message: "修改失败" });
+    console.error("Update profile error:", error);
+    res.status(500).json({ message: "修改失败，服务器错误" });
   }
 });
+
 function signToken(payload) {
   return jwt.sign(payload, SECRET, {
     expiresIn: 600000
