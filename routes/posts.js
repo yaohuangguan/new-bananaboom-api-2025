@@ -133,6 +133,8 @@ try {
     code2,     // 此时它是安全的字符串
     codeGroup,
     isPrivate,
+    // 🔥 新增：保存当前登录用户的 ID (由 auth 中间件提供)
+    user: req.user.id
   });
 
   await newPost.save();
