@@ -5,6 +5,7 @@ const jwt = require("jsonwebtoken");
 const auth = require("../middleware/auth");
 const redis = require("../cache/cache");
 const getCreateTime = require("../utils")
+const checkPrivate = require("../middleware/checkPrivate"); // 引入新中间件
 
 
 const SECRET = process.env.SECRET_JWT || require("../config/keys").SECRET_JWT;
