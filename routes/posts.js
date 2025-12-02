@@ -2,7 +2,7 @@ const express = require("express");
 const getCreateTime = require("../utils");
 
 const router = express.Router();
-
+const logOperation = require("../utils/audit"); // 引入工具
 const Post = require("../models/Post");
 const auth = require("../middleware/auth");
 const checkPrivate = require("../middleware/checkPrivate");
@@ -94,6 +94,15 @@ router.post("/", auth, async (req, res) => {
       name, info, author, createdDate, likes: 0, tags, content, code, code2, codeGroup, isPrivate,
       user: req.user.id
     });
+    // 🔥🔥🔥 埋点记录日志 🔥🔥🔥
+    logOperation({
+      operatorId: req.user.id,
+      action: "CREATE_POST",
+      target: newPost.name,
+      ip: req.ip,
+      io: req.app.get('socketio') // 传入 socket 实例用于实时推送
+  });
+
     await newPost.save();
     await getPost(req, res, true);
   } catch (error) {
@@ -110,7 +119,15 @@ router.put("/:id", auth, async (req, res) => {
     if (Array.isArray(code2)) code2 = code2.join('\n');
 
     const updateFields = { name, info, author, content, code, code2, codeGroup, isPrivate, tags };
-    await Post.updateOne({ _id: req.params.id }, { $set: updateFields });
+    const updatedPost = await Post.updateOne({ _id: req.params.id }, { $set: updateFields });
+    // 🔥🔥🔥 埋点记录日志 🔥🔥🔥
+    logOperation({
+      operatorId: req.user.id,
+      action: "UPDATE_POST",
+      target: updatedPost.name,
+      ip: req.ip,
+      io: req.app.get('socketio') // 传入 socket 实例用于实时推送
+  });
     await getPost(req, res, true);
   } catch (error) {
     console.error(error.message);

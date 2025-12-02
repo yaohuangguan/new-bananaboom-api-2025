@@ -4,6 +4,7 @@ const mongoose = require("mongoose");
 const Comment = require("../models/Comment");
 const User = require("../models/User");
 const auth = require("../middleware/auth");
+const logOperation = require("../utils/audit"); // 引入工具
 
 // --- 核心逻辑：手动关联并清洗数据 (Adapter) ---
 async function populateCommentsManually(comments) {
@@ -147,6 +148,15 @@ router.post("/:postId", auth, async (req, res) => {
       date: new Date()
     });
     await newComment.save();
+    // 🔥🔥🔥 记录日志
+    logOperation({
+      operatorId: req.user.id,
+      action: "CREATE_COMMENT",
+      target: `文章ID: ${req.params.postId}`,
+      details: { content },
+      ip: req.ip,
+      io: req.app.get('socketio')
+  });
 
     const saved = await Comment.findById(newComment._id).lean();
     const result = await populateCommentsManually([saved]);
@@ -179,6 +189,15 @@ router.post("/reply/:commentId", auth, async (req, res) => {
 
     comment.reply.push(newReply);
     await comment.save();
+    // 🔥🔥🔥 记录日志
+    logOperation({
+      operatorId: req.user.id,
+      action: "REPLY_COMMENT",
+      target: `评论ID: ${req.params.commentId}`,
+      details: { content },
+      ip: req.ip,
+      io: req.app.get('socketio')
+  });
 
     const updated = await Comment.findById(req.params.commentId).lean();
     const result = await populateCommentsManually([updated]);

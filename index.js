@@ -23,6 +23,8 @@ const io = new Server(server, {
     methods: ["GET", "POST"]
   }
 });
+// 🔥 把 io 挂载到 app 上，这样所有路由都能用 req.app.get('io') 拿到它
+app.set('socketio', io);
 
 app.use(compression());
 app.use(morgan("tiny"));
@@ -66,6 +68,7 @@ app.use("/api/backup", require("./routes/backup"));
 app.use("/api/photos", require("./routes/photos"));
 const cloudinaryRoute = require("./routes/cloudinary");
 app.use("/api/cloudinary", cloudinaryRoute);
+app.use("/api/audit", require("./routes/audit"));
 
 
 
