@@ -4,14 +4,14 @@ const Photo = require("../models/Photo");
 const auth = require("../middleware/auth");
 const checkPrivate = require("../middleware/checkPrivate");
 
-// 🔥 全局鉴权：只有登录且是 VIP (checkPrivate) 才能操作照片墙
+// 🔥 全局鉴权
 router.use(auth, checkPrivate);
 
 // 1. 【查阅】获取所有照片
 // GET /api/photos
 router.get("/", async (req, res) => {
   try {
-    // 按创建时间倒序排列（最新的在前）
+    // 按时间倒序
     const photos = await Photo.find().sort({ createdDate: -1 });
     res.json(photos);
   } catch (error) {
@@ -20,10 +20,10 @@ router.get("/", async (req, res) => {
   }
 });
 
-// 2. 【存储】新增一张照片
+// 2. 【存储】新增一张照片 (支持自定义时间)
 // POST /api/photos
 router.post("/", async (req, res) => {
-  const { url, name } = req.body;
+  const { url, name, createdDate } = req.body;
 
   if (!url) {
     return res.status(400).json({ message: "URL is required" });
@@ -32,14 +32,13 @@ router.post("/", async (req, res) => {
   try {
     const newPhoto = new Photo({
       url,
-      name: name || "未命名", // 如果没传名字，给个默认值
-      createdDate: new Date()
+      name: name || "未命名",
+      // 如果前端传了时间就用传的，没传就用当前时间
+      createdDate: createdDate || new Date() 
     });
 
     await newPhoto.save();
     
-    // 返回最新的完整列表，方便前端直接更新视图
-    // (也可以只返回 savedPhoto，看你前端怎么写，返回列表通常更省事)
     const allPhotos = await Photo.find().sort({ createdDate: -1 });
     res.json(allPhotos); 
 
@@ -49,28 +48,29 @@ router.post("/", async (req, res) => {
   }
 });
 
-// 3. 【替换】修改某张照片的 URL 或 名字
+// 3. 【修改】修改照片信息 (URL、名字、时间)
 // PUT /api/photos/:id
 router.put("/:id", async (req, res) => {
-  const { url, name } = req.body;
+  const { url, name, createdDate } = req.body;
 
   // 构建更新内容
   const updateFields = {};
-  if (url) updateFields.url = url;   // 如果传了新URL，就替换
-  if (name) updateFields.name = name; // 如果传了新名字，就改名
+  if (url) updateFields.url = url;
+  if (name) updateFields.name = name;
+  if (createdDate) updateFields.createdDate = createdDate; // 新增：支持改时间
 
   try {
     const updatedPhoto = await Photo.findByIdAndUpdate(
       req.params.id,
       { $set: updateFields },
-      { new: true } // 返回修改后的文档，而不是修改前的
+      { new: true }
     );
 
     if (!updatedPhoto) {
       return res.status(404).json({ message: "Photo not found" });
     }
 
-    // 同样，返回最新的完整列表，方便前端刷新
+    // 返回最新列表
     const allPhotos = await Photo.find().sort({ createdDate: -1 });
     res.json(allPhotos);
 
@@ -80,7 +80,7 @@ router.put("/:id", async (req, res) => {
   }
 });
 
-// 4. 【删除】(可选)
+// 4. 【删除】
 // DELETE /api/photos/:id
 router.delete("/:id", async (req, res) => {
   try {
