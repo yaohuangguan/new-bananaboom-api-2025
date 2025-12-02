@@ -161,6 +161,14 @@ router.delete("/:id", auth, checkPrivate, async (req, res) => {
       if (secretKey !== ADMIN_SECRET) return res.status(403).json({ message: "暗号错误！删除私有日志需要超级权限。" });
     } 
     await Post.findByIdAndDelete(req.params.id);
+     // 🔥🔥🔥 埋点记录日志 🔥🔥🔥
+     logOperation({
+      operatorId: req.user.id,
+      action: "DELETE_POST",
+      target: post.name,
+      ip: req.ip,
+      io: req.app.get('socketio') // 传入 socket 实例用于实时推送
+  });
     await getPost(req, res, wasPrivate);
   } catch (error) {
     console.error("Delete post error:", error);
