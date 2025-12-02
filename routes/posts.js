@@ -81,12 +81,14 @@ router.get("/:id", async (req, res) => {
     res.status(404).json({ message: "Not found the posts" });
   }
 });
+
 router.get(
   "/private/posts",
   auth,
   checkPrivate,
   async (req, res) => await getPost(req, res, true)
 );
+
 router.post("/", auth, async (req, res) => {
  // 1. 改用 let 解构，允许我们在下面修改 code 的值
  let {
@@ -215,12 +217,41 @@ router.post("/likes/:id/remove", async (req, res) => {
     console.log(error);
   }
 });
-router.delete("/:id", async (req, res) => {
+// @route   DELETE /api/posts/:id
+// @desc    删除文章 (需要 VIP 权限；私有文章还需要额外暗号)
+// @access  Private
+router.delete("/:id", auth, checkPrivate, async (req, res) => {
+  const { secretKey } = req.body;
+  const ADMIN_SECRET = process.env.ADMIN_RESET_SECRET || "bananaboom-666";
+
   try {
-    await Post.deleteOne({ _id: req.params.id });
-    await getPost(req,res,true)
+    // 1. 先查询文章状态
+    const post = await Post.findById(req.params.id);
+
+    if (!post) {
+      return res.status(404).json({ message: "Post not found" });
+    }
+
+    // 🔴 关键点：先记住这篇文章是不是私有的
+    const wasPrivate = post.isPrivate;
+
+    // 2. 私有文章安检通道
+    if (wasPrivate) {
+      if (secretKey !== ADMIN_SECRET) {
+        return res.status(403).json({ message: "暗号错误！删除私有日志需要超级权限。" });
+      }
+    } 
+    
+    // 3. 执行删除
+    await Post.findByIdAndDelete(req.params.id);
+
+    // 4. 🔥 智能返回：刚才删的是私有的，就返回私有列表；删的是公开的，就返回公开列表
+    // 这样前端页面刷新才是对的
+    await getPost(req, res, wasPrivate);
+
   } catch (error) {
-    console.log(error);
+    console.error("Delete post error:", error);
+    res.status(500).send("Server Error");
   }
 });
 module.exports = router;
