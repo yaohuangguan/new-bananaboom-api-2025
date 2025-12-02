@@ -5,6 +5,8 @@ const router = express.Router();
 const fs = require("fs");
 const Post = require("../models/Post");
 const auth = require("../middleware/auth");
+const checkPrivate = require("../middleware/checkPrivate"); // 引入新中间件
+
 const getLikes = async (req, res) => {
   try {
     const like = await Post.findOne({ _id: req.params.id }, { likes: 1 });
@@ -82,6 +84,7 @@ router.get("/:id", async (req, res) => {
 router.get(
   "/private/posts",
   auth,
+  checkPrivate,
   async (req, res) => await getPost(req, res, true)
 );
 router.post("/", auth, async (req, res) => {
