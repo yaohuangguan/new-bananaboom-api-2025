@@ -64,7 +64,8 @@ app.use("/api/users", require("./routes/users"));
 app.use("/api/todo", require("./routes/todo"));
 app.use("/api/backup", require("./routes/backup"));
 app.use("/api/photos", require("./routes/photos"));
-
+const cloudinaryRoute = require("./routes/cloudinary");
+app.use("/api/cloudinary", cloudinaryRoute);
 
 
 
