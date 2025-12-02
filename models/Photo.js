@@ -15,6 +15,12 @@ const PhotoSchema = new Schema({
   createdDate: {
     type: Date,
     default: Date.now
+  },
+  // 🔥 新增：排序字段
+  // 我们设置默认值为 0，后面会动态计算
+  order: {
+    type: Number,
+    default: 0 
   }
 });
 
