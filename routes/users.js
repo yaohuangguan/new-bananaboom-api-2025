@@ -192,17 +192,27 @@ router.put("/:id", auth, async (req, res) => {
   }
 });
 
+// 1. 修改 Token 生成逻辑
 function signToken(payload) {
+  // 建议直接用字符串格式，清晰明了
+  // '7d' = 7天, '30d' = 30天
   return jwt.sign(payload, SECRET, {
-    expiresIn: 600000
+    expiresIn: "30d" 
   });
 }
+
+// 2. 修改 Redis 存储逻辑
 function setToken(key, value) {
-  return Promise.resolve(redis.set(key, value));
+  // 注意：Redis 也需要设置过期时间，否则内存会爆
+  // 30天 = 30 * 24 * 60 * 60 = 2592000 秒
+  // 'EX' 代表单位是秒
+  return Promise.resolve(redis.set(key, value, 'EX', 2592000));
 }
+
 function sendToken(req, res, token) {
   res.json({ token });
 }
+
 function deleteToken(token) {
   return Promise.resolve(redis.del(token));
 }

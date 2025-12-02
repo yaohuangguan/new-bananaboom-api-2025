@@ -1,41 +1,47 @@
-// 这是一个“内存版”的 Redis 模拟器
-// 专门为了在 Cloud Run 上省钱而设计
-// 它把数据存在内存里，而不是连接外部数据库
-
-const memoryStore = new Map();
+// 使用 MongoDB 替代 Redis 实现持久化缓存
+const Session = require("../models/Session");
 
 module.exports = {
-  // 模拟 get
-  get: (key) => {
-    return new Promise((resolve) => {
-      const val = memoryStore.get(key);
-      // console.log(`[MemoryRedis] GET ${key} = ${val}`);
-      resolve(val || null);
-    });
+  // 获取 Token
+  get: async (key) => {
+    try {
+      const session = await Session.findOne({ key });
+      return session ? session.value : null;
+    } catch (err) {
+      console.error("Cache GET error:", err);
+      return null;
+    }
   },
 
-  // 模拟 set
-  set: (key, value) => {
-    return new Promise((resolve) => {
-      // console.log(`[MemoryRedis] SET ${key}`);
-      memoryStore.set(key, value);
-      resolve('OK');
-    });
+  // 存储 Token (支持 upsert: 如果存在就更新，不存在就创建)
+  set: async (key, value) => {
+    try {
+      // 这里的 expire 参数我们在 Model 里定义了默认值，所以这里可以忽略
+      await Session.findOneAndUpdate(
+        { key }, 
+        { key, value, createdAt: new Date() }, // 更新时间以重置过期倒计时
+        { upsert: true, new: true }
+      );
+      return "OK";
+    } catch (err) {
+      console.error("Cache SET error:", err);
+    }
   },
 
-  // 模拟 del
-  del: (key) => {
-    return new Promise((resolve) => {
-      memoryStore.delete(key);
-      resolve(1);
-    });
+  // 删除 Token (登出)
+  del: async (key) => {
+    try {
+      await Session.findOneAndDelete({ key });
+      return 1;
+    } catch (err) {
+      console.error("Cache DEL error:", err);
+      return 0;
+    }
   },
-
-  // 模拟 expire (这里我们不做实际过期，简化处理)
-  expire: () => Promise.resolve(1),
   
-  // 兼容旧代码的接口
+  // 兼容性接口 (防止报错)
+  expire: () => Promise.resolve(1),
   createClient: () => module.exports,
-  on: () => {}, 
+  on: () => {},
   connect: () => Promise.resolve()
 };
