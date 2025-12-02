@@ -1,7 +1,6 @@
 const dotenv = require('dotenv');
 dotenv.config(); // 这行代码会把 .env 里的内容加载到 process.env 里
 
-const passport = require("passport");
 const express = require("express");
 const connectDB = require("./config/db");
 const http = require("http");
@@ -21,10 +20,11 @@ app.use(compression());
 app.use(morgan("tiny"));
 app.use(helmet());
 app.use(helmet.hidePoweredBy());
-app.use(express.urlencoded({ extended: false }));
 app.options("*", cors());
 app.use(cors(corsConfig));
-app.use(express.json());
+// 🔥 请改成这样：
+app.use(express.json({ limit: '50mb' })); 
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use((_req, res, next) => {
   res.setHeader("Content-Security-Policy", "frame-ancestors 'none'");
   res.setHeader("X-XSS-Protection", 1);
@@ -33,7 +33,7 @@ app.use((_req, res, next) => {
   res.setHeader("X-Frame-Options", "Deny");
   next();
 });
-//passport
+
 
 connectDB();
 

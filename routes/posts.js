@@ -53,40 +53,55 @@ router.get(
   async (req, res) => await getPost(req, res, true)
 );
 router.post("/", auth, async (req, res) => {
-  const {
+ // 1. 改用 let 解构，允许我们在下面修改 code 的值
+ let {
+  name,
+  info,
+  author,
+  content,
+  code,
+  code2,
+  isPrivate,
+  codeGroup,
+  tags // 注意：有些旧代码这里是分开解构的，这里统一处理比较好
+} = req.body;
+
+try {
+  const createdDate = getCreateTime();
+
+  // 2. 处理标签 (Tags)
+  if (tags && typeof tags === 'string') {
+    tags = tags.trim().split(" ");
+  }
+
+  // 🔥🔥🔥 3. 新增：兼容处理 code 字段 (防止空数组报错) 🔥🔥🔥
+  if (Array.isArray(code)) {
+    // 如果是数组，转成字符串（或者直接设为 ""）
+    code = code.join('\n'); 
+  }
+  if (Array.isArray(code2)) {
+    code2 = code2.join('\n');
+  }
+
+  // 4. 创建新文章对象
+  const newPost = new Post({
     name,
     info,
     author,
+    createdDate,
+    likes: 0,
+    tags,
     content,
-    code,
-    code2,
-    isPrivate,
+    code,      // 此时它是安全的字符串
+    code2,     // 此时它是安全的字符串
     codeGroup,
-  } = req.body;
-  let { tags } = req.body;
-  try {
-    const createdDate = getCreateTime();
+    isPrivate,
+  });
 
-    if (tags) {
-      tags = tags.trim().split(" ");
-    }
-
-    const newPost = new Post({
-      name,
-      info,
-      author,
-      createdDate,
-      likes: 0,
-      tags,
-      content,
-      code,
-      code2,
-      codeGroup,
-      isPrivate,
-    });
-
-    await newPost.save();
-    await getPost(req, res, true);
+  await newPost.save();
+  
+  // 5. 返回最新的文章列表
+  await getPost(req, res, true);
   } catch (error) {
     console.error(error.message);
     res.status(500).send("Server Error");
@@ -95,35 +110,46 @@ router.post("/", auth, async (req, res) => {
 
 // --- 新增的 Update 接口 ---
 router.put("/:id", auth, async (req, res) => {
-  const {
+ // 1. 先把 code 单独解构出来，注意这里用 let
+ let {
+  name,
+  info,
+  author,
+  content,
+  code,  // <--- 这里
+  code2,
+  isPrivate,
+  codeGroup,
+  tags
+} = req.body;
+
+try {
+  // ... 原有的 tags 处理逻辑 ...
+  if (tags && typeof tags === 'string') {
+    tags = tags.trim().split(" ");
+  }
+
+  // 🔥🔥🔥 新增：兼容处理 code 字段 🔥🔥🔥
+  // 如果前端传过来的是数组（比如 []），我们把它转成空字符串或者用换行符连接
+  if (Array.isArray(code)) {
+      code = code.join('\n'); // 或者直接 code = ""; 看你需求
+  }
+  // 同理，防止 code2 也出问题
+  if (Array.isArray(code2)) {
+      code2 = code2.join('\n');
+  }
+
+  const updateFields = {
     name,
     info,
     author,
     content,
-    code,
+    code, // 现在它是安全的字符串了
     code2,
-    isPrivate,
     codeGroup,
-  } = req.body;
-  
-  let { tags } = req.body;
-
-  try {
-    if (tags && typeof tags === 'string') {
-      tags = tags.trim().split(" ");
-    }
-
-    const updateFields = {
-      name,
-      info,
-      author,
-      content,
-      code,
-      code2,
-      codeGroup,
-      isPrivate,
-      tags 
-    };
+    isPrivate,
+    tags 
+  };
 
     await Post.updateOne(
       { _id: req.params.id }, 
