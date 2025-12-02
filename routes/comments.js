@@ -119,7 +119,9 @@ router.get("/reply/:commentId", async (req, res) => {
     let comment = null;
     try {
         comment = await Comment.findById(req.params.commentId).lean();
-    } catch(e) {}
+    } catch(e) {
+      console.log(e)
+    }
 
     if (!comment) return res.status(404).json({ message: "Not found" });
 
