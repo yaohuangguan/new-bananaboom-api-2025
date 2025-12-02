@@ -2,7 +2,7 @@ const express = require("express");
 const getCreateTime = require("../utils");
 
 const router = express.Router();
-const fs = require("fs");
+
 const Post = require("../models/Post");
 const auth = require("../middleware/auth");
 const checkPrivate = require("../middleware/checkPrivate"); // 引入新中间件

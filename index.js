@@ -63,6 +63,8 @@ app.use("/api/comments", require("./routes/comments"));
 app.use("/api/users", require("./routes/users"));
 app.use("/api/todo", require("./routes/todo"));
 app.use("/api/backup", require("./routes/backup"));
+app.use("/api/photos", require("./routes/photos"));
+
 
 
 

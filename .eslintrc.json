@@ -1,0 +1,25 @@
+{
+    "env": {
+        "node": true,
+        "es2021": true
+    },
+    "extends": [
+        "eslint:recommended"
+    ],
+    "plugins": [
+        "import"
+    ],
+    "rules": {
+        // 🔥 核心规则：找不到文件就报错 (2 代表 error)
+        // commonjs: true 表示也要检查 require 写法
+        "import/no-unresolved": [
+            2,
+            {
+                "commonjs": true,
+                "caseSensitive": true
+            }
+        ],
+        // 🔥 加上这一行：0=off, 1=warn, 2=error
+        "no-unused-vars": "warn"
+    }
+}

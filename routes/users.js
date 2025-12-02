@@ -39,7 +39,7 @@ router.post(
     check("email", "Please provide a valid email").isEmail(),
     check("password", "Please enter a password and not less than 8 characters")
       .isLength({ min: 8 })
-      .custom((value, { req, loc, path }) => {
+      .custom((value, { req, _loc, _path }) => {
         let re = /^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d]{8,}$/;
         if (value !== req.body.passwordConf) {
           throw new Error("Passwords don't match");

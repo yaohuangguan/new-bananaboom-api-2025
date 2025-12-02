@@ -1,5 +1,5 @@
 const mongoose = require("mongoose");
-const CommentSchema = require("./Comment");
+
 const PostSchema = mongoose.Schema({
   name: {
     type: String,
@@ -43,6 +43,11 @@ const PostSchema = mongoose.Schema({
   },
   button:{
     type:String
+  },
+  // 🔥 加上这个！
+  comments: {
+    type: Array,
+    default: []
   }
 });
 

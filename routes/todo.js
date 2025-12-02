@@ -10,7 +10,7 @@ router.post("/", auth, async (req, res) => {
   const { todo } = req.body;
   let timestamp = Date.now();
   const response = new Todo({ todo, done: false, timestamp });
-  const newTodo = await response.save();
+  await response.save();
   const allTodo = await Todo.find().sort({ timestamp: -1 });
   res.json(allTodo);
 });
