@@ -11,10 +11,18 @@ const compression = require("compression");
 const app = express();
 const corsConfig = require("./corsConfig");
 const server = http.createServer(app);
-const socketManager = require("./socket/socket");
-const io = require("socket.io")(server);
+// 引入刚刚改好的 socket 模块
+const socketHandler = require("./socket/socket");
+const { Server } = require("socket.io");
 
-
+// 2. 初始化 Socket.io，配置跨域
+const io = new Server(server, {
+  cors: {
+    // 允许你的前端域名连接
+    origin: "*", // 开发阶段先允许所有，上线后建议改成 ["https://ps5.space"]
+    methods: ["GET", "POST"]
+  }
+});
 
 app.use(compression());
 app.use(morgan("tiny"));
@@ -37,12 +45,15 @@ app.use((_req, res, next) => {
 
 connectDB();
 
-//socket
-io.on("connection", socketManager);
+// 🔥 关键一步：把 io 传给 socketHandler
+socketHandler(io);
 
 app.get("/", (_req, res) => {
   res.json("api server");
 });
+
+app.get('/health', (_req, res) => res.status(200).send('OK'));
+
 
 app.use("/api/auth", require("./routes/auth"));
 app.use("/api/posts", require("./routes/posts"));
@@ -51,6 +62,7 @@ app.use("/api/homepage", require("./routes/homepage"));
 app.use("/api/comments", require("./routes/comments"));
 app.use("/api/users", require("./routes/users"));
 app.use("/api/todo", require("./routes/todo"));
+
 
 //port
 const PORT = process.env.PORT || 5000;

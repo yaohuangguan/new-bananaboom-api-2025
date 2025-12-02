@@ -15,22 +15,54 @@ const getLikes = async (req, res) => {
     console.log(error);
   }
 };
-const getPost = async (_req, res, isPrivate) => {
+// 修改后的 getPost 函数，支持分页
+const getPost = async (req, res, isPrivate) => {
   try {
-    const response = await Post.find({ isPrivate }).sort({
-      createdDate: -1,
-    });
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
 
-    if (isPrivate) {
-      if (Object.prototype.toString.call(response) === "[object Object]") {
-        let array = [].concat(response);
-        return res.json(array);
-      }
+    // --- 🔥 新增：构建动态查询条件 ---
+    const query = { isPrivate };
 
-      return res.json(response);
+    // 1. 搜索功能 (Search)
+    // 如果 URL 里有 ?q=keyword
+    if (req.query.q) {
+      const keyword = req.query.q;
+      // 在标题(name) 或 内容(content) 中模糊搜索，'i' 表示忽略大小写
+      query.$or = [
+        { name: { $regex: keyword, $options: 'i' } },
+        { content: { $regex: keyword, $options: 'i' } }
+      ];
     }
 
-    return res.json(response);
+    // 2. 标签筛选 (Filter by Tag)
+    // 如果 URL 里有 ?tag=React
+    if (req.query.tag) {
+      // 假设你的 tags 字段是数组，MongoDB 会自动匹配数组中是否包含该值
+      query.tags = req.query.tag;
+    }
+    // --------------------------------
+
+    // 下面的逻辑不用变，直接把 query 传进去
+    const [posts, total] = await Promise.all([
+      Post.find(query)
+        .sort({ createdDate: -1 })
+        .skip(skip)
+        .limit(limit),
+      Post.countDocuments(query)
+    ]);
+
+    return res.json({
+      data: posts,
+      pagination: {
+        currentPage: page,
+        totalPages: Math.ceil(total / limit),
+        totalPosts: total,
+        perPage: limit
+      }
+    });
+
   } catch (error) {
     console.error(error);
     res.status(500).send("Server Error when getting the post");
