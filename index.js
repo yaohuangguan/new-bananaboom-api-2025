@@ -67,7 +67,7 @@ const cloudinaryRoute = require("./routes/cloudinary");
 app.use("/api/cloudinary", cloudinaryRoute);
 app.use("/api/audit", require("./routes/audit"));
 app.use("/api/chat", require("./routes/chat"));
-
+app.use("/api/fitness", require("./routes/fitness"));
 
 //port
 const PORT = process.env.PORT || 5000;
