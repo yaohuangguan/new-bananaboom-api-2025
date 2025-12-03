@@ -44,9 +44,6 @@ app.use((_req, res, next) => {
   next();
 });
 
-
-connectDB();
-
 // 🔥 关键一步：把 io 传给 socketHandler
 socketHandler(io);
 
@@ -75,7 +72,22 @@ app.use("/api/audit", require("./routes/audit"));
 //port
 const PORT = process.env.PORT || 5000;
 
-//create server
-server.listen(PORT, () => console.log(` Server listening on ${PORT}`));
+// 创建一个启动函数
+const startServer = async () => {
+  try {
+    // 1. 先等待数据库连接成功
+    await connectDB();
+    
+    // 2. 数据库连接成功后，再启动服务器
+    server.listen(PORT, () => console.log(`Server listening on ${PORT}`));
+    
+  } catch (error) {
+    console.error("Failed to start server:", error);
+    process.exit(1);
+  }
+};
+
+// 执行启动
+startServer();
 
 module.exports = io;
