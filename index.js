@@ -66,7 +66,7 @@ app.use("/api/photos", require("./routes/photos"));
 const cloudinaryRoute = require("./routes/cloudinary");
 app.use("/api/cloudinary", cloudinaryRoute);
 app.use("/api/audit", require("./routes/audit"));
-
+app.use("/api/chat", require("./routes/chat"));
 
 
 //port

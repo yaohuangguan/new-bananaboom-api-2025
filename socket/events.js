@@ -8,5 +8,6 @@ module.exports = {
   // 🔥 新增功能
   PRIVATE_MESSAGE: "PRIVATE_MESSAGE", // 私聊
   TYPING: "TYPING",                   // 正在输入
-  STOP_TYPING: "STOP_TYPING"          // 停止输入
+  STOP_TYPING: "STOP_TYPING",          // 停止输入,
+  NEW_NOTIFICATION: "NEW_NOTIFICATION", // <--- 必须新增这一行
 };
