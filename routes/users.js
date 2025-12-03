@@ -6,6 +6,7 @@ const auth = require("../middleware/auth");
 const redis = require("../cache/cache");
 const getCreateTime = require("../utils")
 const checkPrivate = require("../middleware/checkPrivate"); // 引入新中间件
+const logOperation = require("../utils/audit"); // 引入工具
 
 
 const SECRET = process.env.SECRET_JWT || require("../config/keys").SECRET_JWT;
@@ -86,6 +87,14 @@ router.post(
 
       const token = signToken(payload);
       await setToken(token, token);
+      logOperation({
+        operatorId: req.user.id,
+        action: "SIGN_UP",
+        target: `SIGN UP [${user.displayName}]`,
+        details: {user},
+        ip: req.ip,
+        io: req.app.get('socketio')
+    });
       sendToken(req, res, token);
     } catch (error) {
       console.log(error);
@@ -129,6 +138,14 @@ router.post(
 
       const token = signToken(payload);
       await setToken(token, token);
+      logOperation({
+        operatorId: req.user.id,
+        action: "SIGN_IN",
+        target: `SIGN IN [${req.user.name}]`,
+        details: {},
+        ip: req.ip,
+        io: req.app.get('socketio')
+    });
       sendToken(req, res, token);
     } catch (error) {
       console.log(error.message);
@@ -178,6 +195,15 @@ router.put("/:id", auth, async (req, res) => {
     if (!updatedUser) {
       return res.status(404).json({ message: "用户不存在" });
     }
+
+    logOperation({
+      operatorId: req.user.id,
+      action: "UPDATE_USER_INFO",
+      target: `UPDATE_USER_INFO [${req.user.name}]`,
+      details: {},
+      ip: req.ip,
+      io: req.app.get('socketio')
+  });
 
     // 4. 返回标准格式
     res.json({
@@ -300,6 +326,15 @@ router.post("/reset-by-secret", async (req, res) => {
     user.password = await bcrypt.hash(newPassword, salt);
 
     await user.save();
+    // 🔥🔥🔥 记录日志
+    logOperation({
+      operatorId: req.user.id,
+      action: "RESET_BY_SECRET",
+      target: `密码已通过暗号强制重置 [${req.user.name}]`,
+      details: {},
+      ip: req.ip,
+      io: req.app.get('socketio')
+  });
 
     res.json({ success: true, message: "密码已通过暗号强制重置！请直接登录。" });
 
@@ -340,6 +375,16 @@ router.put("/grant-vip", auth, checkPrivate, async (req, res) => {
     await targetUser.save();
 
     console.log(`User [${targetUser.displayName}] has been promoted to VIP by [${req.user.name}]`);
+
+     // 🔥🔥🔥 记录日志
+     logOperation({
+      operatorId: req.user.id,
+      action: "GRANT_VIP",
+      target: `User [${targetUser.displayName}] has been promoted to VIP by [${req.user.name}]`,
+      details: {},
+      ip: req.ip,
+      io: req.app.get('socketio')
+  });
 
     res.json({ 
       success: true, 
