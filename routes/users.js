@@ -406,6 +406,55 @@ router.put("/grant-vip", auth, checkPrivate, async (req, res) => {
   }
 });
 
+// @route   PUT /api/users/revoke-vip
+// @desc    【私域专用】撤销指定用户的 VIP 权限
+// @access  Private (需要 VIP/管理员 权限)
+router.put("/revoke-vip", auth, checkPrivate, async (req, res) => {
+  const { email, username } = req.body;
+
+  // 1. 校验参数：必须提供邮箱或用户名
+  if (!email && !username) {
+    return res.status(400).json({ message: "请提供目标用户的邮箱或用户名" });
+  }
+
+  try {
+    // 2. 查找目标用户
+    // 根据你的 Model，名字字段是 displayName，所以我们查 email 或 displayName
+    const targetUser = await User.findOne({
+      $or: [
+        { email: email },
+        { displayName: username } // 对应 Schema 中的 displayName
+      ]
+    });
+
+    if (!targetUser) {
+      return res.status(404).json({ message: "未找到该用户" });
+    }
+
+    // 3. 修改状态
+    // 根据 Schema，vip 是 Boolean 类型
+    targetUser.vip = false;
+
+    // 4. 保存到数据库
+    await targetUser.save();
+
+    // 5. 返回成功信息
+    res.json({ 
+      message: `已成功取消用户 [${targetUser.displayName}] 的 VIP 权限`,
+      user: {
+          id: targetUser._id,
+          email: targetUser.email,
+          displayName: targetUser.displayName,
+          vip: targetUser.vip // 返回 false
+      }
+    });
+
+  } catch (err) {
+    console.error("取消 VIP 失败:", err);
+    res.status(500).json({ message: "Server Error" });
+  }
+});
+
 // @route   PUT /api/users/:id
 // @desc    修改个人资料 (名字、头像)
 // @access  Private
