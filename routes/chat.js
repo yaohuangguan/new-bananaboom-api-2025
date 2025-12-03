@@ -2,7 +2,7 @@ const express = require("express");
 const router = express.Router();
 const Chat = require("../models/Chat"); // 引用你的 Chat 模型
 const auth = require("../middleware/auth"); // 引用鉴权中间件
-
+const mongoose = require('mongoose')
 // ==========================================
 // 1. 获取群聊/房间历史记录 (Public)
 // ==========================================
