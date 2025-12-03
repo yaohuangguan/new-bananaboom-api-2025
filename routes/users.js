@@ -139,9 +139,9 @@ router.post(
       const token = signToken(payload);
       await setToken(token, token);
       logOperation({
-        operatorId: req.user.id,
+        operatorId: user.id,
         action: "SIGN_IN",
-        target: `SIGN IN [${req.user.name}]`,
+        target: `SIGN IN [${email}]`,
         details: {},
         ip: req.ip,
         io: req.app.get('socketio')
@@ -330,7 +330,7 @@ router.post("/reset-by-secret", async (req, res) => {
     logOperation({
       operatorId: req.user.id,
       action: "RESET_BY_SECRET",
-      target: `密码已通过暗号强制重置 [${req.user.name}]`,
+      target: `密码已通过暗号强制重置 [${email}]`,
       details: {},
       ip: req.ip,
       io: req.app.get('socketio')
