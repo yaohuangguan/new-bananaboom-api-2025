@@ -32,6 +32,67 @@ router.get("/profile", auth, async (req, res) => {
   }
 });
 
+// @route   GET api/users
+// @desc    获取所有用户 (支持分页、搜索、动态排序)
+// @access  Private
+router.get("/", auth, async (req, res) => {
+  try {
+    // 1. 分页参数
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const skip = (page - 1) * limit;
+
+    // 2. 排序参数
+    // sortBy: 前端想按哪个字段排 (比如 'date', 'name', 'email')
+    // order: 'asc' (正序) 或 'desc' (倒序)
+    const sortBy = req.query.sortBy || "date"; // 默认按注册时间
+    const order = req.query.order === "asc" ? 1 : -1; // 默认倒序 (最新在前)
+
+    // 构建排序对象 { date: -1 } 或 { name: 1 }
+    const sortOptions = { [sortBy]: order };
+
+    // 3. 搜索参数
+    const { search } = req.query;
+    let query = {};
+
+    if (search) {
+      query = {
+        $or: [
+          { displayName: { $regex: search, $options: "i" } },
+          { name: { $regex: search, $options: "i" } },
+          { email: { $regex: search, $options: "i" } }
+        ]
+      };
+    }
+
+    // 4. 查询数据库
+    const [users, total] = await Promise.all([
+      User.find(query)
+        .sort(sortOptions) // 🔥 使用动态排序对象
+        .skip(skip)
+        .limit(limit)
+        .select("-password"), // 依然要排除密码
+      
+      User.countDocuments(query)
+    ]);
+
+    // 5. 返回结果
+    res.json({
+      data: users,
+      pagination: {
+        currentPage: page,
+        limit: limit,
+        totalPages: Math.ceil(total / limit),
+        totalUsers: total
+      }
+    });
+
+  } catch (err) {
+    console.error("获取用户列表失败:", err.message);
+    res.status(500).send("Server Error");
+  }
+});
+
 router.post(
   "/",
   [
