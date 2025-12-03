@@ -220,64 +220,7 @@ router.post("/logout", auth, async (req, res) => {
   await deleteToken(token);
   res.json("OK");
 });
-// @route   PUT /api/users/:id
-// @desc    修改个人资料 (名字、头像)
-// @access  Private
-router.put("/:id", auth, async (req, res) => {
-  const { displayName, photoURL } = req.body;
-  const userId = req.params.id;
 
-  // 1. 安全检查：确保用户只能修改自己的资料
-  // req.user.id 来自 auth 中间件解析的 token
-  if (req.user.id !== userId) {
-    return res.status(403).json({ message: "你无权修改他人的资料" });
-  }
-
-  // 2. 构建更新对象 (只更新传了的字段)
-  const updateFields = {};
-  if (displayName) updateFields.displayName = displayName;
-  if (photoURL) updateFields.photoURL = photoURL;
-
-  // 如果没有要更新的字段，直接返回
-  if (Object.keys(updateFields).length === 0) {
-    return res.status(400).json({ message: "请提供要修改的名字或头像" });
-  }
-
-  try {
-    // 3. 执行更新
-    // { new: true } 表示返回更新后的数据
-    // .select("-password") 表示返回的数据里不要带密码
-    const updatedUser = await User.findByIdAndUpdate(
-      userId,
-      { $set: updateFields },
-      { new: true }
-    ).select("-password -googleId"); // 排除敏感信息
-
-    if (!updatedUser) {
-      return res.status(404).json({ message: "用户不存在" });
-    }
-
-    logOperation({
-      operatorId: req.user.id,
-      action: "UPDATE_USER_INFO",
-      target: `UPDATE_USER_INFO [${req.user.name}]`,
-      details: {},
-      ip: req.ip,
-      io: req.app.get('socketio')
-  });
-
-    // 4. 返回标准格式
-    res.json({
-      success: true,
-      message: "修改成功",
-      user: updatedUser
-    });
-
-  } catch (error) {
-    console.error("Update profile error:", error);
-    res.status(500).json({ message: "修改失败，服务器错误" });
-  }
-});
 
 // 1. 修改 Token 生成逻辑
 function signToken(payload) {
@@ -460,6 +403,65 @@ router.put("/grant-vip", auth, checkPrivate, async (req, res) => {
   } catch (err) {
     console.error("Grant VIP error:", err.message);
     res.status(500).send("Server Error");
+  }
+});
+
+// @route   PUT /api/users/:id
+// @desc    修改个人资料 (名字、头像)
+// @access  Private
+router.put("/:id", auth, async (req, res) => {
+  const { displayName, photoURL } = req.body;
+  const userId = req.params.id;
+
+  // 1. 安全检查：确保用户只能修改自己的资料
+  // req.user.id 来自 auth 中间件解析的 token
+  if (req.user.id !== userId) {
+    return res.status(403).json({ message: "你无权修改他人的资料" });
+  }
+
+  // 2. 构建更新对象 (只更新传了的字段)
+  const updateFields = {};
+  if (displayName) updateFields.displayName = displayName;
+  if (photoURL) updateFields.photoURL = photoURL;
+
+  // 如果没有要更新的字段，直接返回
+  if (Object.keys(updateFields).length === 0) {
+    return res.status(400).json({ message: "请提供要修改的名字或头像" });
+  }
+
+  try {
+    // 3. 执行更新
+    // { new: true } 表示返回更新后的数据
+    // .select("-password") 表示返回的数据里不要带密码
+    const updatedUser = await User.findByIdAndUpdate(
+      userId,
+      { $set: updateFields },
+      { new: true }
+    ).select("-password -googleId"); // 排除敏感信息
+
+    if (!updatedUser) {
+      return res.status(404).json({ message: "用户不存在" });
+    }
+
+    logOperation({
+      operatorId: req.user.id,
+      action: "UPDATE_USER_INFO",
+      target: `UPDATE_USER_INFO [${req.user.name}]`,
+      details: {},
+      ip: req.ip,
+      io: req.app.get('socketio')
+  });
+
+    // 4. 返回标准格式
+    res.json({
+      success: true,
+      message: "修改成功",
+      user: updatedUser
+    });
+
+  } catch (error) {
+    console.error("Update profile error:", error);
+    res.status(500).json({ message: "修改失败，服务器错误" });
   }
 });
 
