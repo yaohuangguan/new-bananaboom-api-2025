@@ -56,7 +56,8 @@ app.get('/health', (_req, res) => res.status(200).send('OK'));
 
 app.use("/api/auth", require("./routes/auth"));
 app.use("/api/posts", require("./routes/posts"));
-app.use("/api/resume", require("./routes/resume"));
+app.use("/api/resumes", require("./routes/resume"));
+app.use("/api/projects", require("./routes/projects"));
 app.use("/api/homepage", require("./routes/homepage"));
 app.use("/api/comments", require("./routes/comments"));
 app.use("/api/users", require("./routes/users"));
