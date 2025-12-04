@@ -169,7 +169,7 @@ module.exports = (io) => {
         io.to(receiverUser.id).emit(NEW_NOTIFICATION, {
             type: "private_message",
             content: `收到来自 ${senderUser.name} 的新消息`,
-            fromUser: senderUser.name,
+            fromUser: { displayName: senderUser.name, email: senderUser.email, id: senderUser.id },
             timestamp: new Date()
         });
         

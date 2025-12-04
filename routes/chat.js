@@ -41,42 +41,59 @@ router.get("/public/:roomName", auth, async (req, res) => {
 // @desc    获取“我”和“目标用户”之间的私聊记录
 // @access  Private
 router.get("/private/:targetUserId", auth, async (req, res) => {
-    try {
-      const targetUserId = req.params.targetUserId;
-      const currentUserId = req.userId; 
-  
-      // 1. 安全校验：防止 ID 格式错误导致报错
-      if (!mongoose.Types.ObjectId.isValid(targetUserId)) {
-          return res.status(400).json({ msg: "无效的用户ID" });
-      }
-  
-      const page = parseInt(req.query.page) || 1;
-      const limit = parseInt(req.query.limit) || 20;
-      const skip = (page - 1) * limit;
-  
-      // 2. 核心修复：强制加上 room: "private"
-      const query = {
-        room: "private", // 🔥 这一行是关键！有了它，绝不会查出 public 消息
-        $or: [
-          { "user.id": currentUserId, toUser: targetUserId }, // 我发给他
-          { "user.id": targetUserId, toUser: currentUserId }  // 他发给我
-        ]
-      };
-  
-      const messages = await Chat.find(query)
-        .sort({ createdDate: -1 })
-        .skip(skip)
-        .limit(limit)
-        // 3. 让 toUser 显示出具体信息（名字/头像），而不是光秃秃一个 ID
-        // 如果你不需要头像，就把 "name avatar" 改成 "name"
-        .populate("toUser", "name avatar") 
-        .populate("user.id", "name avatar");
-  
-      res.json(messages.reverse());
-    } catch (err) {
-      console.error("获取私聊记录失败:", err);
-      res.status(500).json({ msg: "Server Error" });
+  try {
+    const targetUserId = req.params.targetUserId;
+    const currentUserId = req.userId; 
+
+    // 1. 安全校验
+    if (!mongoose.Types.ObjectId.isValid(targetUserId)) {
+        return res.status(400).json({ msg: "无效的用户ID" });
     }
-  });
+
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const skip = (page - 1) * limit;
+
+    // 2. 查询条件
+    const query = {
+      room: "private",
+      $or: [
+        { "user.id": currentUserId, toUser: targetUserId },
+        { "user.id": targetUserId, toUser: currentUserId }
+      ]
+    };
+
+    const messages = await Chat.find(query)
+      .sort({ createdDate: -1 })
+      .skip(skip)
+      .limit(limit)
+      // 3. 🔥 核心修复：字段名改为 displayName 和 photoURL
+      .populate("toUser", "displayName photoURL") 
+      .populate("user.id", "displayName photoURL"); // <--- 这里之前写错了，现已修正
+
+    // 4. (可选) 数据清洗
+    // 如果你的前端直接读取 msg.user.photoURL，而 populate 把 user.id 变成了对象
+    // 你可能需要把最新的头像“提”出来覆盖快照，或者前端改读取路径
+    const formattedMessages = messages.map(msg => {
+        const msgObj = msg.toObject();
+        
+        // 如果关联查询到了最新的用户信息，用最新的覆盖旧的
+        if (msgObj.user && msgObj.user.id && msgObj.user.id.displayName) {
+            msgObj.user.displayName = msgObj.user.id.displayName;
+            msgObj.user.photoURL = msgObj.user.id.photoURL;
+        }
+        
+        // 同理处理 toUser (接收者信息)
+        // toUser 本身就是 populate 出来的对象，不需要额外处理，前端直接 msg.toUser.photoURL 即可
+        
+        return msgObj;
+    });
+
+    res.json(formattedMessages.reverse());
+  } catch (err) {
+    console.error("获取私聊记录失败:", err);
+    res.status(500).json({ msg: "Server Error" });
+  }
+});
   
   module.exports = router;
