@@ -3,6 +3,20 @@ const router = express.Router();
 const Chat = require("../models/Chat"); // 引用你的 Chat 模型
 const auth = require("../middleware/auth"); // 引用鉴权中间件
 const mongoose = require('mongoose')
+
+
+// ==========================================
+// 🔥🔥🔥 核心修改：只给 Chat 路由加“防缓存”补丁
+// ==========================================
+router.use((req, res, next) => {
+  // 告诉浏览器：这个接口的数据永远是最新的，绝对不要缓存！
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
+  next();
+});
+
+
 // ==========================================
 // 1. 获取群聊/房间历史记录 (Public)
 // ==========================================
