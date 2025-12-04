@@ -28,12 +28,14 @@ function removeUser(userList, username) {
   return newList;
 }
 
-// 辅助函数：创建用户对象
-function createUser({ name = "", socketId = "", userId = "" } = {}) {
+// 🔥 修复点 1：创建用户对象时，必须包含完整信息 (Email, Photo, DB ID)
+function createUser({ name = "", socketId = "", userId = "", email = "", photoURL = "" } = {}) {
   return {
-    id: userId, // 用户的数据库ID
-    socketId,   // 当前连接的 socket ID
-    name,       // 用户名
+    id: userId,      // 对应 MongoDB 的 _id
+    socketId,        // socket 连接 ID
+    name,            // 对应 displayName
+    email,
+    photoURL
   };
 }
 
@@ -46,13 +48,12 @@ module.exports = (io) => {
     // 1. 验证用户 (登录前的检查)
     // ===================================
     socket.on(CONFIRM_USER, (nickname, callback) => {
-      // 检查用户名是否已存在于在线列表
       if (Object.values(connectedUsers).some(u => u.name === nickname)) {
         callback({ isUser: true, user: null });
       } else {
-        // 这里暂时还没拿到 userId，等 USER_CONNECTED 时前端会传完整的过来
         callback({ 
           isUser: false, 
+          // 这里只是临时创建，真正的数据在 USER_CONNECTED 补全
           user: createUser({ name: nickname, socketId: socket.id }) 
         });
       }
@@ -62,85 +63,118 @@ module.exports = (io) => {
     // 2. 用户正式上线 (连接成功)
     // ===================================
     socket.on(USER_CONNECTED, (user) => {
-      // 更新用户的 socketId (因为刷新页面 socketId 会变)
-      user.socketId = socket.id;
+      // data 预期: { name: "...", id: "...", email: "...", photoURL: "..." }
       
-      // 将用户加入在线列表
-      connectedUsers = addUser(connectedUsers, user);
-      
-      // 将当前用户信息挂载到 socket 对象上，方便后续使用
-      socket.user = user;
+      // 🔥 修复点 2：构造完整的用户对象
+      // 必须确保前端传来了 id (数据库ID)，否则后续所有逻辑都会崩
+      const newUser = createUser({
+          name: user.name,
+          socketId: socket.id,
+          userId: user.id || user._id, // 兼容处理
+          email: user.email,
+          photoURL: user.photoURL
+      });
 
-      // 🔥 关键步骤：让 Socket 加入以 UserID 命名的房间
-      // 这样无论用户打开多少个标签页，只要 ID 一样，都能收到消息
-      if (user.id) {
-        socket.join(user.id);
-        console.log(`🔗 User ${user.name} (ID: ${user.id}) joined their private room.`);
+      // 挂载到 socket 实例，方便后续直接取用
+      socket.user = newUser;
+      
+      // 更新在线列表
+      connectedUsers = addUser(connectedUsers, newUser);
+
+      // 🔥 修复点 3：加入以 UserID 命名的房间 (多端同步的关键)
+      if (newUser.id) {
+        socket.join(newUser.id);
+        console.log(`🔗 User ${newUser.name} (ID: ${newUser.id}) joined room.`);
+      } else {
+        console.warn(`⚠️ User ${newUser.name} connected without a valid Database ID!`);
       }
 
-      // 广播给所有人：更新侧边栏在线用户列表
+      // 广播更新在线列表
       io.emit(USER_CONNECTED, connectedUsers);
 
-      // 只发给当前用户：欢迎消息
+      // 欢迎自己
       socket.emit(ROOM_WELCOME, {
         user: "系统管家",
-        message: `欢迎回来，${user.name}！这里是你的私有聊天室。`
+        message: `欢迎回来，${newUser.name}！`
       });
       
-      console.log(`🟢 ${user.name} is Online`);
+      console.log(`🟢 ${newUser.name} is Online`);
     });
 
     // ===================================
     // 3. 处理群发消息 (Public / Room)
     // ===================================
     socket.on(MESSAGE_SENT, async (data) => {
-      // data 结构: { message: "...", author: "...", userId: "...", room: "..." }
-      console.log("📨 Group Message received:", data);
+      // 🔥 修复点 4：不再盲目信任 data 里的用户信息，而是从 socket.user 取
+      // 这样能确保头像和名字是真实的
+      const sender = socket.user;
+      
+      if (!sender) return; // 未登录防卫
+
+      console.log(`📨 Group Message: ${sender.name} -> ${data.room || "public"}`);
+
+      // 构造标准 Payload (确保和 HTTP 接口返回的结构一致)
+      const payload = {
+          message: data.message,
+          room: data.room || "public",
+          user: {
+              id: sender.id, 
+              displayName: sender.name, 
+              photoURL: sender.photoURL 
+          },
+          createdDate: new Date()
+      };
 
       // A. 存入 MongoDB
       try {
-        if (data.userId && data.message) {
+        if (sender.id && data.message) {
             const newChat = new Chat({
                 user: { 
-                    name: data.author, 
-                    id: data.userId,
+                    displayName: sender.name, 
+                    id: sender.id,
+                    photoURL: sender.photoURL
                 },
                 content: data.message,
-                room: data.room || "public", // 默认为大厅
-                createdDate: new Date()
+                room: data.room || "public",
+                createdDate: payload.createdDate
             });
-
             await newChat.save();
         }
       } catch (err) {
         console.error("❌ Save public chat error:", err);
       }
 
-      // B. 广播给房间内的所有人 (包括发送者自己)
+      // B. 广播
       const targetRoom = data.room || "public";
-      io.to(targetRoom).emit(MESSAGE_RECEIVED, data);
+      io.to(targetRoom).emit(MESSAGE_RECEIVED, payload);
     });
 
     // ===================================
     // 4. 处理私聊消息 (Private)
     // ===================================
     socket.on(PRIVATE_MESSAGE, async ({ receiverName, message }) => {
-      const senderUser = socket.user; // 从 socket 中获取发送者信息
-      
-      // 从在线列表中查找接收者信息
+      const senderUser = socket.user;
       const receiverUser = connectedUsers[receiverName];
       
-      // A. 存入 MongoDB
+      // 校验：发送者必须已登录
+      if (!senderUser || !senderUser.id) {
+          return console.error("❌ 发送失败：发送者信息不完整");
+      }
+
+      // A. 存入 MongoDB (不管对方在不在线都存)
       try {
-          if (senderUser && receiverUser) {
+          // 查找接收者的 ID (如果在线直接拿，不在线可能需要去 DB 查，这里简化为在线才发)
+          // 如果你的业务允许给离线发，你需要在这里查 User 表获取 receiverUser ID
+          if (receiverUser && receiverUser.id) {
              const newPrivateChat = new Chat({
                user: { 
-                   name: senderUser.name, 
-                   id: senderUser.id 
+                   displayName: senderUser.name, 
+                   id: senderUser.id,
+                   photoURL: senderUser.photoURL
                },
-               toUser: receiverUser.id, // 存入接收者的 Database ID
+               toUser: receiverUser.id, 
                content: message,
-               room: "private",
+               room: "private", // 必须标记为 private
                createdDate: new Date()
              });
              await newPrivateChat.save();
@@ -149,38 +183,48 @@ module.exports = (io) => {
          console.error("❌ Save private chat error:", err);
       }
 
-      // B. 消息推送逻辑
+      // B. 实时推送
       if (receiverUser) {
         console.log(`🤫 Private Message: ${senderUser.name} -> ${receiverName}`);
 
         const newMsgPayload = {
           message,
-          author: senderUser.name,
-          fromUserId: senderUser.id,
           isPrivate: true,
-          timestamp: new Date()
+          timestamp: new Date(),
+          // 统一结构：user 代表发送者
+          user: {
+              id: senderUser.id,
+              displayName: senderUser.name,
+              photoURL: senderUser.photoURL
+          },
+          fromUserId: senderUser.id // 冗余一个 ID 方便前端逻辑
         };
         
-        // 1. 发给接收者 (通过 User ID 房间投送，覆盖多端/多页面)
-        // 这里的 receiverUser.id 必须和 USER_CONNECTED 里的 user.id 一致
+        // 1. 发给接收者 (通过 User ID 房间)
         io.to(receiverUser.id).emit(PRIVATE_MESSAGE, newMsgPayload);
 
-        // 2. 🔥 发送全局通知 (用于右上角铃铛、红点等，独立于聊天内容)
+        // 2. 🔥 修复点 5：发送全局通知 (补全 fromUser 里的 ID)
+        // 这样前端点击通知跳转时，就有 ID 了
         io.to(receiverUser.id).emit(NEW_NOTIFICATION, {
             type: "private_message",
             content: `收到来自 ${senderUser.name} 的新消息`,
-            fromUser: { displayName: senderUser.name, email: senderUser.email, id: senderUser.id },
+            fromUser: { 
+                displayName: senderUser.name, 
+                email: senderUser.email, 
+                id: senderUser.id,    // <--- 确保这个 ID 存在！
+                photoURL: senderUser.photoURL
+            },
             timestamp: new Date()
         });
         
-        // 3. 发给自己 (让发送者的界面也能显示这条消息)
+        // 3. 发给自己 (即时反馈)
         socket.emit(PRIVATE_MESSAGE, newMsgPayload);
 
       } else {
         console.log(`⚠️ User ${receiverName} is offline.`);
-        // 可选：在这里处理离线消息逻辑
+        // 可选：回传离线提示
         socket.emit(MESSAGE_RECEIVED, {
-            author: "系统",
+            user: { displayName: "系统" },
             message: `用户 ${receiverName} 当前不在线，消息已保存。`,
             isSystem: true
         });
@@ -188,54 +232,33 @@ module.exports = (io) => {
     });
 
     // ===================================
-    // 5. 正在输入 (Typing)
+    // 5. 正在输入 / 停止输入
     // ===================================
     socket.on(TYPING, ({ chatId, isTyping }) => {
-       // 广播给除了自己以外的人
        socket.broadcast.emit(TYPING, { user: socket.user.name, isTyping });
     });
 
-    // ===================================
-    // 6. 停止输入 (Stop Typing)
-    // ===================================
     socket.on(STOP_TYPING, ({ chatId }) => {
       socket.broadcast.emit(STOP_TYPING, { user: socket.user.name, isTyping: false });
    });
 
    // ===================================
-   // 7. 主动登出 (Logout)
+   // 6. 登出 & 断开
    // ===================================
    socket.on(LOGOUT, () => {
-     if ("user" in socket) {
+     if (socket.user) {
        console.log(`👋 ${socket.user.name} Logged out`);
-       
-       // 离开房间
-       if (socket.user.id) {
-           socket.leave(socket.user.id);
-       }
-       
-       // 从列表移除
+       socket.leave(socket.user.id);
        connectedUsers = removeUser(connectedUsers, socket.user.name);
-       
-       // 广播列表更新
        io.emit(USER_CONNECTED, connectedUsers);
-       
-       // 清除引用
        delete socket.user;
      }
    });
 
-    // ===================================
-    // 8. 断开连接 (Disconnect)
-    // ===================================
     socket.on("disconnect", () => {
-      if ("user" in socket) {
-        // 从列表移除
+      if (socket.user) {
         connectedUsers = removeUser(connectedUsers, socket.user.name);
-        
-        // 广播列表更新
         io.emit(USER_CONNECTED, connectedUsers);
-        
         console.log(`🔴 ${socket.user.name} Disconnected`);
       }
     });
