@@ -2,6 +2,14 @@ const mongoose = require("mongoose");
 const Schema = mongoose.Schema;
 
 const ResumeSchema = new Schema({
+// 🔥 新增这个字段，用来区分是谁的简历
+  // unique: true 确保每个人只有一个标识
+  slug: { 
+    type: String, 
+    required: true, 
+    unique: true, 
+    default: "sam" 
+  },
   // 1. 基础信息
   basics: {
     name_zh: String,

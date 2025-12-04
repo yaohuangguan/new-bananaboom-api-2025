@@ -1,25 +1,27 @@
 const express = require("express");
 const router = express.Router();
-const { body } = require("express-validator");
+const { body } = require("express-validator"); // 引入校验规则
 const Resume = require("../models/Resume");
 const auth = require("../middleware/auth");
 const checkPrivate = require("../middleware/checkPrivate");
-const validate = require("../middleware/validate");
+const validate = require("../middleware/validate"); // 你的通用校验中间件
 
 // ==========================================
-// 1. 获取简历 (公开)
+// 1. 获取简历 (公开接口)
 // ==========================================
-// @route   GET api/resume
-// @desc    获取唯一的简历数据
+// @route   GET api/resumes
+// @desc    获取简历数据
+// @param   user (可选): "sam" | "jenny"。默认 "sam"
 // @access  Public
 router.get("/", async (req, res) => {
   try {
-    // 既然是个人站，我们假设库里只有一条简历数据，直接取第一个
-    const resume = await Resume.findOne();
+    // 🔥 核心逻辑：前端不传参默认找 "sam"
+    const targetSlug = req.query.user || "sam";
+
+    const resume = await Resume.findOne({ slug: targetSlug });
     
     if (!resume) {
-      // 如果还没数据（虽然我们seed过了），返回空对象或初始化一个默认的
-      return res.status(404).json({ msg: "Resume not found" });
+      return res.status(404).json({ msg: `Resume for user '${targetSlug}' not found` });
     }
     
     res.json(resume);
@@ -29,49 +31,65 @@ router.get("/", async (req, res) => {
   }
 });
 
+// ------------------------------------------
+// 以下接口需要管理员权限
+// ------------------------------------------
 router.use(auth, checkPrivate);
 
 // ==========================================
-// 更新简历 (PUT) - 严格校验
-// /api/resume
+// 2. 更新简历 (管理接口)
 // ==========================================
+// @route   PUT api/resumes
+// @desc    更新指定用户的简历
+// @param   user (可选): 要更新谁？默认 "sam"
+// @access  Private
 router.put(
   "/",
   [
-    // 1. 校验 Basics (基础信息)
-    // 如果传了 basics 对象，则检查里面的 email 是否合法
+    // --- 严格参数校验 ---
+    
+    // 1. 基础信息校验
     body("basics.email").optional({ checkFalsy: true }).isEmail().withMessage("邮箱格式不正确"),
     body("basics.name_zh").optional().isString(),
     body("basics.name_en").optional().isString(),
 
-    // 2. 校验 Education (数组)
-    // 确保 education 是个数组
+    // 2. 教育经历校验 (确保是数组)
     body("education").optional().isArray().withMessage("教育经历必须是数组"),
-    // 确保 education 数组里的每一项的 startDate 是字符串 (如果有的话)
     body("education.*.institution").optional().notEmpty().withMessage("学校名称不能为空"),
     
-    // 3. 校验 Work (数组)
+    // 3. 工作经历校验
     body("work").optional().isArray().withMessage("工作经历必须是数组"),
     body("work.*.company_zh").optional().notEmpty().withMessage("公司中文名不能为空"),
-    body("work.*.company_en").optional().notEmpty().withMessage("公司英文名不能为空"),
-    // 校验 highlights 必须是数组
-    body("work.*.highlights_zh").optional().isArray().withMessage("中文工作亮点必须是数组"),
-    body("work.*.highlights_en").optional().isArray().withMessage("英文工作亮点必须是数组"),
-
-    // 4. 校验 Skills (数组)
+    
+    // 4. 技能与语言
     body("skills").optional().isArray(),
-    body("skills.*.keywords").optional().isArray().withMessage("技能关键词必须是数组"),
+    body("languages").optional().isArray(),
 
+    // 挂载校验处理函数
     validate
   ],
   async (req, res) => {
     try {
-      // 这里的逻辑保持不变
+      // 🔥 核心逻辑：确定要更新谁的简历
+      // 如果前端想更新 Jenny 的，必须发 PUT /api/resume?user=jenny
+      const targetSlug = req.query.user || "sam";
+
+      // 执行更新
+      // $set: req.body 会智能合并。
+      // 注意：对于数组字段（如 work），Mongoose 会直接覆盖整个数组（符合前端表单提交习惯）
       const resume = await Resume.findOneAndUpdate(
-        {}, 
+        { slug: targetSlug }, 
         { $set: req.body },
-        { new: true, upsert: true, setDefaultsOnInsert: true }
+        { new: true, upsert: true, setDefaultsOnInsert: true } // 如果不存在则创建
       );
+
+      // 如果是第一次创建，且没传 slug，强制补上 slug 防止数据错乱
+      if (!resume.slug) {
+          resume.slug = targetSlug;
+          await resume.save();
+      }
+
+      console.log(`✅ Updated resume for: ${targetSlug}`);
       res.json(resume);
     } catch (err) {
       console.error(err.message);
