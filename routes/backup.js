@@ -10,6 +10,10 @@ const Comment = require("../models/Comment");
 const Todo = require("../models/Todo");
 const Chat = require("../models/Chat");
 const Photo = require("../models/Photo");
+const Fitness = require("../models/Fitness");
+const AuditLog = require("../models/AuditLog");
+
+
 
 
 // @route   GET /api/backup
@@ -25,15 +29,17 @@ router.get("/", auth, checkPrivate, async (req, res) => {
     // 定义所有查询任务
     // 使用 Promise.all 并行查询，速度最快
     const fetchAll = async () => {
-      const [users, posts, comments, todos, chats, photos] = await Promise.all([
+      const [users, posts, comments, todos, chats, photos, fitness, auditLog] = await Promise.all([
         User.find({}).select("-password"), // 为了安全，不导出密码哈希
         Post.find({}).sort({ createdDate: -1 }),
         Comment.find({}).sort({ date: -1 }),
         Todo.find({}).sort({ timestamp: -1 }), // Todo 用的是 timestamp
         Chat.find({}).sort({ createdDate: -1 }),
-        Photo.find({}).sort({ createdDate: -1 })
+        Photo.find({}).sort({ createdDate: -1 }),
+        Fitness.find({}).sort({ createdDate: -1 }),
+        AuditLog.find({}).sort({ createdDate: -1 }),
       ]);
-      return { users, posts, comments, todos, chats, photos };
+      return { users, posts, comments, todos, chats, photos, fitness, auditLog };
     };
 
     // 根据 type 参数决定导出什么
@@ -57,6 +63,12 @@ router.get("/", auth, checkPrivate, async (req, res) => {
           break;
         case "photos":
           data.photos = await Photo.find({}).sort({ createdDate: -1 });
+          break;
+        case "fitness":
+          data.fitness = await Fitness.find({}).sort({ createdDate: -1 });
+          break;
+        case "audit":
+          data.audit = await AuditLog.find({}).sort({ createdDate: -1 });
           break;
         default:
           // 如果 type 写错了，默认导出全部
