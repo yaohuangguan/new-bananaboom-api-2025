@@ -6,6 +6,11 @@ const whitelist = [
   "https://www.ps5.space",
   "https://ps5.space",
   "http://ps5.space", // 兼容 http
+
+  // 你的正式域名
+  "https://www.ps6.space",
+  "https://ps6.space",
+  "http://ps6.space", // 兼容 http
   
   // Vercel 前端部署地址
   "https://bananaboom-frontend.vercel.app"
