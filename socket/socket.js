@@ -59,56 +59,53 @@ module.exports = (io) => {
       }
     });
 
+ // ===================================
+    // 2. 用户上线 (修复版：同时保证私聊和群聊)
     // ===================================
-    // 2. 用户正式上线 (连接成功)
-    // ===================================
-   // 在 socket.js 中找到这一段
-   socket.on(USER_CONNECTED, (user) => {
+    socket.on(USER_CONNECTED, (user) => {
+      // 1. 整理用户信息 (防止前端传参不统一)
+      // 这里的 user 是前端传过来的原始数据
+      const finalUser = {
+          name: user.name,
+          socketId: socket.id,
+          // 🔥 关键：确保拿到数据库 ID，无论前端传的是 id 还是 _id
+          id: user.id || user._id, 
+          email: user.email,
+          photoURL: user.photoURL
+      };
+
+      // 2. 挂载到 Socket 和在线列表
+      socket.user = finalUser;
+      connectedUsers = addUser(connectedUsers, finalUser);
+
+      // ===========================================
+      // 🔥 房间管理 (这里是核心)
+      // ===========================================
       
-    // 🕵️‍♀️🕵️‍♀️🕵️‍♀️ 加这几行调试日志！！！
-    console.log("---------------------------------------");
-    console.log("🔌 SOCKET 收到用户上线请求:", user.name);
-    console.log("📦 前端传来的原始数据:", user);
-    console.log("🔑 解析出的 ID:", user.id || user._id);
-    // ---------------------------------------
-
-    const newUser = createUser({
-        name: user.name,
-        socketId: socket.id,
-        userId: user.id || user._id, // 这里是最关键的
-        email: user.email,
-        photoURL: user.photoURL
-    });
-
-      // 挂载到 socket 实例，方便后续直接取用
-      socket.user = newUser;
-      
-      // 更新在线列表
-      connectedUsers = addUser(connectedUsers, newUser);
-
-      // 🔥 修复点 3：加入以 UserID 命名的房间 (多端同步的关键)
-      if (newUser.id) {
-        socket.join(newUser.id);
-        console.log(`🔗 User ${newUser.name} (ID: ${newUser.id}) joined room.`);
+      // A. 加入【私聊】房间 (必须加入自己的 ID 房间，否则收不到私聊)
+      if (finalUser.id) {
+        socket.join(finalUser.id);
+        console.log(`✅ 私聊准备就绪: User ${finalUser.name} joined room ${finalUser.id}`);
       } else {
-        console.warn(`⚠️ User ${newUser.name} connected without a valid Database ID!`);
+        console.error(`❌ 私聊不可用: User ${finalUser.name} 缺少 ID!`);
       }
-      // 🔥🔥🔥 [新增] 默认加入 "public" 大厅 (群聊用) 🔥🔥🔥
-      socket.join("public");
-      console.log(`🔗 User ${newUser.name} joined rooms: [${newUser.id || '?'}, "public"]`);
 
-      // 广播更新在线列表
+      // B. 加入【群聊】房间 (解决群聊收不到的问题)
+      socket.join("public"); 
+      
+      // ===========================================
+
+      // 3. 广播给所有人
       io.emit(USER_CONNECTED, connectedUsers);
 
-      // 欢迎自己
+      // 4. 欢迎消息
       socket.emit(ROOM_WELCOME, {
         user: "系统管家",
-        message: `欢迎回来，${newUser.name}！`
+        message: `欢迎回来，${finalUser.name}！`
       });
       
-      console.log(`🟢 ${newUser.name} is Online`);
+      console.log(`🟢 ${finalUser.name} is Online`);
     });
-
   // ===================================
     // 3. 处理群发消息 (已修复：统一字段格式)
     // ===================================
