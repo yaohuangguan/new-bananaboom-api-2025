@@ -52,39 +52,42 @@ router.get("/public/:roomName", auth, async (req, res) => {
 });
 
 
-// @route   GET api/chat/private/:targetUserId
+
 router.get("/private/:targetUserId", auth, async (req, res) => {
   try {
     const targetUserId = req.params.targetUserId;
-    const currentUserId = req.userId; // 这是从 Token 解析出来的“我”的 ID
+    
+    // 🔥🔥🔥 核心修复点在这里 🔥🔥🔥
+    // 尝试从 req.user.id 获取 (这是最标准的 jwt 写法)
+    // 如果没有，再试 req.userId (防止你中间件写法不一样)
+    const currentUserId = (req.user && req.user.id) || req.userId;
 
-    console.log("--------------- 🔍 私聊接口调试 start ---------------");
-    console.log("1. 前端传来的目标 ID (target):", targetUserId);
-    console.log("2. 当前登录用户 ID (me):    ", currentUserId);
+    console.log("--------------- 🔍 修复后调试 ---------------");
+    console.log("1. req.user 对象:", req.user); // 看看这个对象里到底有啥
+    console.log("2. 最终获取到的 currentUserId:", currentUserId);
+
+    if (!currentUserId) {
+        console.log("❌ 严重错误: 无法获取当前用户 ID，Token 解析失败或中间件未正确挂载");
+        return res.status(401).json({ msg: "用户未授权，无法获取 ID" });
+    }
 
     // 1. 基础校验
     if (!mongoose.Types.ObjectId.isValid(targetUserId)) {
-      console.log("❌ 目标 ID 格式无效");
-      return res.status(400).json({ msg: "无效的用户ID" });
+      return res.status(400).json({ msg: "无效的目标用户ID" });
     }
 
-    // 2. 强制转换 ID 类型 (关键修复点)
-    // Mongoose 在复杂查询($or)中有时不会自动把 String 转成 ObjectId，手动转最稳
+    // 2. 强制转换 ID 类型
     const myId = new mongoose.Types.ObjectId(currentUserId);
     const targetId = new mongoose.Types.ObjectId(targetUserId);
 
-    // 3. 构建查询条件
+    // 3. 构建查询
     const query = {
       room: "private",
       $or: [
-        // 情况 A: 我发给他的 (我是 sender, 他是 receiver)
         { "user.id": myId, toUser: targetId },
-        // 情况 B: 他发给我的 (他是 sender, 我是 receiver)
         { "user.id": targetId, toUser: myId }
       ]
     };
-
-    console.log("3. MongoDB 查询条件:", JSON.stringify(query, null, 2));
 
     // 4. 执行查询
     const messages = await Chat.find(query)
@@ -92,32 +95,16 @@ router.get("/private/:targetUserId", auth, async (req, res) => {
       .populate("toUser", "displayName photoURL")
       .populate("user.id", "displayName photoURL");
 
-    console.log(`4. 查询结果: 找到 ${messages.length} 条消息`);
+    console.log(`✅ 查询成功，找到 ${messages.length} 条记录`);
 
-    // 5. 如果没查到，尝试做一个“宽松查询”来辅助排查 (只查 room 和 toUser)
-    if (messages.length === 0) {
-        const looseCheck = await Chat.findOne({ room: "private", toUser: targetId });
-        if (looseCheck) {
-            console.log("⚠️ 警告: 数据库里确实有发给这个人的私聊，但'发送者'不是当前登录用户！");
-            console.log("  -> 数据库里的发送者 user.id 是:", looseCheck.user.id);
-            console.log("  -> 而你现在的 currentUserId 是:", currentUserId);
-            console.log("  -> 结论: 你的 Token 是旧的，或者数据库被重置过，导致 ID 不匹配。");
-        } else {
-            console.log("⚠️ 警告: 数据库里连'发给这个targetId'的私聊都没有。可能存的时候 toUser 存错了？");
-        }
-    }
-
-    console.log("--------------- 🔍 私聊接口调试 end ---------------");
-
-    // 6. 数据清洗返回
+    // 5. 数据清洗
     const formattedMessages = messages.map(msg => {
         const m = msg.toObject();
-        // 确保 user 结构扁平化，防止前端读取报错
         if (m.user && m.user.id) {
-             const senderInfo = m.user.id; // populate 之后的对象
+             const senderInfo = m.user.id;
              m.user.displayName = senderInfo.displayName;
              m.user.photoURL = senderInfo.photoURL;
-             m.user.id = senderInfo._id; // 还原 ID
+             m.user.id = senderInfo._id;
         }
         return m;
     });
