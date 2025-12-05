@@ -1,24 +1,38 @@
 const express = require("express");
 const router = express.Router();
 const fetch = require("isomorphic-unfetch");
-// router.get(
-//   "/google",
-//   passport.authenticate("google", {
-//     scope: ["profile", "email"]
-//   })
-// );
+// 🔥 定义你的管理员密钥 (建议放在环境变量中，这里保留你的默认值)
+const ADMIN_SECRET = process.env.ADMIN_RESET_SECRET || "bananaboom-666";
 
-// router.get("/google/callback", passport.authenticate("google"), (req, res) => {
-//   res.redirect("/auth/current_user");
-// });
-// router.get("/current_user", (req, res) => {
-//   res.send(req.user);
-// });
+/**
+ * POST /api/auth/verify-secret
+ * 用于前端验证输入的口令是否正确
+ * body: { "secret": "用户输入的字符串" }
+ */
+router.post("/verify-secret", (req, res) => {
+  const { secret } = req.body;
+
+  // 简单的字符串比对
+  if (secret === ADMIN_SECRET) {
+    return res.json({ 
+      success: true, 
+      code: 200, 
+      message: "验证通过" 
+    });
+  } else {
+    return res.status(401).json({ 
+      success: false, 
+      code: 401, 
+      message: "口令错误" 
+    });
+  }
+});
 
 router.get("/logout", (req, res) => {
   req.logout();
   res.send(req.user);
 });
+
 router.post("/subscribe", async (req, res) => {
   const { email } = req.body;
   const data = {
