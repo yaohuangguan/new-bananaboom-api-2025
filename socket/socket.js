@@ -62,18 +62,23 @@ module.exports = (io) => {
     // ===================================
     // 2. 用户正式上线 (连接成功)
     // ===================================
-    socket.on(USER_CONNECTED, (user) => {
-      // data 预期: { name: "...", id: "...", email: "...", photoURL: "..." }
+   // 在 socket.js 中找到这一段
+   socket.on(USER_CONNECTED, (user) => {
       
-      // 🔥 修复点 2：构造完整的用户对象
-      // 必须确保前端传来了 id (数据库ID)，否则后续所有逻辑都会崩
-      const newUser = createUser({
-          name: user.name,
-          socketId: socket.id,
-          userId: user.id || user._id, // 兼容处理
-          email: user.email,
-          photoURL: user.photoURL
-      });
+    // 🕵️‍♀️🕵️‍♀️🕵️‍♀️ 加这几行调试日志！！！
+    console.log("---------------------------------------");
+    console.log("🔌 SOCKET 收到用户上线请求:", user.name);
+    console.log("📦 前端传来的原始数据:", user);
+    console.log("🔑 解析出的 ID:", user.id || user._id);
+    // ---------------------------------------
+
+    const newUser = createUser({
+        name: user.name,
+        socketId: socket.id,
+        userId: user.id || user._id, // 这里是最关键的
+        email: user.email,
+        photoURL: user.photoURL
+    });
 
       // 挂载到 socket 实例，方便后续直接取用
       socket.user = newUser;
