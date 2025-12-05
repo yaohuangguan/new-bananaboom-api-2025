@@ -93,6 +93,9 @@ module.exports = (io) => {
       } else {
         console.warn(`⚠️ User ${newUser.name} connected without a valid Database ID!`);
       }
+      // 🔥🔥🔥 [新增] 默认加入 "public" 大厅 (群聊用) 🔥🔥🔥
+      socket.join("public");
+      console.log(`🔗 User ${newUser.name} joined rooms: [${newUser.id || '?'}, "public"]`);
 
       // 广播更新在线列表
       io.emit(USER_CONNECTED, connectedUsers);
@@ -106,31 +109,19 @@ module.exports = (io) => {
       console.log(`🟢 ${newUser.name} is Online`);
     });
 
-    // ===================================
-    // 3. 处理群发消息 (Public / Room)
+  // ===================================
+    // 3. 处理群发消息 (已修复：统一字段格式)
     // ===================================
     socket.on(MESSAGE_SENT, async (data) => {
-      // 🔥 修复点 4：不再盲目信任 data 里的用户信息，而是从 socket.user 取
-      // 这样能确保头像和名字是真实的
+      // 1. 安全校验：强制使用当前 Socket 的用户信息，防止前端伪造
       const sender = socket.user;
-      
-      if (!sender) return; // 未登录防卫
+      if (!sender) return; 
 
-      console.log(`📨 Group Message: ${sender.name} -> ${data.room || "public"}`);
+      const targetRoom = data.room || "public";
+      console.log(`📨 Public Message: ${sender.name} -> ${targetRoom}`);
 
-      // 构造标准 Payload (确保和 HTTP 接口返回的结构一致)
-      const payload = {
-          message: data.message,
-          room: data.room || "public",
-          user: {
-              id: sender.id, 
-              displayName: sender.name, 
-              photoURL: sender.photoURL 
-          },
-          createdDate: new Date()
-      };
-
-      // A. 存入 MongoDB
+      // 2. 先存入 MongoDB
+      let savedChat = null;
       try {
         if (sender.id && data.message) {
             const newChat = new Chat({
@@ -139,21 +130,35 @@ module.exports = (io) => {
                     id: sender.id,
                     photoURL: sender.photoURL
                 },
-                content: data.message,
-                room: data.room || "public",
-                createdDate: payload.createdDate
+                content: data.message, // 数据库字段是 content
+                room: targetRoom,
+                createdDate: new Date()
             });
-            await newChat.save();
+            savedChat = await newChat.save();
         }
       } catch (err) {
         console.error("❌ Save public chat error:", err);
       }
 
-      // B. 广播
-      const targetRoom = data.room || "public";
+      // 3. 构造广播 Payload (关键！)
+      // 必须同时包含 message(旧前端用) 和 content(数据库用)，以及完整的 user 对象
+      const payload = {
+          _id: savedChat ? savedChat._id : new Date().getTime(), // 有 ID 最好传 ID
+          message: data.message, // 兼容前端旧写法
+          content: data.message, // 标准写法
+          room: targetRoom,
+          user: {
+              id: sender.id, 
+              displayName: sender.name, 
+              photoURL: sender.photoURL 
+          },
+          // 使用存库的时间
+          createdDate: savedChat ? savedChat.createdDate : new Date() 
+      };
+
+      // 4. 广播给房间内的所有人
       io.to(targetRoom).emit(MESSAGE_RECEIVED, payload);
     });
-
     // ===================================
     // 4. 处理私聊消息 (Private)
     // ===================================
