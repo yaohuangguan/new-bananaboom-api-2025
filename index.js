@@ -64,11 +64,11 @@ app.use("/api/users", require("./routes/users"));
 app.use("/api/todo", require("./routes/todo"));
 app.use("/api/backup", require("./routes/backup"));
 app.use("/api/photos", require("./routes/photos"));
-const cloudinaryRoute = require("./routes/cloudinary");
-app.use("/api/cloudinary", cloudinaryRoute);
+app.use("/api/cloudinary", require("./routes/cloudinary"));
 app.use("/api/audit", require("./routes/audit"));
 app.use("/api/chat", require("./routes/chat"));
 app.use("/api/fitness", require("./routes/fitness"));
+app.use("/api/period", require("./routes/period"));
 
 //port
 const PORT = process.env.PORT || 5000;
