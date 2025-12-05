@@ -115,14 +115,18 @@ router.post('/', auth, async (req, res) => {
 });
 
 // ==========================================
-// 3. 获取统计趋势
+// GET /stats
+// 获取统计趋势 (防曲线跳水版)
 // ==========================================
 router.get('/stats', auth, async (req, res) => {
   try {
     const days = parseInt(req.query.days) || 30;
     
-    // 默认查自己
-    let targetUserId = req.userId;
+    // 1. 确定查询的目标用户
+    let targetUserId = req.user.id; // 默认查自己 (假设 auth 中间件把 id 放在 req.user.id)
+    
+    // 如果是旧代码风格可能是 req.userId，请根据你的 auth 中间件实际情况调整
+    // let targetUserId = req.userId; 
 
     // 如果前端传了 email 想看别人的趋势
     if (req.query.email) {
@@ -134,25 +138,40 @@ router.get('/stats', auth, async (req, res) => {
         }
     }
 
+    // 2. 确定时间范围
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
 
+    // 3. 数据库查询
     const stats = await Fitness.find({
       user: targetUserId,
       date: { $gte: startDate }
     })
-    .sort({ date: 1 })
-    .select('dateStr body.weight workout.duration');
+    .sort({ date: 1 }) // 按日期升序
+    .select('dateStr body.weight workout.duration diet.water status.sleepHours');
 
+    // 4. 数据清洗与映射
     const chartData = {
       dates: stats.map(s => s.dateStr),
+      
+      // --- 核心身体指标 (使用 null 防止曲线掉底) ---
       weights: stats.map(s => s.body?.weight || null),
-      durations: stats.map(s => s.workout?.duration || 0)
+      
+      // --- 运动时长 (使用 0 代表休息日) ---
+      durations: stats.map(s => s.workout?.duration || 0),
+      
+      // --- 喝水 (使用 null 防止曲线掉底) ---
+      // 这里的逻辑是：没记不代表没喝，用 0 会拉低平均值且导致图表难看
+      water: stats.map(s => s.diet?.water || null),
+      
+      // --- 睡眠 (使用 null 防止曲线掉底) ---
+      sleep: stats.map(s => s.status?.sleepHours || null)
     };
 
     res.json(chartData);
+
   } catch (err) {
-    console.error(err);
+    console.error("Stats Error:", err);
     res.status(500).send('Server Error');
   }
 });
