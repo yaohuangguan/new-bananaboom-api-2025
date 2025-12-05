@@ -1,32 +1,26 @@
 const mongoose = require("mongoose");
 
 const PeriodSchema = mongoose.Schema({
-  user: {
+  // 记录是谁操作的 (用于审计日志，不再用于数据隔离)
+  operator: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'users',
-    required: true
+    ref: 'users'
   },
   
-  // 核心日期
-  startDate: { type: Date, required: true }, // 姨妈来的第一天
-  endDate: { type: Date },                   // 姨妈走的那一天
-  
-  // 统计数据
-  duration: { type: Number, default: 5 },    // 经期持续天数 (默认5天)
-  cycleLength: { type: Number, default: 28 },// 距离上一次的天数 (周期长度)
-
-  // 身体感受
-  symptoms: [{ type: String }], // ['痛经', '腰酸', '头痛']
+  startDate: { type: Date, required: true },
+  endDate: { type: Date },
+  duration: { type: Number, default: 5 },
+  cycleLength: { type: Number, default: 28 },
+  symptoms: [{ type: String }],
   flow: { 
     type: String, 
     enum: ['light', 'medium', 'heavy'], 
     default: 'medium'
   },
   note: { type: String, default: "" }
-
 }, { timestamps: true });
 
-// 索引
-PeriodSchema.index({ user: 1, startDate: -1 });
+// 索引改了：不再需要按 user 索引，直接按 startDate 排序
+PeriodSchema.index({ startDate: -1 });
 
 module.exports = mongoose.model("period", PeriodSchema);
