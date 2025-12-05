@@ -51,61 +51,81 @@ router.get("/public/:roomName", auth, async (req, res) => {
   }
 });
 
+
 // @route   GET api/chat/private/:targetUserId
-// @desc    获取“我”和“目标用户”之间的私聊记录
-// @access  Private
 router.get("/private/:targetUserId", auth, async (req, res) => {
   try {
     const targetUserId = req.params.targetUserId;
-    const currentUserId = req.userId; 
+    const currentUserId = req.userId; // 这是从 Token 解析出来的“我”的 ID
 
-    // 1. 安全校验
+    console.log("--------------- 🔍 私聊接口调试 start ---------------");
+    console.log("1. 前端传来的目标 ID (target):", targetUserId);
+    console.log("2. 当前登录用户 ID (me):    ", currentUserId);
+
+    // 1. 基础校验
     if (!mongoose.Types.ObjectId.isValid(targetUserId)) {
-        return res.status(400).json({ msg: "无效的用户ID" });
+      console.log("❌ 目标 ID 格式无效");
+      return res.status(400).json({ msg: "无效的用户ID" });
     }
 
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
-    const skip = (page - 1) * limit;
+    // 2. 强制转换 ID 类型 (关键修复点)
+    // Mongoose 在复杂查询($or)中有时不会自动把 String 转成 ObjectId，手动转最稳
+    const myId = new mongoose.Types.ObjectId(currentUserId);
+    const targetId = new mongoose.Types.ObjectId(targetUserId);
 
-    // 2. 查询条件
+    // 3. 构建查询条件
     const query = {
       room: "private",
       $or: [
-        { "user.id": currentUserId, toUser: targetUserId },
-        { "user.id": targetUserId, toUser: currentUserId }
+        // 情况 A: 我发给他的 (我是 sender, 他是 receiver)
+        { "user.id": myId, toUser: targetId },
+        // 情况 B: 他发给我的 (他是 sender, 我是 receiver)
+        { "user.id": targetId, toUser: myId }
       ]
     };
 
+    console.log("3. MongoDB 查询条件:", JSON.stringify(query, null, 2));
+
+    // 4. 执行查询
     const messages = await Chat.find(query)
       .sort({ createdDate: -1 })
-      .skip(skip)
-      .limit(limit)
-      // 3. 🔥 核心修复：字段名改为 displayName 和 photoURL
-      .populate("toUser", "displayName photoURL") 
-      .populate("user.id", "displayName photoURL"); // <--- 这里之前写错了，现已修正
+      .populate("toUser", "displayName photoURL")
+      .populate("user.id", "displayName photoURL");
 
-    // 4. (可选) 数据清洗
-    // 如果你的前端直接读取 msg.user.photoURL，而 populate 把 user.id 变成了对象
-    // 你可能需要把最新的头像“提”出来覆盖快照，或者前端改读取路径
-    const formattedMessages = messages.map(msg => {
-        const msgObj = msg.toObject();
-        
-        // 如果关联查询到了最新的用户信息，用最新的覆盖旧的
-        if (msgObj.user && msgObj.user.id && msgObj.user.id.displayName) {
-            msgObj.user.displayName = msgObj.user.id.displayName;
-            msgObj.user.photoURL = msgObj.user.id.photoURL;
+    console.log(`4. 查询结果: 找到 ${messages.length} 条消息`);
+
+    // 5. 如果没查到，尝试做一个“宽松查询”来辅助排查 (只查 room 和 toUser)
+    if (messages.length === 0) {
+        const looseCheck = await Chat.findOne({ room: "private", toUser: targetId });
+        if (looseCheck) {
+            console.log("⚠️ 警告: 数据库里确实有发给这个人的私聊，但'发送者'不是当前登录用户！");
+            console.log("  -> 数据库里的发送者 user.id 是:", looseCheck.user.id);
+            console.log("  -> 而你现在的 currentUserId 是:", currentUserId);
+            console.log("  -> 结论: 你的 Token 是旧的，或者数据库被重置过，导致 ID 不匹配。");
+        } else {
+            console.log("⚠️ 警告: 数据库里连'发给这个targetId'的私聊都没有。可能存的时候 toUser 存错了？");
         }
-        
-        // 同理处理 toUser (接收者信息)
-        // toUser 本身就是 populate 出来的对象，不需要额外处理，前端直接 msg.toUser.photoURL 即可
-        
-        return msgObj;
+    }
+
+    console.log("--------------- 🔍 私聊接口调试 end ---------------");
+
+    // 6. 数据清洗返回
+    const formattedMessages = messages.map(msg => {
+        const m = msg.toObject();
+        // 确保 user 结构扁平化，防止前端读取报错
+        if (m.user && m.user.id) {
+             const senderInfo = m.user.id; // populate 之后的对象
+             m.user.displayName = senderInfo.displayName;
+             m.user.photoURL = senderInfo.photoURL;
+             m.user.id = senderInfo._id; // 还原 ID
+        }
+        return m;
     });
 
     res.json(formattedMessages.reverse());
+
   } catch (err) {
-    console.error("获取私聊记录失败:", err);
+    console.error("❌ 接口报错:", err);
     res.status(500).json({ msg: "Server Error" });
   }
 });
