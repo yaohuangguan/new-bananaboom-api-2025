@@ -14,7 +14,7 @@ const ExternalResourceSchema = new Schema({
   type: {
     type: String,
     required: true,
-    enum: ['recipe', 'news', 'hotsearch', 'other'], 
+    enum: ['recipe', 'news', 'finance','hotsearch', 'other'], 
     index: true
   },
 
