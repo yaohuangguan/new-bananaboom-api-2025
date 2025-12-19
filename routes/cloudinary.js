@@ -54,6 +54,55 @@ router.get("/signature", (req, res) => {
  * @route   GET /api/cloudinary/usage
  * @desc    获取账户用量信息 (比如用了多少存储空间)
  * 适合展示在你的私域 Dashboard 里
+ * 参考响应 {
+    "plan": "Free",
+    "last_updated": "2025-12-18",
+    "date_requested": "2025-12-19T00:00:00Z",
+    "transformations": {
+        "usage": 36,
+        "credits_usage": 0.04,
+        "breakdown": {
+            "transformation": 26
+        }
+    },
+    "objects": {
+        "usage": 94
+    },
+    "bandwidth": {
+        "usage": 317387882,
+        "credits_usage": 0.3
+    },
+    "storage": {
+        "usage": 192041533,
+        "credits_usage": 0.18
+    },
+    "impressions": {
+        "usage": 558,
+        "credits_usage": 0
+    },
+    "seconds_delivered": {
+        "usage": 0,
+        "credits_usage": 0
+    },
+    "credits": {
+        "usage": 0.52,
+        "limit": 25,
+        "used_percent": 2.08
+    },
+    "resources": 94,
+    "derived_resources": 0,
+    "requests": 558,
+    "media_limits": {
+        "image_max_size_bytes": 10485760,
+        "video_max_size_bytes": 104857600,
+        "raw_max_size_bytes": 10485760,
+        "image_max_px": 25000000,
+        "asset_max_total_px": 50000000
+    },
+    "rate_limit_allowed": 500,
+    "rate_limit_reset_at": "2025-12-19T16:00:00.000Z",
+    "rate_limit_remaining": 497
+}
  */
 router.get("/usage", async (req, res) => {
   try {
