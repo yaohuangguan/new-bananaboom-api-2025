@@ -298,14 +298,32 @@ router.get("/hotsearch/list", async (req, res) => {
  * @access  Private
  * * @param   {string} force - (Query) "true" 强制刷新
  */
-router.get("/finance/list", async (req, res) => {
+  这个错误是非常经典的空指针错误 (TypeError: Cannot read properties of undefined)。
+
+  原因很简单：TianAPI 返回的数据结构里，result 或者 result.list 是空的 (undefined)，导致代码执行到 .map() 时崩溃了。这可能是因为那一刻 API 没有返回数据，或者返回格式稍微有点不一样（比如 result 为 null）。
+  
+  我们需要给代码加一层**“防弹衣”**（空值检查），确保即便 API 返回空数据，服务器也不会崩。
+  
+  请修改 routes/external.js 中的 /finance/list 接口，主要修改两个地方：
+  
+  修复后的 routes/external.js (财经接口部分)
+  请直接替换原来的 router.get("/finance/list", ...) 部分：
+  
+  JavaScript
+  
+  /**
+   * =================================================================
+   * 🔥 获取财经新闻 (修复版 - 增加空值安全检查)
+   * =================================================================
+   */
+  router.get("/finance/list", async (req, res) => {
     const { force } = req.query;
     const todayStr = new Date().toISOString().split('T')[0];
-    const uniqueKey = `finance:${todayStr}`; // 每天存一份当天的财经快报
+    const uniqueKey = `finance:${todayStr}`; 
   
     try {
       // -------------------------------------------------------
-      // Step 1: 检查本地缓存及其新鲜度 (逻辑同热搜)
+      // Step 1: 检查本地缓存
       // -------------------------------------------------------
       let useCache = false;
       const cachedFinance = await ExternalResource.findOne({ uniqueKey });
@@ -314,13 +332,11 @@ router.get("/finance/list", async (req, res) => {
         const now = new Date();
         const lastUpdate = new Date(cachedFinance.updatedAt);
         const diffMs = now - lastUpdate;
-        const sixHoursMs = 6 * 60 * 60 * 1000; // 6小时
+        const sixHoursMs = 6 * 60 * 60 * 1000; 
   
         if (force === 'true') {
-          console.log(`[Finance] 强制刷新`);
           useCache = false;
         } else if (diffMs > sixHoursMs) {
-          console.log(`[Finance] 缓存已过期，准备重新抓取...`);
           useCache = false;
         } else {
           useCache = true;
@@ -328,11 +344,13 @@ router.get("/finance/list", async (req, res) => {
       }
   
       // -------------------------------------------------------
-      // Step 2: 缓存有效则直接返回
+      // Step 2: 缓存有效则直接返回 (修复点1：防止缓存坏数据导致崩盘)
       // -------------------------------------------------------
       if (useCache && cachedFinance) {
-        // 补全 Google URL (防止旧数据没有)
-        const listWithUrl = cachedFinance.rawData.list.map(item => ({
+        // 安全获取列表，如果 list 丢了就给个空数组
+        const safeList = (cachedFinance.rawData && cachedFinance.rawData.list) ? cachedFinance.rawData.list : [];
+        
+        const listWithUrl = safeList.map(item => ({
           ...item,
           googleUrl: item.googleUrl || `https://www.google.com/search?q=${encodeURIComponent(item.title)}`
         }));
@@ -349,59 +367,68 @@ router.get("/finance/list", async (req, res) => {
       // Step 3: 调用天行财经 API
       // -------------------------------------------------------
       console.log(`[API Call] 正在抓取财经新闻...`);
-      // num=20 : 财经新闻多抓点，看起来丰富
       const tianUrl = `https://apis.tianapi.com/caijing/index?key=${TIAN_KEY}&num=20`;
       
       const response = await axios.get(tianUrl);
       const apiRes = response.data;
   
+      // 如果 API 报错
       if (apiRes.code !== 200) {
-        // 降级策略
         if (cachedFinance) {
+          // 降级：如果有旧缓存，哪怕过期了也先返回，别报错
+          const fallbackList = (cachedFinance.rawData && cachedFinance.rawData.list) ? cachedFinance.rawData.list : [];
           return res.json({
              date: todayStr,
-             list: cachedFinance.rawData.list,
+             list: fallbackList,
              source: "local-fallback"
           });
         }
         return res.status(400).json({ msg: apiRes.msg || "天行接口调用失败" });
       }
   
-      const rawList = apiRes.result.list;
+      // 🔥🔥🔥 修复点2：核心修复 (Fix .map error)
+      // 确保 rawList 绝对是个数组，而不是 undefined
+      let rawList = [];
+      if (apiRes.result && Array.isArray(apiRes.result.list)) {
+        rawList = apiRes.result.list;
+      } else {
+        console.warn("TianAPI warning: result.list is missing or empty", apiRes);
+        // 如果 API 返回成功代码但没有 list，我们就不处理了，直接返回空或报错
+      }
   
-      // 🔥 处理数据：保留原 URL，同时注入 Google 搜索链接
-      // 财经新闻通常自带 url，但有时候打不开，双重保障
       const processedList = rawList.map(item => ({
         ...item,
-        // 如果 API 自带 url 就保留，没有就用 google
         url: item.url || `https://www.google.com/search?q=${encodeURIComponent(item.title)}`,
-        // 额外给一个 googleUrl 字段，前端可以决定用哪个
         googleUrl: `https://www.google.com/search?q=${encodeURIComponent(item.title)}`
       }));
   
       // -------------------------------------------------------
       // Step 4: 存入数据库
       // -------------------------------------------------------
-      const savedDoc = await ExternalResource.findOneAndUpdate(
-        { uniqueKey },
-        {
-          type: 'finance', // 记得确保 Model 的 enum 里加了 'finance'
-          uniqueKey: uniqueKey,
-          title: `${todayStr} 财经快报`,
-          description: `包含 ${processedList.length} 条资讯`,
-          coverImage: processedList[0]?.picUrl || "", // 用第一条新闻图做封面
-          rawData: { list: processedList }
-        },
-        { upsert: true, new: true, setDefaultsOnInsert: true }
-      );
+      // 只有当真的抓到了数据才存，防止把空列表存进去覆盖了可能有用的旧数据
+      let savedDoc = null;
+      if (processedList.length > 0) {
+        savedDoc = await ExternalResource.findOneAndUpdate(
+          { uniqueKey },
+          {
+            type: 'finance',
+            uniqueKey: uniqueKey,
+            title: `${todayStr} 财经快报`,
+            description: `包含 ${processedList.length} 条资讯`,
+            coverImage: processedList[0]?.picUrl || "",
+            rawData: { list: processedList }
+          },
+          { upsert: true, new: true, setDefaultsOnInsert: true }
+        );
+      } else {
+          // 如果没抓到数据，尝试复用缓存对象以便返回 updateTime
+          savedDoc = cachedFinance || { updatedAt: new Date() };
+      }
   
-      // -------------------------------------------------------
-      // Step 5: 返回
-      // -------------------------------------------------------
       res.json({
         date: todayStr,
         list: processedList,
-        updateTime: savedDoc.updatedAt,
+        updateTime: savedDoc ? savedDoc.updatedAt : new Date(),
         source: "tianapi"
       });
   
