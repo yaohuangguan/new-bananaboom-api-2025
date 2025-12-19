@@ -70,6 +70,7 @@ app.use("/api/chat", require("./routes/chat"));
 app.use("/api/fitness", require("./routes/fitness"));
 app.use("/api/period", require("./routes/period"));
 app.use("/api/footprints", require("./routes/footprint"));
+app.use("/api/menu", require("./routes/menu"));
 
 //port
 const PORT = process.env.PORT || 5000;
