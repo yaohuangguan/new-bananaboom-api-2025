@@ -68,26 +68,28 @@ router.get("/usage", async (req, res) => {
 
 /**
  * @route   GET /api/cloudinary/resources
- * @desc    (可选) 获取最近上传的图片列表
+ * @desc    获取图片列表
+ * @return  Array<Object>  (直接返回数组，保持前端零修改)
  */
 router.get("/resources", async (req, res) => {
   try {
+      // 1. 调用 Cloudinary API
       const result = await cloudinary.api.resources({
-          max_results: 20,
-          direction: 'desc'
-      });
-      
-      // ✅ 建议写法：包裹在一个对象里返回
-      res.json({
-          success: true,
-          total_count: result.resources.length,
-          next_cursor: result.next_cursor, // 如果需要做“加载更多”功能，这个字段很有用
-          data: result.resources // 把数组放在 data 字段里
+          max_results: 20,   // 限制返回数量
+          direction: 'desc', // 最新的在前
+          resource_type: 'image',
+          type: 'upload'
       });
 
+      // 2. 🔥 关键点：只提取 resources 数组直接返回
+      // Cloudinary 返回的是 { resources: [...], next_cursor: "..." }
+      // 我们直接 res.json(数组)，这样前端拿到的就是 [ {asset_id...}, {asset_id...} ]
+      res.json(result.resources);
+
   } catch (error) {
-      console.error("Cloudinary resources error:", error);
-      res.status(500).json({ success: false, message: "Failed to fetch images" });
+      console.error("Cloudinary error:", error);
+      // 出错时最好也保持简单的 JSON 结构，或者返回空数组防止前端 .map 报错
+      res.status(500).json([]); 
   }
 });
 
