@@ -171,7 +171,7 @@ const CATEGORY_CONFIG = {
     finance: {
       tianUrl: `https://apis.tianapi.com/caijing/index?key=${TIAN_KEY}&num=20`,
       titleSuffix: "财经快报",
-      apiListKey: "list",
+      apiListKey: "newslist",
       hasPic: true
     },
     // 3. 电竞/游戏资讯 (新增)
@@ -179,7 +179,7 @@ const CATEGORY_CONFIG = {
       // 天行电竞接口 (esports)
       tianUrl: `https://apis.tianapi.com/game/index?key=${TIAN_KEY}&num=20`,
       titleSuffix: "电竞/游戏资讯",
-      apiListKey: "list", // 注意：不同接口返回结构可能不同，确认都在 list 里
+      apiListKey: "newslist", // 注意：不同接口返回结构可能不同，确认都在 list 里
       hasPic: true
     }
   };
