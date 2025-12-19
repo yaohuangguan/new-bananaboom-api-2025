@@ -14,7 +14,13 @@ const FitnessSchema = new Schema({
   // --- 1. 身体指标 (只留体重) ---
   body: {
     weight: { type: Number }, // 体重 (kg) - 最直观的指标
-    // 去掉了胸围、腰围等复杂测量
+    // 🔥 新增：身高快照 (cm)
+    // 每次记录时，自动从 User 表拿过来存一份，或者是用户当天手动填的
+    height: { type: Number }, 
+    
+    // 🔥 新增：BMI 指数
+    // 自动计算存入：Weight(kg) / (Height(m) * Height(m))
+    bmi: { type: Number },
   },
 
   // --- 2. 运动记录 (简化版) ---
@@ -56,5 +62,19 @@ const FitnessSchema = new Schema({
 
 // 复合唯一索引 (不变)
 FitnessSchema.index({ user: 1, dateStr: 1 }, { unique: true });
+
+// 🔥 核心逻辑：使用 Pre-save 钩子自动计算 BMI
+// 这样你无论在哪里 save()，BMI 都会自动算好，不用手写计算逻辑
+FitnessSchema.pre('save', function(next) {
+  // 只有当体重和身高都有值的时候，才计算 BMI
+  if (this.body && this.body.weight && this.body.height) {
+    const heightInMeters = this.body.height / 100; // cm 转 m
+    if (heightInMeters > 0) {
+      // 保留1位小数 (例如 23.5)
+      this.body.bmi = parseFloat((this.body.weight / (heightInMeters * heightInMeters)).toFixed(1));
+    }
+  }
+  next();
+});
 
 module.exports = mongoose.model('fitness', FitnessSchema);

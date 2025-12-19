@@ -29,6 +29,13 @@ const UserSchema = mongoose.Schema({
     type:Boolean,
     default:false
   },
+  // 🔥 新增：身高 (cm)
+  // 这是用户的基准身高，设置一次通常不动了
+  height: { 
+    type: Number, 
+    min: 50, 
+    max: 300 
+  },
     // 🔥🔥🔥 新增：健身目标/模式
   // cut: 减脂 (Fat Loss)
   // bulk: 增重/增肌 (Muscle Gain)

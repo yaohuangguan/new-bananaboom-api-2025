@@ -41,105 +41,120 @@ router.get("/", async (req, res) => {
 
 /**
  * =================================================================
- * 🥗 智能膳食推荐接口 (基于用户真实数据)
+ * 🥗 智能膳食推荐接口 (Pro版 - 集成BMI分析)
  * =================================================================
  * @route   POST /api/menu/recommend
- * @desc    根据用户最新体重、健身目标模式，推荐 3 道适合的菜品
+ * @desc    根据用户最新体重、BMI、健身目标，推荐 3 道适合的菜品
  * @access  Private
  */
 router.post("/recommend", auth, async (req, res) => {
-    try {
-      const userId = req.user.id;
-  
-      // 1. 并行查询：查用户基础信息 & 查最近一次的 Fitness 记录
-      const [userProfile, latestFitness] = await Promise.all([
-        User.findById(userId).select("fitnessGoal displayName"), 
-        Fitness.findOne({ user: userId }).sort({ date: -1 }) // 按日期倒序取最新一条
-      ]);
-  
-      // 2. 数据清洗与逻辑判断
-      // 目标优先级：Fitness记录里的当天模式 > User表里的长期目标 > 默认 maintain
-      let currentGoal = "maintain"; 
-      let currentWeight = null;
-      
-      // 尝试从 Fitness 表获取最新状态
-      if (latestFitness) {
-        if (latestFitness.diet && latestFitness.diet.goalSnapshot) {
-          currentGoal = latestFitness.diet.goalSnapshot;
-        }
-        if (latestFitness.body && latestFitness.body.weight) {
-          currentWeight = latestFitness.body.weight;
-        }
-      }
-  
-      // 如果 Fitness 表里没记模式，回退到 User 表
-      if (currentGoal === "maintain" && userProfile.fitnessGoal) {
-        currentGoal = userProfile.fitnessGoal;
-      }
-  
-      // 3. 构造 AI 上下文 (User Context)
-      let userContext = `用户昵称: ${userProfile.displayName || "健身爱好者"}。`;
-      
-      if (currentWeight) {
-        userContext += ` 最新体重: ${currentWeight}kg。`;
-      }
-      
-      // 翻译目标模式给 AI 理解
-      const goalMap = {
-        cut: "减脂 (Fat Loss) - 需要低热量、高饱腹感、高蛋白",
-        bulk: "增肌 (Muscle Gain) - 需要热量盈余、高碳水、高蛋白",
-        maintain: "保持体型 (Maintain) - 营养均衡"
-      };
-      userContext += ` 当前健身目标: ${goalMap[currentGoal] || goalMap.maintain}。`;
-  
-      console.log(`🥗 [Menu Recommend] Context: ${userContext}`);
-  
-      // 4. 构造 Prompt
-      const systemPrompt = `
-        你是一位专业的运动营养师。请根据以下用户的身体数据和健身目标，推荐 3 道适合的正餐（午餐或晚餐）。
-        
-        【用户信息】：${userContext}
-  
-        【要求】：
-        1. 必须严格贴合用户的健身目标（例如：如果是减脂，请严格控制碳水和脂肪；如果是增肌，请保证足够的碳水和蛋白质）。
-        2. 菜品要是家常能做的，不要过于花哨。
-        3. 请严格按照以下 JSON 格式返回：
-        {
-          "nutrition_advice": "一句话点评用户的当前状态并给出营养建议（如：'您当前处于减脂期，建议多吃膳食纤维...'）",
-          "dishes": [
-            {
-              "name": "菜品名称",
-              "tags": ["高蛋白", "低脂", "快手"],
-              "calories_estimate": "预估热量(如: 400kcal)",
-              "reason": "为什么推荐这道菜(结合用户目标说明)"
-            },
-            { ... },
-            { ... }
-          ]
-        }
-      `;
-  
-      // 5. 调用 AI
-      // 这里的 modelName 使用默认配置 (gemini-3-flash-preview)
-      const data = await generateJSON(systemPrompt);
-  
-      // 6. 返回结果
-      res.json({
-        success: true,
-        // 把刚才用于判断的依据也返回给前端，方便 UI 展示“基于您的xxkg体重推荐”
-        based_on: {
-          weight: currentWeight,
-          goal: currentGoal,
-          source: latestFitness ? "fitness_record" : "user_profile"
-        },
-        recommendation: data
-      });
-  
-    } catch (err) {
-      console.error("Menu Recommend Error:", err);
-      res.status(500).json({ msg: "营养师正在忙，请稍后再试" });
+  try {
+    const userId = req.user.id;
+
+    // 1. 并行查询：基础档案 & 最新健身状态
+    const [userProfile, latestFitness] = await Promise.all([
+      User.findById(userId).select("fitnessGoal height displayName"), 
+      Fitness.findOne({ user: userId }).sort({ date: -1 }) // 找最近的一条记录
+    ]);
+
+    // ==========================================
+    // 2. 智能数据组装 (Snapshot 优先策略)
+    // ==========================================
+    
+    // A. 确定目标 (Fitness里的临时目标 > User里的长期目标 > 默认保持)
+    let currentGoal = "maintain";
+    if (latestFitness && latestFitness.diet && latestFitness.diet.goalSnapshot) {
+      currentGoal = latestFitness.diet.goalSnapshot;
+    } else if (userProfile.fitnessGoal) {
+      currentGoal = userProfile.fitnessGoal;
     }
-  });
+
+    // B. 确定身体数据 (Fitness快照 > User基础数据)
+    let currentWeight = latestFitness?.body?.weight || null;
+    let currentHeight = latestFitness?.body?.height || userProfile.height || null;
+    let currentBMI = latestFitness?.body?.bmi || null;
+
+    // C. 如果数据库里没存 BMI 但有身高体重，我们现场算一下补救
+    if (!currentBMI && currentWeight && currentHeight) {
+      const h = currentHeight / 100;
+      currentBMI = (currentWeight / (h * h)).toFixed(1);
+    }
+
+    // ==========================================
+    // 3. 构建 AI 提示词 (Prompt Engineering)
+    // ==========================================
+    
+    // 翻译目标给 AI
+    const goalMap = {
+      cut: "减脂/刷脂 (Fat Loss) - 需要制造热量缺口，高饱腹感",
+      bulk: "增肌/增重 (Muscle Gain) - 需要热量盈余，高碳水高蛋白",
+      maintain: "保持/塑形 (Maintain) - 营养均衡"
+    };
+
+    let userContext = `用户昵称: ${userProfile.displayName || "健身者"}。`;
+    if (currentWeight) userContext += ` 当前体重: ${currentWeight}kg。`;
+    if (currentHeight) userContext += ` 身高: ${currentHeight}cm。`;
+    if (currentBMI) userContext += ` BMI指数: ${currentBMI}。`;
+    userContext += ` 当前目标: ${goalMap[currentGoal] || goalMap.maintain}。`;
+
+    console.log(`🥗 [AI Menu] Generating for: ${userContext}`);
+
+    const systemPrompt = `
+      你是一位拥有 20 年经验的运动营养专家。请根据用户的身体数据(BMI)和健身目标，推荐 3 道适合的正餐（午餐或晚餐）。
+      
+      【用户信息】：
+      ${userContext}
+
+      【分析逻辑】：
+      1. **先看 BMI**：
+         - 如果 BMI > 24 (超重) 且目标是减脂：请严格控制碳水（推荐粗粮），增加膳食纤维。
+         - 如果 BMI < 18.5 (偏瘦) 且目标是增肌：请推荐高密度热量食物，不用过于忌口油脂。
+         - 如果 BMI 正常：重点在于蛋白质摄入和微量元素。
+      2. **再看目标**：
+         - Cut (减脂)：推荐 "低卡、抗饿" 的食物。
+         - Bulk (增肌)：推荐 "易消化、高能量" 的食物。
+
+      【输出要求】：
+      请务必严格按照以下 JSON 格式返回，不要包含 Markdown 代码块：
+      {
+        "nutrition_advice": "针对用户当前BMI和目标的简短专业点评（例如：'您的BMI为24.5略微超重，结合减脂目标，建议本餐采用211饮食法...'）",
+        "dishes": [
+          {
+            "name": "菜品名称 (如: 藜麦鸡胸沙拉)",
+            "tags": ["高蛋白", "低GI", "快手"],
+            "calories_estimate": "预估热量 (如: 450kcal)",
+            "reason": "推荐理由 (结合BMI和目标的一句话解释)"
+          },
+          { ... },
+          { ... }
+        ]
+      }
+    `;
+
+    // ==========================================
+    // 4. 调用 AI & 返回
+    // ==========================================
+    const data = await generateJSON(systemPrompt); // 默认使用 gemini-3-flash-preview
+
+    res.json({
+      success: true,
+      // 返回给前端展示用的“依据”，让用户知道是基于什么算的
+      based_on: {
+        weight: currentWeight,
+        height: currentHeight,
+        bmi: currentBMI,
+        goal: currentGoal
+      },
+      recommendation: data
+    });
+
+  } catch (err) {
+    console.error("Menu Recommend Error:", err);
+    res.status(500).json({ msg: "AI 营养师正在忙，请稍后再试" });
+  }
+});
+
+module.exports = router;
 
 /**
  * =================================================================

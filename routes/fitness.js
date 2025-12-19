@@ -1,18 +1,17 @@
 const express = require('express');
 const router = express.Router();
 const Fitness = require('../models/Fitness');
-const User = require('../models/User'); // 🔥 新增：必须引入 User 模型才能查邮箱
+const User = require('../models/User'); 
 const auth = require('../middleware/auth');
 
-
 // ==========================================
-// 1. 获取健身记录 (支持多人)
+// 1. 获取健身记录 (支持多人 & 筛选)
 // ==========================================
 // @route   GET api/fitness
 // @desc    获取记录
 router.get('/', auth, async (req, res) => {
   try {
-    const { start, end, email } = req.query; // 你也可以支持按 email 筛选查询
+    const { start, end, email } = req.query;
     
     let query = {};
 
@@ -22,9 +21,11 @@ router.get('/', auth, async (req, res) => {
         if (targetUser) {
             query.user = targetUser._id;
         } else {
-            // 如果查不到这个人，直接返回空数组，或者报错，这里选择返回空以防崩溃
             return res.json([]); 
         }
+    } else {
+        // 如果没传 email，默认查当前登录用户的所有记录 (或者你也可以不加这个限制，看需求)
+        // query.user = req.user.id; 
     }
 
     // 2. 日期范围
@@ -37,7 +38,7 @@ router.get('/', auth, async (req, res) => {
 
     const records = await Fitness.find(query)
       .sort({ date: -1 })
-      // 关联查出用户信息，方便前端展示
+      // 关联查出用户信息
       .populate('user', 'name displayName email avatar photoURL'); 
 
     res.json(records);
@@ -48,17 +49,16 @@ router.get('/', auth, async (req, res) => {
 });
 
 // ==========================================
-// 2. 提交/更新记录 (支持用 Email 帮他人打卡)
+// 2. 提交/更新记录 (🔥 核心修改：自动补全身高)
 // ==========================================
 // @route   POST api/fitness
-// @desc    创建或更新记录 (支持 targetUserEmail)
-// @access  Private
+// @desc    创建或更新记录
 router.post('/', auth, async (req, res) => {
   try {
     const { 
       date, 
-      targetUserEmail, // 🔥 核心修改：改用更好记的邮箱
-      body, 
+      targetUserEmail, 
+      body, // 里面包含 weight, height(可选)
       workout, 
       diet, 
       status, 
@@ -69,43 +69,73 @@ router.post('/', auth, async (req, res) => {
         return res.status(400).json({ msg: 'Date is required' });
     }
 
-    // 1. 确定最终要操作的用户 ID
-    let finalUserId = req.userId; // 默认为当前登录用户
+    // 1. 确定最终要操作的用户 (查 ID 和 查身高)
+    let finalUserId = req.user.id; // 默认当前用户
+    let userBaseHeight = null;     // 用于存从 User 表查到的身高
 
-    // 如果前端传了 email，说明是要帮别人(或自己)指定账号打卡
+    // 逻辑：无论是否代打卡，都要查一下 User 表获取身高作为默认值
     if (targetUserEmail) {
-        // 去 User 表查找这个邮箱对应的用户
         const targetUser = await User.findOne({ email: targetUserEmail });
-        
         if (!targetUser) {
             return res.status(404).json({ msg: `找不到邮箱为 ${targetUserEmail} 的用户` });
         }
-        
-        finalUserId = targetUser._id; // 找到了，使用该用户的 ID
+        finalUserId = targetUser._id;
+        userBaseHeight = targetUser.height; // 获取目标用户的身高
+    } else {
+        // 如果是给自己打卡，也要查一下自己的身高
+        const currentUser = await User.findById(req.user.id);
+        if (currentUser) {
+            userBaseHeight = currentUser.height;
+        }
     }
 
     // 2. 处理日期
     const dateObj = new Date(date);
     const dateStr = dateObj.toISOString().split('T')[0];
 
-    // 3. 构建更新字段
+    // 3. 构建 body 对象 (处理身高逻辑)
+    // 如果前端传了 body.height 就用前端的，否则用 User 表里的 userBaseHeight
+    const finalBody = body || {};
+    if (!finalBody.height && userBaseHeight) {
+        finalBody.height = userBaseHeight;
+    }
+    // 注意：这里不需要手动算 BMI，Fitness Model 的 pre('save') 会自动处理
+
+    // 4. 构建更新字段
     const updateFields = {
       user: finalUserId, 
       date: dateObj,
       dateStr: dateStr,
-      body: body || {},
+      body: finalBody,     // 🔥 包含了 weight 和自动补全的 height
       workout: workout || {}, 
       diet: diet || {},
       status: status || {},   
       photos: photos || []
     };
 
-    // 4. Upsert
-    const record = await Fitness.findOneAndUpdate(
-      { user: finalUserId, dateStr: dateStr },
-      { $set: updateFields },
-      { new: true, upsert: true, setDefaultsOnInsert: true }
-    );
+    // 5. Upsert
+    // 注意：findOneAndUpdate 默认不会触发 pre('save') 钩子，除非设置 { new: true } 并且在 mongoose 插件层处理，
+    // 但通常建议如果需要计算字段，先 find 再 save，或者依赖前端算好。
+    // 为了保险起见，Mongoose 的 pre('save') 只有在 .save() 时触发。
+    // 如果用 findOneAndUpdate，我们需要手动 trigger 或者在 schema 使用 pre('findOneAndUpdate')。
+    
+    // 🔥 最佳实践修正：使用 findOne 然后 save，确保触发 BMI 计算逻辑
+    let record = await Fitness.findOne({ user: finalUserId, dateStr: dateStr });
+
+    if (record) {
+        // 更新现有记录
+        record.body = { ...record.body, ...finalBody }; // 合并数据
+        if (workout) record.workout = workout;
+        if (diet) record.diet = diet;
+        if (status) record.status = status;
+        if (photos) record.photos = photos;
+    } else {
+        // 创建新记录
+        record = new Fitness(updateFields);
+    }
+
+    // 这一步会触发 FitnessSchema.pre('save')，自动计算 BMI
+    await record.save();
 
     res.json(record);
   } catch (err) {
@@ -115,20 +145,14 @@ router.post('/', auth, async (req, res) => {
 });
 
 // ==========================================
-// GET /stats
-// 获取统计趋势 (防曲线跳水版)
+// 3. 获取统计趋势 (增加 BMI 数据)
 // ==========================================
 router.get('/stats', auth, async (req, res) => {
   try {
     const days = parseInt(req.query.days) || 30;
     
-    // 1. 确定查询的目标用户
-    let targetUserId = req.user.id; // 默认查自己 (假设 auth 中间件把 id 放在 req.user.id)
-    
-    // 如果是旧代码风格可能是 req.userId，请根据你的 auth 中间件实际情况调整
-    // let targetUserId = req.userId; 
+    let targetUserId = req.user.id; 
 
-    // 如果前端传了 email 想看别人的趋势
     if (req.query.email) {
         const user = await User.findOne({ email: req.query.email });
         if (user) {
@@ -138,33 +162,24 @@ router.get('/stats', auth, async (req, res) => {
         }
     }
 
-    // 2. 确定时间范围
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
 
-    // 3. 数据库查询
     const stats = await Fitness.find({
       user: targetUserId,
       date: { $gte: startDate }
     })
-    .sort({ date: 1 }) // 按日期升序
-    .select('dateStr body.weight workout.duration diet.water status.sleepHours');
+    .sort({ date: 1 })
+    // 🔥 查出 bmi
+    .select('dateStr body.weight body.bmi workout.duration diet.water status.sleepHours');
 
-    // 4. 数据清洗与映射
     const chartData = {
       dates: stats.map(s => s.dateStr),
-      
-      // --- 核心身体指标 (使用 null 防止曲线掉底) ---
       weights: stats.map(s => s.body?.weight || null),
-      
-      // --- 运动时长 (使用 0 代表休息日) ---
+      // 🔥 新增 BMI 趋势
+      bmis: stats.map(s => s.body?.bmi || null),
       durations: stats.map(s => s.workout?.duration || 0),
-      
-      // --- 喝水 (使用 null 防止曲线掉底) ---
-      // 这里的逻辑是：没记不代表没喝，用 0 会拉低平均值且导致图表难看
       water: stats.map(s => s.diet?.water || null),
-      
-      // --- 睡眠 (使用 null 防止曲线掉底) ---
       sleep: stats.map(s => s.status?.sleepHours || null)
     };
 
@@ -176,7 +191,7 @@ router.get('/stats', auth, async (req, res) => {
   }
 });
 
-// DELETE 接口保持不变 (略)
+// DELETE 接口
 router.delete('/:id', auth, async (req, res) => {
     try {
       const record = await Fitness.findById(req.params.id);

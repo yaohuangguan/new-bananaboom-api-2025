@@ -487,52 +487,72 @@ router.put("/revoke-vip", auth, checkPrivate, async (req, res) => {
 });
 
 // @route   PUT /api/users/:id
-// @desc    修改个人资料 (名字、头像)
+// @desc    修改个人资料 (名字、头像、身高、健身目标)
 // @access  Private
 router.put("/:id", auth, async (req, res) => {
-  const { displayName, photoURL } = req.body;
+  // 🔥 1. 新增 height 和 fitnessGoal 字段的获取
+  const { displayName, photoURL, height, fitnessGoal } = req.body;
   const userId = req.params.id;
 
-  // 1. 安全检查：确保用户只能修改自己的资料
-  // req.user.id 来自 auth 中间件解析的 token
+  // 安全检查：确保用户只能修改自己的资料
   if (req.user.id !== userId) {
     return res.status(403).json({ message: "你无权修改他人的资料" });
   }
 
   // 2. 构建更新对象 (只更新传了的字段)
   const updateFields = {};
+  
   if (displayName) updateFields.displayName = displayName;
   if (photoURL) updateFields.photoURL = photoURL;
+  
+  // 🔥 新增：身高逻辑 (确保是数字)
+  if (height) {
+    const heightNum = Number(height);
+    // 简单的合理性检查，虽然Schema里也有min/max
+    if (!isNaN(heightNum) && heightNum > 0) {
+      updateFields.height = heightNum;
+    }
+  }
+
+  // 🔥 新增：健身目标逻辑
+  // 允许的值: 'cut' | 'bulk' | 'maintain'
+  if (fitnessGoal) {
+    updateFields.fitnessGoal = fitnessGoal;
+  }
 
   // 如果没有要更新的字段，直接返回
   if (Object.keys(updateFields).length === 0) {
-    return res.status(400).json({ message: "请提供要修改的名字或头像" });
+    return res.status(400).json({ message: "请提供要修改的资料 (名字/头像/身高/目标)" });
   }
 
   try {
     // 3. 执行更新
-    // { new: true } 表示返回更新后的数据
-    // .select("-password") 表示返回的数据里不要带密码
     const updatedUser = await User.findByIdAndUpdate(
       userId,
       { $set: updateFields },
-      { new: true }
-    ).select("-password -googleId"); // 排除敏感信息
+      { 
+        new: true, // 返回更新后的数据
+        runValidators: true // 🔥 重要：开启Schema验证 (确保height不超限，goal在枚举内)
+      }
+    ).select("-password -googleId");
 
     if (!updatedUser) {
       return res.status(404).json({ message: "用户不存在" });
     }
 
-    logOperation({
-      operatorId: req.user.id,
-      action: "UPDATE_USER_INFO",
-      target: `UPDATE_USER_INFO [${req.user.name}]`,
-      details: {},
-      ip: req.ip,
-      io: req.app.get('socketio')
-  });
+    // 记录日志 (保持原有逻辑)
+    if (typeof logOperation === 'function') {
+        logOperation({
+          operatorId: req.user.id,
+          action: "UPDATE_USER_INFO",
+          target: `UPDATE_USER_INFO [${req.user.name || displayName}]`,
+          details: updateFields, // 记录改了什么
+          ip: req.ip,
+          io: req.app.get('socketio')
+        });
+    }
 
-    // 4. 返回标准格式
+    // 4. 返回结果
     res.json({
       success: true,
       message: "修改成功",
@@ -541,6 +561,12 @@ router.put("/:id", auth, async (req, res) => {
 
   } catch (error) {
     console.error("Update profile error:", error);
+    
+    // 专门捕获 Mongoose 的验证错误 (比如 height 超出范围)
+    if (error.name === 'ValidationError') {
+       return res.status(400).json({ message: "参数错误: " + error.message });
+    }
+
     res.status(500).json({ message: "修改失败，服务器错误" });
   }
 });
