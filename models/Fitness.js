@@ -63,18 +63,19 @@ const FitnessSchema = new Schema({
 // 复合唯一索引 (不变)
 FitnessSchema.index({ user: 1, dateStr: 1 }, { unique: true });
 
-// 🔥 核心逻辑：使用 Pre-save 钩子自动计算 BMI
-// 这样你无论在哪里 save()，BMI 都会自动算好，不用手写计算逻辑
-FitnessSchema.pre('save', function(next) {
+// 🔥 修复版：使用 async 函数，不需要 next 参数
+FitnessSchema.pre('save', async function() {
+  // 注意：这里不要写 (next)，也不要调用 next()
+  
   // 只有当体重和身高都有值的时候，才计算 BMI
   if (this.body && this.body.weight && this.body.height) {
     const heightInMeters = this.body.height / 100; // cm 转 m
     if (heightInMeters > 0) {
-      // 保留1位小数 (例如 23.5)
+      // 保留1位小数
       this.body.bmi = parseFloat((this.body.weight / (heightInMeters * heightInMeters)).toFixed(1));
     }
   }
-  next();
+  
+  // async 函数执行完毕自动视为成功，不需要手动 next()
 });
-
 module.exports = mongoose.model('fitness', FitnessSchema);
