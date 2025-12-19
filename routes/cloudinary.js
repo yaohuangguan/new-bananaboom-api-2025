@@ -71,16 +71,24 @@ router.get("/usage", async (req, res) => {
  * @desc    (可选) 获取最近上传的图片列表
  */
 router.get("/resources", async (req, res) => {
-    try {
-        const result = await cloudinary.api.resources({
-            max_results: 20, // 最多返回20张
-            direction: 'desc' // 最新的在前
-        });
-        res.json(result.resources);
-    } catch (error) {
-        console.error("Cloudinary resources error:", error);
-        res.status(500).json({ message: "Failed to fetch images" });
-    }
+  try {
+      const result = await cloudinary.api.resources({
+          max_results: 20,
+          direction: 'desc'
+      });
+      
+      // ✅ 建议写法：包裹在一个对象里返回
+      res.json({
+          success: true,
+          total_count: result.resources.length,
+          next_cursor: result.next_cursor, // 如果需要做“加载更多”功能，这个字段很有用
+          data: result.resources // 把数组放在 data 字段里
+      });
+
+  } catch (error) {
+      console.error("Cloudinary resources error:", error);
+      res.status(500).json({ success: false, message: "Failed to fetch images" });
+  }
 });
 
 module.exports = router;

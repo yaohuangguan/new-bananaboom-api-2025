@@ -197,9 +197,17 @@ router.post(
           message_cn: "你输入的密码和账户名不匹配"
         });
       }
+    // 🔥🔥🔥 核心修改在这里 🔥🔥🔥
+      // 我们把 User 表里的关键信息都塞进 payload
+      // 这样 Auth 中间件解密后，req.user 直接就有了这些数据，不用再查库
       const payload = {
         user: {
-          id: user.id
+          id: user.id,
+          name: user.displayName, // 或者是 user.name，看你数据库字段
+          email: user.email,
+          photoURL: user.photoURL, // 头像，前端展示常用
+          vip: user.vip,           // 权限字段，鉴权常用
+          // 注意：不要塞太大的数据（比如 hugeBio），会增加网络传输流量
         }
       };
 
@@ -220,6 +228,7 @@ router.post(
     }
   }
 );
+
 router.post("/logout", auth, async (req, res) => {
   const { token } = req.user;
   

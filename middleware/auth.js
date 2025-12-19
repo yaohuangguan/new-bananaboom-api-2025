@@ -1,61 +1,46 @@
 const jwt = require("jsonwebtoken");
-const User = require("../models/User");
 const redis = require("../cache/cache");
 const SECRET = process.env.SECRET_JWT || "secret";
 
+// 注意：这里不再需要引入 User 模型，因为 JWT 直接解密用户信息，不查库
+// const User = require("../models/User"); 
+
 module.exports = async function(req, res, next) {
-  const token = req.header("x-auth-token");
-  const googleToken = req.header("x-google-auth");
+  // 1. 获取 Token
+  // 优先尝试获取标准的 Authorization: Bearer <token>
+  let token = req.header("x-auth-token");
+  const authHeader = req.header("Authorization");
 
-  // ==========================================
-  // 分支 A: Google 登录
-  // ==========================================
-  if (googleToken) {
-    try {
-      let user = await User.findOne({ googleId: googleToken });
-      if (!user) user = await User.findOne({ email: googleToken });
-      if (!user) return res.status(401).json({ message: "Google User not found" });
-
-      // ✅ 修复点 1：构造标准 user 对象
-      req.user = {
-        id: user._id.toString(), // ⚡️ 必须转成 String，统一叫 id
-        _id: user._id.toString(), // ⚡️ 兼容前端可能取 _id
-        name: user.displayName,
-        email: user.email,
-        vip: user.vip,
-        photoURL: user.photoURL
-      };
-      
-      // 兼容旧代码
-      req.userId = req.user.id;
-      return next();
-    } catch (err) {
-      console.error(err);
-      return res.status(500).json({ message: "Server Error" });
-    }
+  if (!token && authHeader && authHeader.startsWith('Bearer ')) {
+    token = authHeader.split(' ')[1];
   }
 
-  // ==========================================
-  // 分支 B: JWT 登录
-  // ==========================================
-  if (!token) return res.status(401).json({ message: "No Token" });
+  // 2. 如果没有 Token，直接拒绝
+  if (!token) {
+    return res.status(401).json({ message: "No Token, authorization denied" });
+  }
 
   try {
+    // 3. Redis 校验 (检查 Token 是否有效/未过期)
+    // 逻辑：如果 Redis 里查不到这个 token，说明会话已过期或被强制登出
     const redisToken = await redis.get(token);
+    
+    // 兼容你之前的逻辑：确保 Redis 里不仅有值，且值等于 token (如果你存的是 key=token, value=token)
+    // 如果你 Redis 存的是 key=token, value=userId，这里只要判断 !redisToken 即可
     if (!redisToken || redisToken !== token) {
-      return res.status(401).json({ message: "Session expired" });
+      return res.status(401).json({ message: "Session expired or logged out" });
     }
 
+    // 4. JWT 解密
     const decoded = jwt.verify(token, SECRET);
     
-    // ✅ 修复点 2：确保 JWT 解出来的 user 也有 id
+    // 5. 挂载用户信息到 req 对象
     req.user = decoded.user;
-    
-    // 如果 token 里存的是 _id，强制补一个 id
+
+    // ⚡️ 统一 ID 格式 (为了防止后端混用 _id 和 id 导致 bug)
     if (req.user._id && !req.user.id) {
         req.user.id = req.user._id;
     }
-    // 如果 token 里存的是 id，强制补一个 _id (双保险)
     if (req.user.id && !req.user._id) {
         req.user._id = req.user.id;
     }
@@ -64,8 +49,14 @@ module.exports = async function(req, res, next) {
     req.userId = req.user.id; // 兼容旧代码
 
     next();
+
   } catch (error) {
-    console.error(error);
+    // 细分错误日志：如果是 Token 过期，不要打印 Stack Trace 吓自己
+    if (error.name === 'TokenExpiredError') {
+        return res.status(401).json({ message: "Token Expired" });
+    }
+    
+    console.error("Auth Middleware Error:", error.message);
     res.status(401).json({ message: "Token Invalid" });
   }
 };
