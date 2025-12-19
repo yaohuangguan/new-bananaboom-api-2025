@@ -164,22 +164,35 @@ const CATEGORY_CONFIG = {
     hotsearch: {
       tianUrl: `https://apis.tianapi.com/networkhot/index?key=${TIAN_KEY}`,
       titleSuffix: "全网热搜榜",
-      apiListKey: "list", // 天行返回数据在 result.list 里
+      apiListKey: "list", // 天行热搜接口返回数据在 result.list 里
       hasPic: false       // 热搜通常没图
     },
     // 2. 财经新闻
     finance: {
       tianUrl: `https://apis.tianapi.com/caijing/index?key=${TIAN_KEY}&num=20`,
       titleSuffix: "财经快报",
+      apiListKey: "newslist", // 天行新闻类接口通常在 newslist 里
+      hasPic: true
+    },
+    // 3. 电竞/游戏资讯
+    game: {
+      tianUrl: `https://apis.tianapi.com/game/index?key=${TIAN_KEY}&num=20`,
+      titleSuffix: "电竞/游戏资讯",
       apiListKey: "newslist",
       hasPic: true
     },
-    // 3. 电竞/游戏资讯 (新增)
-    game: {
-      // 天行电竞接口 (esports)
-      tianUrl: `https://apis.tianapi.com/game/index?key=${TIAN_KEY}&num=20`,
-      titleSuffix: "电竞/游戏资讯",
-      apiListKey: "newslist", // 注意：不同接口返回结构可能不同，确认都在 list 里
+    // 🔥 4. 国内新闻 (新增)
+    guonei: {
+      tianUrl: `https://apis.tianapi.com/guonei/index?key=${TIAN_KEY}&num=20`,
+      titleSuffix: "国内新闻",
+      apiListKey: "newslist", // 这里的结构通常也是 newslist
+      hasPic: true
+    },
+    // 🔥 5. 国际新闻 (新增)
+    world: {
+      tianUrl: `https://apis.tianapi.com/world/index?key=${TIAN_KEY}&num=20`,
+      titleSuffix: "国际新闻",
+      apiListKey: "newslist",
       hasPic: true
     }
   };

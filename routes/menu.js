@@ -7,7 +7,7 @@ const auth = require("../middleware/auth");
 const checkPrivate = require("../middleware/checkPrivate"); // 私域权限检查
 const dayjs = require("dayjs");
 const { generateJSON } = require("../utils/aiProvider"); // 刚才封装好的 AI 工具
-
+const mongoose = require("mongoose");
 // 🔥 全局路由守卫：只有登录且是 VIP (家人) 才能访问
 router.use(auth, checkPrivate);
 
@@ -311,67 +311,102 @@ router.delete("/:id", async (req, res) => {
  * 2. Fitness表：在当前用户的今日记录中，追加饮食内容。
  * 3. Auto-Water: 如果菜名含“汤”，自动 +300ml 水。
  */
-router.post("/confirm/:id", async (req, res) => {
-  const menuId = req.params.id;
-  const userId = req.user.id;
-  const todayStr = dayjs().format("YYYY-MM-DD");
-  const { mealTime } = req.body; 
-
-  try {
-    const [currentUser, menuItem] = await Promise.all([
-      User.findById(userId),
-      Menu.findById(menuId)
-    ]);
-
-    if (!menuItem) return res.status(404).json({ msg: "菜品不存在" });
-
-    // --- A. 更新全局菜单 (触发冷却) ---
-    menuItem.timesEaten += 1;
-    menuItem.lastEaten = new Date();
-    await menuItem.save();
-
-    // --- B. 写入个人 Fitness 记录 ---
-    let fitnessRecord = await Fitness.findOne({ user: userId, dateStr: todayStr });
-    
-    // 如果今天还没记录，初始化一条
-    if (!fitnessRecord) {
-      fitnessRecord = new Fitness({
-        user: userId,
-        date: new Date(),
-        dateStr: todayStr,
-        diet: { content: "", water: 0 }
+router.post("/confirm/:id", auth, async (req, res) => {
+    // 1. 获取并解码参数 (防止中文乱码)
+    // 这里的 id 可能是 "65a..." (数据库ID) 也可能是 "红烧牛肉" (AI生成的菜名)
+    const paramId = decodeURIComponent(req.params.id);
+    const userId = req.user.id;
+    const todayStr = dayjs().format("YYYY-MM-DD");
+    const { mealTime } = req.body; 
+  
+    try {
+      // 2. 先查用户 (User 是必须要查的，为了拿 fitnessGoal)
+      const currentUser = await User.findById(userId);
+      if (!currentUser) return res.status(404).json({ msg: "用户未找到" });
+  
+      // 3. 核心分叉逻辑：判断 paramId 到底是个 ID 还是个菜名
+      let menuItem = null;
+      let finalDishName = "";
+      let isSoup = false;
+  
+      // 判断逻辑：是合法的 ObjectId 格式吗？
+      if (mongoose.Types.ObjectId.isValid(paramId)) {
+        // ---> 分支 A: 看起来像个 ID，去 Menu 表查查看
+        menuItem = await Menu.findById(paramId);
+      }
+  
+      if (menuItem) {
+        // [情况 1]: 是现有菜单 (数据库里查到了)
+        finalDishName = menuItem.name;
+        
+        // --- A. 更新全局菜单 (触发冷却) ---
+        // 只有数据库里的菜才需要更新"上次吃的时间"
+        menuItem.timesEaten += 1;
+        menuItem.lastEaten = new Date();
+        await menuItem.save();
+  
+        // 判断是否汤品 (查 tags 或 名字)
+        isSoup = menuItem.name.includes("汤") || (menuItem.tags && menuItem.tags.some(t => t.includes("汤")));
+  
+      } else {
+        // [情况 2]: 是 AI 菜品 (不是 ID，或者库里没这个 ID)
+        // 直接把 paramId 当作菜名
+        finalDishName = paramId;
+        
+        // 判断是否汤品 (只能查名字)
+        isSoup = finalDishName.includes("汤");
+      }
+  
+      // --- B. 写入个人 Fitness 记录 (通用逻辑) ---
+      // 这里的逻辑对 AI 菜品和现有菜品是通用的，只认 finalDishName
+      
+      let fitnessRecord = await Fitness.findOne({ user: userId, dateStr: todayStr });
+      
+      // 如果今天还没记录，初始化一条
+      if (!fitnessRecord) {
+        fitnessRecord = new Fitness({
+          user: userId,
+          date: new Date(),
+          dateStr: todayStr,
+          diet: { content: "", water: 0 },
+          body: {},    // 初始化防止报错
+          workout: {}  // 初始化防止报错
+        });
+      }
+  
+      // 记录当时的模式快照
+      const currentGoal = currentUser.fitnessGoal || 'maintain';
+      if (fitnessRecord.diet) {
+          fitnessRecord.diet.goalSnapshot = currentGoal;
+      }
+  
+      // 生成日记文案
+      // 格式： "晚餐选中了：【红烧肉】。"
+      const newContent = `${mealTime || '大厨转盘'}选中了：【${finalDishName}】。`;
+      const oldContent = fitnessRecord.diet.content || "";
+      
+      // 简单的去重/追加逻辑
+      fitnessRecord.diet.content = oldContent ? `${oldContent}\n${newContent}` : newContent;
+  
+      // 自动补水逻辑 (通用)
+      if (isSoup) {
+        fitnessRecord.diet.water = (fitnessRecord.diet.water || 0) + 300;
+        fitnessRecord.diet.content += " (汤品自动补水 +300ml)";
+      }
+  
+      await fitnessRecord.save();
+  
+      res.json({ 
+        msg: `已确认【${finalDishName}】，并记录到您的饮食日记`,
+        // 如果是 AI 菜，menu 字段返回 null 或构建一个临时对象，防止前端报错
+        menu: menuItem || { name: finalDishName, _id: "ai_generated" },
+        fitness: fitnessRecord
       });
+  
+    } catch (err) {
+      console.error("Confirm Dish Error:", err);
+      res.status(500).send("Server Error");
     }
-
-    // 记录当时的模式快照 (Cut/Bulk) - 仅做记录，不影响转盘逻辑
-    const currentGoal = currentUser.fitnessGoal || 'maintain';
-    fitnessRecord.diet.goalSnapshot = currentGoal;
-
-    // 生成日记文案
-    // 格式： "晚餐选中了：【红烧肉】。"
-    const newContent = `${mealTime || '大厨转盘'}选中了：【${menuItem.name}】。`;
-    const oldContent = fitnessRecord.diet.content || "";
-    fitnessRecord.diet.content = oldContent ? `${oldContent}\n${newContent}` : newContent;
-
-    // 自动补水逻辑
-    const isSoup = menuItem.name.includes("汤") || (menuItem.tags && menuItem.tags.some(t => t.includes("汤")));
-    if (isSoup) {
-      fitnessRecord.diet.water = (fitnessRecord.diet.water || 0) + 300;
-      fitnessRecord.diet.content += " (汤品自动补水 +300ml)";
-    }
-
-    await fitnessRecord.save();
-
-    res.json({ 
-      msg: `已确认【${menuItem.name}】，并记录到您的饮食日记`,
-      menu: menuItem,
-      fitness: fitnessRecord
-    });
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).send("Server Error");
-  }
-});
+  });
 
 module.exports = router;
