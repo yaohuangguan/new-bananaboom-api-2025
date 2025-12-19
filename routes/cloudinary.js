@@ -2,7 +2,7 @@ const express = require("express");
 const router = express.Router();
 const cloudinary = require("cloudinary").v2;
 const auth = require("../middleware/auth");
-
+const checkPrivate = require('../middleware/checkPrivate')
 
 // 1. 初始化配置 (从环境变量读取)
 cloudinary.config({
@@ -118,13 +118,29 @@ router.get("/usage", async (req, res) => {
 /**
  * @route   GET /api/cloudinary/resources
  * @desc    获取图片列表
- * @return  Array<Object>  (直接返回数组，保持前端零修改)
+ * @return  Array<{
+        "asset_id": "5233bb2522f138efbad32ae8f149317c",
+        "public_id": "bnqa86xkeknlk3yxvi7i",
+        "format": "jpg",
+        "version": 1766156303,
+        "resource_type": "image",
+        "type": "upload",
+        "created_at": "2025-12-19T14:58:23Z",
+        "bytes": 170538,
+        "width": 1280,
+        "height": 1707,
+        "asset_folder": "",
+        "display_name": "bnqa86xkeknlk3yxvi7i",
+        "url": "http://res.cloudinary.com/dyhwehswh/image/upload/v1766156303/bnqa86xkeknlk3yxvi7i.jpg",
+        "secure_url": "https://res.cloudinary.com/dyhwehswh/image/upload/v1766156303/bnqa86xkeknlk3yxvi7i.jpg"
+    }>  (直接返回数组，保持前端零修改)
+ * 
  */
 router.get("/resources", async (req, res) => {
   try {
       // 1. 调用 Cloudinary API
       const result = await cloudinary.api.resources({
-          max_results: 20,   // 限制返回数量
+          max_results: 30,   // 限制返回数量
           direction: 'desc', // 最新的在前
           resource_type: 'image',
           type: 'upload'
@@ -139,6 +155,36 @@ router.get("/resources", async (req, res) => {
       console.error("Cloudinary error:", error);
       // 出错时最好也保持简单的 JSON 结构，或者返回空数组防止前端 .map 报错
       res.status(500).json([]); 
+  }
+});
+
+/**
+ * @route   POST /api/cloudinary/delete
+ * @desc    删除指定图片
+ * @body    { public_id: "bnqa86xkeknlk3yxvi7i" }
+ */
+router.post("/delete", auth, checkPrivate, async (req, res) => {
+  const { public_id } = req.body;
+
+  if (!public_id) {
+    return res.status(400).json({ msg: "Public ID is required" });
+  }
+
+  try {
+    // 调用 Cloudinary 的销毁方法
+    // resource_type: 'image' 是默认值，如果是视频需指定 'video'
+    const result = await cloudinary.uploader.destroy(public_id);
+
+    // Cloudinary 返回格式通常是: { result: 'ok' } 或 { result: 'not found' }
+    if (result.result === 'ok') {
+      res.json({ success: true, msg: "删除成功" });
+    } else {
+      res.status(404).json({ success: false, msg: "未找到该图片或删除失败", details: result });
+    }
+
+  } catch (error) {
+    console.error("Cloudinary Delete Error:", error);
+    res.status(500).json({ msg: "Server Error" });
   }
 });
 
