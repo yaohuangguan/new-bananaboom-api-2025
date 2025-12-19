@@ -71,6 +71,7 @@ app.use("/api/fitness", require("./routes/fitness"));
 app.use("/api/period", require("./routes/period"));
 app.use("/api/footprints", require("./routes/footprint"));
 app.use("/api/menu", require("./routes/menu"));
+app.use("/api/external", require("./routes/external"));
 
 //port
 const PORT = process.env.PORT || 5000;
