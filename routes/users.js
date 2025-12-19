@@ -299,6 +299,31 @@ router.put("/password", auth, async (req, res) => {
   }
 });
 
+// @route   PUT /api/users/fitness-goal
+// @desc    切换健身模式 (Fitness 空间专用)
+// @access  Private
+router.put("/fitness-goal", auth, async (req, res) => {
+  const { goal } = req.body; // 'cut' | 'bulk' | 'maintain'
+
+  if (!['cut', 'bulk', 'maintain'].includes(goal)) {
+    return res.status(400).json({ msg: "无效的模式" });
+  }
+
+  try {
+    const user = await User.findById(req.user.id);
+    user.fitnessGoal = goal;
+    await user.save(); // 只保存，不影响其他业务逻辑
+
+    res.json({ 
+      success: true, 
+      msg: "模式已更新",
+      goal: user.fitnessGoal
+    });
+  } catch (err) {
+    res.status(500).send("Server Error");
+  }
+});
+
 // @route   POST /api/users/reset-by-secret
 // @desc    【私域专用】通过超级暗号直接重置密码
 // @access  Public
