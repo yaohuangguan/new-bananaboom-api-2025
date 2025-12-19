@@ -12,26 +12,32 @@ const logOperation = require("../utils/audit"); // 引入工具
 const SECRET = process.env.SECRET_JWT || require("../config/keys").SECRET_JWT;
 const router = express.Router();
 const { check, validationResult } = require("express-validator");
+
 router.get("/profile", auth, async (req, res) => {
-  const { id } = req.user;
-  let user = await User.findOne(
-    { _id: id },
-    {
-      displayName: 1,
-      vip: 1,
-      email: 1,
-      date: 1,
-      photoURL: 1
+  try {
+    const { id } = req.user;
+
+    // 🔥 修改点：使用 .select("-password")
+    // 意思是：查询所有字段，唯独不要 password
+    let user = await User.findById(id).select("-password");
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
     }
-  );
-  if (user.vip) {
-    let privateUser = { ...user._doc, private_token: "ilovechenfangting" };
-    return res.json(privateUser);
-  } else {
-    return res.json(user);
+
+    if (user.vip) {
+      // 保持你原有的 VIP 彩蛋逻辑
+      // user.toObject() 把 mongoose 对象转为普通 JS 对象，方便扩展属性
+      let privateUser = { ...user.toObject(), private_token: "ilovechenfangting" };
+      return res.json(privateUser);
+    } else {
+      return res.json(user);
+    }
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Server Error");
   }
 });
-
 // @route   GET api/users
 // @desc    获取所有用户 (支持分页、搜索、动态排序)
 // @access  Private
