@@ -2,54 +2,34 @@ const express = require("express");
 const router = express.Router();
 const Menu = require("../models/Menu");
 const Fitness = require("../models/Fitness");
-const User = require('../models/User')
+const User = require("../models/User"); 
 const auth = require("../middleware/auth");
-const checkPrivate = require("../middleware/checkPrivate"); // 你的私域权限中间件
+const checkPrivate = require("../middleware/checkPrivate"); // 私域权限检查
 const dayjs = require("dayjs");
 
-// 🔥 全局路由守卫：只有登录且通过 checkPrivate (VIP/家人) 的用户才能访问
+// 🔥 全局路由守卫：只有登录且是 VIP (家人) 才能访问
 router.use(auth, checkPrivate);
 
 /**
+ * =================================================================
+ * 1. 获取全量菜品列表 (管理视图)
+ * =================================================================
  * @route   GET /api/menu
- * @desc    获取转盘菜品列表 (支持多种过滤模式)
- * @access  Private (VIP)
- * * @param {string} category - (可选) 按分类筛选，例如 "晚餐"
- * @param {string} cooldown - (可选) "true" 开启贤者模式。过滤掉最近 2 天吃过的菜。
- * @param {string} healthy  - (可选) "true" 开启健康模式。过滤掉高热量 (high) 的菜。
- * * @example 请求示例:
- * GET /api/menu?category=晚餐&cooldown=true&healthy=true
+ * @desc    获取所有启用的菜品，不进行任何算法过滤。
+ * @usage   用于前端的“菜单管理”页面，展示列表供用户查看或编辑。
+ * * @param   {string} category - (Query可选) 按分类筛选，如 "晚餐"
+ * @returns {Array} 菜品对象数组
  */
 router.get("/", async (req, res) => {
   try {
-    const { category, cooldown, healthy } = req.query;
+    const { category } = req.query;
     
-    // 基础查询：只查找状态为“启用”的菜品
+    // 基础查询：只查找状态为 isActive=true 的
     let query = { isActive: true };
-
-    // 1. 分类筛选
     if (category) query.category = category;
 
-    // 2. 🔥 功能 A：贤者模式 (Cooldown Mode)
-    // 业务逻辑：如果开启，过滤掉 `lastEaten` 在 48 小时内的记录。
-    // 即：只返回 "很久没吃" 或 "从未吃过" 的菜。
-    if (cooldown === 'true') {
-      const twoDaysAgo = dayjs().subtract(2, 'days').toDate();
-      query.$or = [
-        { lastEaten: { $lte: twoDaysAgo } }, // 上次吃是在2天前
-        { lastEaten: { $eq: null } },        // 从没吃过
-        { lastEaten: { $exists: false } }
-      ];
-    }
-
-    // 3. 🔥 功能 B：健康模式 (Healthy Mode)
-    // 业务逻辑：如果开启，过滤掉 `caloriesLevel` 为 'high' 的记录。
-    if (healthy === 'true') {
-      query.caloriesLevel = { $in: ['low', 'medium'] };
-    }
-
-    // 排序：优先展示很久没吃的 (lastEaten 升序)
-    const menus = await Menu.find(query).sort({ lastEaten: 1 });
+    // 按创建时间倒序排列 (新加的菜在最上面)
+    const menus = await Menu.find(query).sort({ createdAt: -1 });
     res.json(menus);
 
   } catch (err) {
@@ -59,20 +39,110 @@ router.get("/", async (req, res) => {
 });
 
 /**
+ * =================================================================
+ * 2. 🔥 随机抽取接口 (转盘核心算法)
+ * =================================================================
+ * @route   GET /api/menu/draw
+ * @desc    根据前端传入的开关，在后端进行过滤和带权重的随机抽取。
+ * @usage   用于转盘页面。前端调用此接口获取数据来渲染转盘，并直接知道结果。
+ * * @param   {string} category - (Query) "午餐" | "晚餐"
+ * @param   {string} cooldown - (Query) "true" = 开启贤者模式 (过滤掉最近2天吃过的)
+ * @param   {string} healthy  - (Query) "true" = 开启健康模式 (过滤掉 high 热量的)
+ * * @returns {Object} JSON结构:
+ * {
+ * "winner": { ... },   // 最终中奖的菜品对象 (转盘动画应该停在这里)
+ * "pool": [ ... ],     // 参与抽奖的候选菜品列表 (用于渲染转盘的扇形)
+ * "meta": { ... }      // 调试元数据
+ * }
+ */
+router.get("/draw", async (req, res) => {
+  try {
+    const { category, cooldown, healthy } = req.query;
+    
+    // --- Step 1: 构建过滤条件 ---
+    let query = { isActive: true };
+
+    // 筛选分类
+    if (category) query.category = category;
+
+    // A. 贤者模式 (冷却逻辑)
+    // 逻辑：lastEaten 必须小于 48小时前，或者 为空(从未吃过)
+    if (cooldown === 'true') {
+      const twoDaysAgo = dayjs().subtract(2, 'days').toDate();
+      query.$or = [
+        { lastEaten: { $lte: twoDaysAgo } },
+        { lastEaten: { $eq: null } },
+        { lastEaten: { $exists: false } }
+      ];
+    }
+
+    // B. 健康模式 (热量过滤)
+    // 逻辑：只保留 low 和 medium，排除 high
+    if (healthy === 'true') {
+      query.caloriesLevel = { $in: ['low', 'medium'] };
+    }
+
+    // --- Step 2: 获取候选池 ---
+    const candidates = await Menu.find(query);
+
+    if (candidates.length === 0) {
+      return res.status(404).json({ msg: "没有符合条件的菜品，请尝试关闭一些过滤开关" });
+    }
+
+    // --- Step 3: 带权重的随机算法 (Weighted Random) ---
+    // 逻辑：weight (1-10) 越高，被抽中的概率越大 (扇形面积越大)
+    
+    // 3.1 计算总权重
+    let totalWeight = 0;
+    candidates.forEach(item => {
+      totalWeight += (item.weight || 1);
+    });
+
+    // 3.2 生成随机数 (0 到 totalWeight 之间)
+    let random = Math.random() * totalWeight;
+    
+    // 3.3 寻找中奖者
+    let winner = null;
+    for (const item of candidates) {
+      const w = item.weight || 1;
+      if (random < w) {
+        winner = item; // 命中
+        break;
+      }
+      random -= w; // 减去当前权重，继续下一轮检测
+    }
+    
+    // 兜底：如果因浮点数精度问题没选中，默认选最后一个
+    if (!winner) winner = candidates[candidates.length - 1];
+
+    // --- Step 4: 返回结果 ---
+    res.json({
+      winner: winner,  // 前端用这个控制停止位置
+      pool: candidates, // 前端用这个渲染转盘 UI
+      meta: {
+        totalCandidates: candidates.length,
+        filterMode: { cooldown, healthy }
+      }
+    });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Server Error");
+  }
+});
+
+/**
+ * =================================================================
+ * 3. 新增菜品
+ * =================================================================
  * @route   POST /api/menu
- * @desc    新增一道菜到公共菜单
- * @access  Private (VIP)
- * * @body {string} name - 菜名 (必须)
- * @body {string} category - 分类 (默认: 随机)
- * @body {string} caloriesLevel - 卡路里等级: 'low' | 'medium' | 'high'
- * @body {Array} tags - 标签数组
- * @body {number} weight - 权重 1-10
+ * @body    { name, category, tags, weight, caloriesLevel, image }
  */
 router.post("/", async (req, res) => {
   try {
     const { name, category, tags, image, weight, caloriesLevel } = req.body;
     
-    // 查重：全库菜名唯一
+    // 查重
     const exists = await Menu.findOne({ name });
     if (exists) return res.status(400).json({ msg: "这道菜已经在菜单里啦" });
 
@@ -94,7 +164,7 @@ router.post("/", async (req, res) => {
   }
 });
 
-// 标准 CRUD: 修改菜品
+// 标准 CRUD: 修改
 router.put("/:id", async (req, res) => {
   try {
     const updated = await Menu.findByIdAndUpdate(req.params.id, { $set: req.body }, { new: true });
@@ -102,7 +172,7 @@ router.put("/:id", async (req, res) => {
   } catch (err) { res.status(500).send("Error"); }
 });
 
-// 标准 CRUD: 删除菜品
+// 标准 CRUD: 删除
 router.delete("/:id", async (req, res) => {
   try {
     await Menu.findByIdAndDelete(req.params.id);
@@ -111,39 +181,41 @@ router.delete("/:id", async (req, res) => {
 });
 
 /**
+ * =================================================================
+ * 4. 🔥 确认选择 (双重写入：全局冷却 + 个人记录)
+ * =================================================================
  * @route   POST /api/menu/confirm/:id
- * @desc    🔥 确认选择这道菜 (核心业务接口)
- * @access  Private (VIP)
- * * @body {string} mealTime - (可选) 用餐时段标签，如 "晚餐", "午餐"。用于生成更好看的日记。
- * * 业务逻辑：
- * 1. 全局：更新 Menu 表的 `lastEaten` 为当前时间 (触发全家人的贤者模式冷却)。
- * 2. 个人：在当前用户的 Fitness 表今天的记录中，追加一条饮食记录 (Diet)。
- * 3. 自动：如果菜名含“汤”，自动给 Fitness 增加 300ml 饮水记录。
+ * @desc    用户在转盘结束后点击“确认”，记录数据。
+ * @access  Private
+ * * @body    {string} mealTime - (可选) 用餐时段，如 "午餐" 或 "晚餐"
+ * * @logic
+ * 1. Menu表：更新 `lastEaten` 为当前时间 (触发全家冷却)。
+ * 2. Fitness表：在当前用户的今日记录中，追加饮食内容。
+ * 3. Auto-Water: 如果菜名含“汤”，自动 +300ml 水。
  */
 router.post("/confirm/:id", async (req, res) => {
   const menuId = req.params.id;
   const userId = req.user.id;
   const todayStr = dayjs().format("YYYY-MM-DD");
   const { mealTime } = req.body; 
-  const timeLabel = mealTime || "大厨转盘"; // 默认文案
 
   try {
-    // 1. 更新全局菜品状态
-   // 获取 用户信息(为了拿 goal 记录日志) 和 菜品信息
-   const [currentUser, menuItem] = await Promise.all([
-    User.findById(userId),
-    Menu.findById(menuId)
-  ]);
+    const [currentUser, menuItem] = await Promise.all([
+      User.findById(userId),
+      Menu.findById(menuId)
+    ]);
+
     if (!menuItem) return res.status(404).json({ msg: "菜品不存在" });
 
+    // --- A. 更新全局菜单 (触发冷却) ---
     menuItem.timesEaten += 1;
-    menuItem.lastEaten = new Date(); // 更新全局 CD
+    menuItem.lastEaten = new Date();
     await menuItem.save();
 
-    // 2. 写入个人 Fitness 记录
+    // --- B. 写入个人 Fitness 记录 ---
     let fitnessRecord = await Fitness.findOne({ user: userId, dateStr: todayStr });
     
-    // 如果今天还没记录，先创建一条空的
+    // 如果今天还没记录，初始化一条
     if (!fitnessRecord) {
       fitnessRecord = new Fitness({
         user: userId,
@@ -153,19 +225,17 @@ router.post("/confirm/:id", async (req, res) => {
       });
     }
 
-    // 🔥 仅仅是记录：当时用户处于什么模式
-    // 这不会影响转盘逻辑，只是为了以后在 Fitness 页面看历史记录时知道当时在干嘛
+    // 记录当时的模式快照 (Cut/Bulk) - 仅做记录，不影响转盘逻辑
     const currentGoal = currentUser.fitnessGoal || 'maintain';
     fitnessRecord.diet.goalSnapshot = currentGoal;
 
-
-    // 🔥 生成 AI 风格的饮食日记
-    const newContent = `${timeLabel}选中了：【${menuItem.name}】。`;
+    // 生成日记文案
+    // 格式： "晚餐选中了：【红烧肉】。"
+    const newContent = `${mealTime || '大厨转盘'}选中了：【${menuItem.name}】。`;
     const oldContent = fitnessRecord.diet.content || "";
-    // 追加内容 (换行显示)
     fitnessRecord.diet.content = oldContent ? `${oldContent}\n${newContent}` : newContent;
 
-    // 🔥 自动补水逻辑 (Feature D)
+    // 自动补水逻辑
     const isSoup = menuItem.name.includes("汤") || (menuItem.tags && menuItem.tags.some(t => t.includes("汤")));
     if (isSoup) {
       fitnessRecord.diet.water = (fitnessRecord.diet.water || 0) + 300;
@@ -175,7 +245,7 @@ router.post("/confirm/:id", async (req, res) => {
     await fitnessRecord.save();
 
     res.json({ 
-      msg: `已选定【${menuItem.name}】，并同步到您的饮食记录。`,
+      msg: `已确认【${menuItem.name}】，并记录到您的饮食日记`,
       menu: menuItem,
       fitness: fitnessRecord
     });
