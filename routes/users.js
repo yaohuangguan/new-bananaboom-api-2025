@@ -309,14 +309,14 @@ router.put("/password", auth, async (req, res) => {
 // @desc    切换健身模式 (Fitness 空间专用)
 // @access  Private
 router.put("/fitness-goal", auth, async (req, res) => {
-  const { goal } = req.body; // 'cut' | 'bulk' | 'maintain'
+  const { goal, userId } = req.body; // 'cut' | 'bulk' | 'maintain'
 
   if (!['cut', 'bulk', 'maintain'].includes(goal)) {
     return res.status(400).json({ msg: "无效的模式" });
   }
 
   try {
-    const user = await User.findById(req.user.id);
+    const user = await User.findById(userId);
     user.fitnessGoal = goal;
     await user.save(); // 只保存，不影响其他业务逻辑
 
