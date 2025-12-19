@@ -121,4 +121,47 @@ async function generateJSON(prompt, modelName = CONFIG.PRIMARY_MODEL) {
   }
 }
 
-module.exports = { generateJSON };
+
+/**
+ * 🌊 流式生成工具 (新增)
+ * @param {string} prompt - 提示词
+ * @returns {Promise<AsyncGenerator>} - 返回流对象
+ */
+async function generateStream(prompt) {
+  let currentModel = CONFIG.PRIMARY_MODEL;
+
+  try {
+    console.log(`🌊 [AI Stream] Start: ${currentModel}`);
+    
+    // 尝试使用主模型
+    const result = await ai.models.generateContentStream({
+      model: currentModel,
+      contents: prompt,
+    });
+    
+    // 返回流对象，让调用者去 for await
+    return result.stream;
+
+  } catch (err) {
+    console.error(`⚠️ [AI Stream Error] ${currentModel} failed:`, err.message);
+
+    // 自动降级逻辑
+    if (currentModel !== CONFIG.FALLBACK_MODEL) {
+      console.warn(`🔄 [AI Stream Fallback] Switching to ${CONFIG.FALLBACK_MODEL}`);
+      try {
+        const fallbackResult = await ai.models.generateContentStream({
+          model: CONFIG.FALLBACK_MODEL,
+          contents: prompt,
+        });
+        return fallbackResult.stream;
+      } catch (fallbackErr) {
+        throw new Error(`AI Stream completely failed: ${fallbackErr.message}`);
+      }
+    }
+    
+    throw err;
+  }
+}
+
+
+module.exports = { generateJSON, generateStream };

@@ -1,9 +1,9 @@
 const express = require("express");
 const router = express.Router();
-const { generateJSON } = require("../utils/aiProvider"); // 引入我们刚才封装好的工具
+const { generateJSON, generateStream } = require("../utils/aiProvider"); // 引入我们刚才封装好的工具
 const auth = require("../middleware/auth"); // 依然建议加上鉴权，防止被路人刷爆
 
-
+  
 // 引入所有数据模型 (根据你实际的文件路径调整)
 const User = require("../models/User");
 const Fitness = require("../models/Fitness");
@@ -213,7 +213,100 @@ router.post("/ask-life", auth, async (req, res) => {
       res.status(500).json({ msg: "大脑过载了，请稍后再试" });
     }
   });
+
+/**
+ * =================================================================
+ * 🧠 第二大脑 (God Mode - 智能判断 + 流式 + 全量数据)
+ * =================================================================
+ */
+router.post("/ask-life/stream", auth, async (req, res) => {
+    const { prompt, history } = req.body;
+    const userId = req.user.id;
   
-  module.exports = router;
+    if (!prompt) return res.status(400).json({ msg: "请说话" });
+  
+    // 设置流式响应头
+    res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+  
+    try {
+      // 2. 加载全量数据 (逻辑不变)
+      const [userProfile, fitness, todos, projects, posts, resume] = await Promise.all([
+        User.findById(userId).select("-password -googleId -__v").lean(),
+        Fitness.find({ user: userId }).sort({ date: -1 }).select("-photos -__v -user").lean(),
+        Todo.find({ user: userId }).sort({ date: -1 }).select("-__v -user").lean(),
+        Project.find({ user: userId }).select("-__v -user").lean(),
+        Post.find({ user: userId }).sort({ date: -1 }).select("title tags date summary content").lean(),
+        Resume.findOne({ user: userId }).lean()
+      ]);
+  
+      // 内容截断处理
+      const processedPosts = posts.map(p => ({
+        ...p,
+        content: p.content ? p.content.substring(0, 500) + "..." : ""
+      }));
+  
+      const contextData = {
+        UserProfile: userProfile,
+        FitnessRecords: fitness,
+        Todos: todos,
+        Projects: projects,
+        Blogs: processedPosts,
+        Resume: resume
+      };
+  
+      // 3. 构建 Prompt (逻辑不变)
+      let fullPrompt = `
+        你是一个拥有用户【全量第二大脑数据】的智能助手。
+        
+        【你的知识库 (用户的真实历史)】：
+        ${JSON.stringify(contextData)}
+  
+        【💡 核心指令 - 请严格遵守】：
+        请先**判断**用户的当前问题是否与【个人数据】相关：
+  
+        👉 **情况 A：如果用户问的是关于自己的事**
+        (例如："我最近练得咋样？", "我去年那个项目叫啥？", "帮我总结一下我的博客")
+        - 请**务必**深入分析上述【知识库】数据。
+        - 引用具体的数据点（日期、数值、项目名）来支持你的回答。
+  
+        👉 **情况 B：如果用户问的是通用知识/闲聊/无关话题**
+        (例如："如何用 Python 写爬虫？", "讲个笑话", "西红柿炒鸡蛋怎么做？")
+        - 请**完全忽略**上述【知识库】中的个人数据。
+        - 直接作为一个博学的 AI 助手正常回答即可。
+  
+        【用户当前问题】：
+        ${prompt}
+      `;
+  
+      if (history && Array.isArray(history)) {
+        fullPrompt += "\n\n【历史对话参考】:\n";
+        history.slice(-6).forEach(h => {
+          fullPrompt += `${h.role === 'user' ? 'User' : 'AI'}: ${h.content}\n`;
+        });
+      }
+  
+      // 🔥 4. 使用 utils/aiProvider.js 提供的流式工具
+      // 这里不再直接调用 ai.models.generateContentStream，而是用封装好的
+      const stream = await generateStream(fullPrompt);
+  
+      // 🔥 5. 遍历流并响应
+      for await (const chunk of stream) {
+        const chunkText = chunk.text();
+        if (chunkText) {
+          res.write(chunkText);
+        }
+      }
+  
+      res.end();
+  
+    } catch (err) {
+      console.error("God Mode Error:", err);
+      if (!res.headersSent) res.status(500).json({ msg: "AI 生成失败" });
+      else res.write("\n[生成中断，请重试]");
+      res.end();
+    }
+  });
 
 module.exports = router;

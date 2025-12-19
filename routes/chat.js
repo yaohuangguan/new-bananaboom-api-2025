@@ -116,5 +116,95 @@ router.get("/private/:targetUserId", auth, async (req, res) => {
     res.status(500).json({ msg: "Server Error" });
   }
 });
+
+// ==========================================
+// 🔥🔥🔥 新增：AI 专属聊天接口
+// ==========================================
+
+/**
+ * 1. 获取 AI 历史记录
+ * @route   GET /api/chat/ai
+ * @desc    获取当前用户与 AI 的对话历史
+ */
+router.get("/ai", auth, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const skip = (page - 1) * limit;
+
+    // 定义专属房间名: ai_session_用户ID
+    // 这样每个人的 AI 聊天记录都是独立的
+    const aiRoomName = `ai_session_${userId}`;
+
+    const messages = await Chat.find({ room: aiRoomName })
+      .sort({ createdDate: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    // AI 记录不需要 populate，因为 AI 不是 User 表里的真实用户
+    // 我们直接返回即可
+    res.json(messages.reverse());
+
+  } catch (err) {
+    console.error("获取AI记录失败:", err);
+    res.status(500).json({ msg: "Server Error" });
+  }
+});
+
+/**
+ * 2. 保存 AI 消息 (供前端或 AI 接口调用)
+ * @route   POST /api/chat/ai/save
+ * @desc    保存一条消息到 AI 历史 (用户发的 OR AI发的)
+ * @body    { text: "你好", role: "user" | "ai" }
+ */
+router.post("/ai/save", auth, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { text, role } = req.body; // role 决定是谁发的
+
+    if (!text) return res.status(400).json({ msg: "内容不能为空" });
+
+    const aiRoomName = `ai_session_${userId}`;
+    
+    // 构造消息对象
+    // 注意：AI 没有真实 ID，我们用字符串 'ai_assistant' 标记
+    const userObj = role === 'user' 
+      ? { id: userId, displayName: req.user.name || '我', photoURL: req.user.avatar } 
+      : { id: 'ai_assistant', displayName: 'Second Brain', photoURL: 'https://cdn-icons-png.flaticon.com/512/4712/4712027.png' };
+
+    const newMsg = new Chat({
+      room: aiRoomName,
+      user: userObj,
+      text: text,
+      // 标记这是 AI 对话，方便以后分析
+      toUser: null 
+    });
+
+    await newMsg.save();
+    res.json(newMsg);
+
+  } catch (err) {
+    console.error("保存AI消息失败:", err);
+    res.status(500).json({ msg: "Server Error" });
+  }
+});
+
+/**
+ * 3. 清空 AI 历史 (开启新对话)
+ * @route   DELETE /api/chat/ai
+ */
+router.delete("/ai", auth, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const aiRoomName = `ai_session_${userId}`;
+    
+    await Chat.deleteMany({ room: aiRoomName });
+    
+    res.json({ msg: "AI 对话历史已清空" });
+  } catch (err) {
+    res.status(500).json({ msg: "Server Error" });
+  }
+});
   
-  module.exports = router;
+module.exports = router;
