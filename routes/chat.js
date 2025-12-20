@@ -3,7 +3,12 @@ const router = express.Router();
 const Chat = require("../models/Chat"); // 引用你的 Chat 模型
 const auth = require("../middleware/auth"); // 引用鉴权中间件
 const mongoose = require('mongoose')
+// =========================================================================
+// 🤖 配置区域
+// =========================================================================
 
+// 🔥🔥🔥【重要】请将此处替换为你运行 createBotUser.js 生成的真实 ID 🔥🔥🔥
+const AI_USER_ID = "6946005372b6aea1602bf390";
 
 // ==========================================
 // 🔥🔥🔥 核心修改：只给 Chat 路由加“防缓存”补丁
@@ -133,8 +138,6 @@ router.get("/ai", auth, async (req, res) => {
     const limit = parseInt(req.query.limit) || 20;
     const skip = (page - 1) * limit;
 
-    // 定义专属房间名: ai_session_用户ID
-    // 这样每个人的 AI 聊天记录都是独立的
     const aiRoomName = `ai_session_${userId}`;
 
     const messages = await Chat.find({ room: aiRoomName })
@@ -142,9 +145,22 @@ router.get("/ai", auth, async (req, res) => {
       .skip(skip)
       .limit(limit);
 
-    // AI 记录不需要 populate，因为 AI 不是 User 表里的真实用户
-    // 我们直接返回即可
-    res.json(messages.reverse());
+    // 🔥 数据清洗 / 伪装
+    // 数据库里存的是真实的 AI_USER_ID (为了数据一致性)
+    // 但前端现在的逻辑是判断 if (id === 'ai_assistant')
+    // 所以我们在返回给前端前，把 ID 临时“换皮”换回去
+    const formattedMessages = messages.map(msg => {
+        const m = msg.toObject();
+        
+        // 检查 user 对象是否存在，以及 ID 是否匹配真实机器人 ID
+        if (m.user && m.user.id && m.user.id.toString() === AI_USER_ID) {
+            m.user.id = 'ai_assistant'; // 欺骗前端，保持兼容
+        }
+        return m;
+    });
+
+    // 反转数组，让旧消息在前，新消息在后 (符合聊天窗口习惯)
+    res.json(formattedMessages.reverse());
 
   } catch (err) {
     console.error("获取AI记录失败:", err);
@@ -161,34 +177,53 @@ router.get("/ai", auth, async (req, res) => {
 router.post("/ai/save", auth, async (req, res) => {
   try {
     const userId = req.user.id;
-    // 前端传过来的是 text，我们也兼容一下 content
+    // 兼容前端可能传 text 或 content
     const { text, content, role } = req.body; 
-    
-    // 🔥 确保拿到内容
     const msgContent = text || content;
 
     if (!msgContent) return res.status(400).json({ msg: "内容不能为空" });
 
+    if (AI_USER_ID === "请在这里填入脚本生成的ID") {
+        return res.status(500).json({ msg: "后端配置错误：未设置 AI_USER_ID" });
+    }
+
     const aiRoomName = `ai_session_${userId}`;
     
-    // 构造消息对象
-    const userObj = role === 'user' 
-      ? { id: userId, displayName: req.user.name || '我', photoURL: req.user.avatar } 
-      : { id: 'ai_assistant', displayName: 'Second Brain', photoURL: 'https://cdn-icons-png.flaticon.com/512/4712/4712027.png' };
+    // 🔥 构造 User 对象
+    let userObj;
+
+    if (role === 'user') {
+        // 如果是用户发的
+        userObj = { 
+            id: userId, 
+            displayName: req.user.name || '我', 
+            photoURL: req.user.photoURL || req.user.avatar 
+        };
+    } else {
+        // 如果是 AI 发的 (使用真实 ID 存库)
+        userObj = { 
+            id: AI_USER_ID, 
+            displayName: 'Second Brain', // 这里可以硬编码，也可以去 User 表查
+            photoURL: 'https://cdn-icons-png.flaticon.com/512/4712/4712027.png' 
+        };
+    }
 
     const newMsg = new Chat({
       room: aiRoomName,
       user: userObj,
-      
-      // 🔥🔥🔥 核心修复点在这里 🔥🔥🔥
-      // 你的数据库 Schema 要的是 'content'，不是 'text'
-      content: msgContent, 
-      
+      content: msgContent, // 确保字段名匹配 Schema
       toUser: null 
     });
 
     await newMsg.save();
-    res.json(newMsg);
+    
+    // 🔥 返回给前端时，同样做“换皮”处理
+    const resObj = newMsg.toObject();
+    if (role !== 'user') {
+        resObj.user.id = 'ai_assistant';
+    }
+
+    res.json(resObj);
 
   } catch (err) {
     console.error("保存AI消息失败:", err);
@@ -212,5 +247,4 @@ router.delete("/ai", auth, async (req, res) => {
     res.status(500).json({ msg: "Server Error" });
   }
 });
-  
 module.exports = router;

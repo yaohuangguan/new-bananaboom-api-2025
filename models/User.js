@@ -44,7 +44,18 @@ const UserSchema = mongoose.Schema({
     type: String, 
     enum: ['cut', 'bulk', 'maintain'], 
     default: 'maintain' 
-  }
+  },
+  // 🔥🔥🔥 新增：角色权限控制
+  // user: 普通用户
+  // admin: 管理员 (可以管理普通用户)
+  // super_admin: 超级管理员 (就是 VIP，拥有最高权限)
+  // bot: 机器人 (给 AI 预留，防止以后跟真人逻辑混淆)
+  role: {
+    type: String,
+    enum: ['user', 'admin', 'super_admin', 'bot'],
+    default: 'user', // 默认注册进来都是普通用户
+    required: true   // 建议设为必填，配合 default 使用
+  },
 });
 
 module.exports = mongoose.model("users", UserSchema);
