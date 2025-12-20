@@ -69,15 +69,16 @@ const toolsSchema = [{
                         enum: ["todo", "in_progress", "done"],
                         description: "初始状态，默认为 todo (想做/未开始)"
                     },
-                    // 🔥 新增参数
-                    recurrence: {
-                        type: "STRING",
-                        description: "Standard Cron expression for recurring tasks. Examples: '0 * * * *' (hourly), '0 9-21 * * *' (hourly 9am-9pm), '0 9 * * *' (daily at 9am). ONLY set this if user asks for recurring/repeating reminders."
-                    },
+                    // 🔥 新增：任务类型
                     type: {
                         type: "STRING",
                         enum: ["wish", "routine"],
-                        description: "Set to 'routine' if it's a recurring reminder/habit. Set to 'wish' for standard goals."
+                        description: "任务类型。'routine' 用于每日/每周的重复性习惯（如喝水、健身）；'wish' 用于一次性任务或心愿（如看电影、旅行）。默认为 'wish'。"
+                    },
+                    // 🔥 新增：循环规则 (Cron)
+                    recurrence: {
+                        type: "STRING",
+                        description: "【仅针对 routine 类型】标准的 Cron 表达式。例如：每天='0 0 * * *'，每小时='0 * * * *'，每周一='0 0 * * 1'。如果是一次性任务，此字段留空。"
                     },
                     // 🔥 新增：提醒时间 (Bark 推送的关键)
                     remindAt: {
@@ -168,25 +169,25 @@ const toolsSchema = [{
             }
         },
         // -----------------------------------------------------
-      // ✅ 工具 E: 更新用户设置 (换时区/改称呼等)
-      // -----------------------------------------------------
-      {
-        name: "update_user_settings",
-        description: "更新用户的个人设置，比如所在时区、昵称等。当用户说'我到东京了'、'修改时区为纽约'、'以后叫我老大'时调用。",
-        parameters: {
-          type: "OBJECT",
-          properties: {
-            timezone: {
-              type: "STRING",
-              description: "IANA Timezone format (e.g., 'Asia/Tokyo', 'America/New_York', 'Europe/London'). Inference this from user's location name."
-            },
-            displayName: {
-              type: "STRING",
-              description: "New display name if user wants to change it."
+        // ✅ 工具 E: 更新用户设置 (换时区/改称呼等)
+        // -----------------------------------------------------
+        {
+            name: "update_user_settings",
+            description: "更新用户的个人设置，比如所在时区、昵称等。当用户说'我到东京了'、'修改时区为纽约'、'以后叫我老大'时调用。",
+            parameters: {
+                type: "OBJECT",
+                properties: {
+                    timezone: {
+                        type: "STRING",
+                        description: "IANA Timezone format (e.g., 'Asia/Tokyo', 'America/New_York', 'Europe/London'). Inference this from user's location name."
+                    },
+                    displayName: {
+                        type: "STRING",
+                        description: "New display name if user wants to change it."
+                    }
+                }
             }
-          }
         }
-      }
     ]
 }];
 
@@ -271,72 +272,88 @@ const functions = {
     /**
      * ✅ 添加待办 (适配你的新 Schema)
      */
-    async add_todo({
+    add_todo: async ({
         title,
-        detail = "",
-        status = "todo"
-    }, userId) {
+        detail,
+        status,
+        remindAt,
+        targetDate,
+        type,
+        recurrence
+    }, {
+        user
+    }) => {
         try {
-            const now = new Date();
+            // 1. 默认值处理
+            // 如果 AI 没传 type，默认为 'wish'
+            // 如果 AI 没传 recurrence，默认为 null
+            const finalType = type || 'wish';
+            const finalRecurrence = recurrence || null;
 
             const newTodo = new Todo({
-                // 核心字段
-                user: userId, // ⚠️ 确保你的 Todo Schema 里有 user 字段关联，如果没有，请确认如何关联用户
-                todo: title, // 对应 Schema 的 todo
-                description: detail, // 对应 Schema 的 description
-                status: status,
+                user: user._id, // 绑定当前用户
+                todo: title,
+                description: detail,
+                status: status || 'todo',
+                remindAt: remindAt ? new Date(remindAt) : undefined,
+                targetDate: targetDate ? new Date(targetDate) : undefined,
 
-                // 兼容旧字段 (Legacy Support)
-                done: false,
-                create_date: now.toLocaleDateString(), // e.g. "12/20/2025"
-                timestamp: Date.now().toString(),
-
-                // 其他字段
-                order: 0,
-                images: []
+                // 🔥 核心修改：存入这两个字段
+                type: finalType,
+                recurrence: finalRecurrence
             });
 
             await newTodo.save();
+
             return {
                 success: true,
-                message: `已添加任务: "${title}"`
+                msg: `已创建任务: "${title}"`,
+                type: finalType,
+                is_recurring: !!finalRecurrence
             };
-        } catch (e) {
-            console.error(e);
+
+        } catch (err) {
             return {
-                success: false,
-                message: "添加任务失败: " + e.message
+                error: `创建失败: ${err.message}`
             };
         }
     },
 
-    delete_todo: async ({ id }) => {
+    delete_todo: async ({
+        id
+    }) => {
         console.log(`🗑️ [Agent Action] Deleting Todo ID: ${id}`);
-        
+
         if (!id) {
-          return { error: "无法删除：缺少任务 ID。请先查询任务列表获取 ID。" };
+            return {
+                error: "无法删除：缺少任务 ID。请先查询任务列表获取 ID。"
+            };
         }
-  
+
         try {
-          // 执行删除
-          const deletedTodo = await Todo.findByIdAndDelete(id);
-  
-          if (!deletedTodo) {
-            return { error: "删除失败：找不到该 ID 的任务，可能已经被删除了。" };
-          }
-  
-          return { 
-            success: true, 
-            message: `已成功删除任务："${deletedTodo.todo}"`,
-            deleted_id: deletedTodo._id
-          };
-  
+            // 执行删除
+            const deletedTodo = await Todo.findByIdAndDelete(id);
+
+            if (!deletedTodo) {
+                return {
+                    error: "删除失败：找不到该 ID 的任务，可能已经被删除了。"
+                };
+            }
+
+            return {
+                success: true,
+                message: `已成功删除任务："${deletedTodo.todo}"`,
+                deleted_id: deletedTodo._id
+            };
+
         } catch (err) {
-          console.error("❌ Delete Todo Error:", err);
-          return { error: `数据库错误: ${err.message}` };
+            console.error("❌ Delete Todo Error:", err);
+            return {
+                error: `数据库错误: ${err.message}`
+            };
         }
-      },
-      
+    },
+
 
     /**
      * 记录运动
@@ -428,36 +445,50 @@ const functions = {
         }
     },
     // 在 functionsMap 中添加：
-    update_user_settings: async ({ timezone, displayName }, { user }) => {
+    update_user_settings: async ({
+        timezone,
+        displayName
+    }, {
+        user
+    }) => {
         // 注意：这里需要传入 user 对象（从 req.user 获取）
         // 如果你的 createAgentStream 里没有透传 user，需要改一下传参逻辑
         // 或者直接根据 user.id 查库
-        
+
         try {
-          const updateData = {};
-          let msg = [];
-  
-          if (timezone) {
-            updateData.timezone = timezone;
-            msg.push(`时区已切换为 ${timezone}`);
-          }
-          if (displayName) {
-            updateData.displayName = displayName;
-            msg.push(`昵称已改为 ${displayName}`);
-          }
-  
-          if (Object.keys(updateData).length === 0) {
-            return { error: "没有检测到需要修改的设置" };
-          }
-  
-          await User.findByIdAndUpdate(user._id, { $set: updateData });
-  
-          return { success: true, message: msg.join("，") + "。时间计算将立即生效。" };
-  
+            const updateData = {};
+            let msg = [];
+
+            if (timezone) {
+                updateData.timezone = timezone;
+                msg.push(`时区已切换为 ${timezone}`);
+            }
+            if (displayName) {
+                updateData.displayName = displayName;
+                msg.push(`昵称已改为 ${displayName}`);
+            }
+
+            if (Object.keys(updateData).length === 0) {
+                return {
+                    error: "没有检测到需要修改的设置"
+                };
+            }
+
+            await User.findByIdAndUpdate(user._id, {
+                $set: updateData
+            });
+
+            return {
+                success: true,
+                message: msg.join("，") + "。时间计算将立即生效。"
+            };
+
         } catch (err) {
-          return { error: `更新失败: ${err.message}` };
+            return {
+                error: `更新失败: ${err.message}`
+            };
         }
-      },
+    },
 };
 
 module.exports = {
