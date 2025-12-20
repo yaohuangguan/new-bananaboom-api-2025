@@ -222,7 +222,8 @@ router.post(
           name: user.displayName,
           email: user.email,
           photoURL: user.photoURL || "",
-          vip: false
+          vip: false,
+          role: 'user'
         }
       };
 
@@ -288,7 +289,8 @@ router.post(
           name: user.displayName,
           email: user.email,
           photoURL: user.photoURL,
-          vip: user.vip
+          vip: user.vip,
+          role: user.role // 🔥🔥🔥 必须加上这一行！🔥🔥🔥
         }
       };
 
