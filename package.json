@@ -15,6 +15,7 @@
     "cloudinary": "^2.8.0",
     "compression": "^1.7.4",
     "cors": "^2.8.5",
+    "cron-parser": "^5.4.0",
     "dayjs": "^1.11.19",
     "delete": "^1.1.0",
     "dotenv": "^17.2.3",
@@ -46,7 +47,7 @@
     "start": "node --experimental-specifier-resolution=node index.js",
     "dev": "nodemon index.js --use-strict",
     "test": "jest",
-    "bark":"node ./utils/updateBark.js",
+    "bark": "node ./utils/updateBark.js",
     "prepare": "husky install"
   },
   "author": "samyao",

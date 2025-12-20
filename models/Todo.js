@@ -35,7 +35,17 @@ const TodoSchema = new Schema({
   // 是否已经通知过 (防止重复推送)
   isNotified: { type: Boolean, default: false },
 
-  order: { type: Number, default: 0 }
+  order: { type: Number, default: 0 },
+  // 🔥 新增：循环规则 (Cron 格式)
+  // 例如: "0 * * * *" (每小时), "0 9-21 * * *" (早9晚9每小时), "0 8 * * 1" (每周一早8点)
+  recurrence: { type: String, default: null },
+
+  // 🔥 新增：任务类型 (区分 愿望 vs 例行提醒)
+  type: { 
+    type: String, 
+    enum: ['wish', 'routine'], 
+    default: 'wish' 
+  }
 }, { timestamps: true });
 
 module.exports = mongoose.model("todos", TodoSchema);
