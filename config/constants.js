@@ -7,6 +7,10 @@ const PERM_KEYS = {
   
     // --- 私域门票 ---
     PRIVATE_ACCESS: 'private_domain:access',
+
+    //私域日志
+    PRIVATE_POST_USE:'private_post:use',
+    PRIVATE_POST_READ:'private_post:read',
   
     // --- 第二大脑 ---
     BRAIN_USE: 'brain:use',

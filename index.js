@@ -73,7 +73,7 @@ app.use("/api/footprints", require("./routes/footprint"));
 app.use("/api/menu", require("./routes/menu"));
 app.use("/api/external", require("./routes/external"));
 app.use("/api/ai", require("./routes/ai"));
-
+app.use("/api/permission-requests", require("./routes/permissionRequest"));
 //port
 const PORT = process.env.PORT || 5000;
 
