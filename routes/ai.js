@@ -13,6 +13,7 @@ const {
   createAgentStream
 } = require("../utils/aiProvider");
 const K = require('../config/constants');
+const { PERIOD_COLORS } = require('../config/periodConstants')
 // 引入所有数据模型 (根据你实际的文件路径调整)
 const User = require("../models/User");
 const Fitness = require("../models/Fitness");
