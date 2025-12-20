@@ -1,6 +1,12 @@
 const mongoose = require("mongoose");
 
 const PeriodSchema = mongoose.Schema({
+  // 🔥 新增：绑定所属用户
+  user: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'users',
+    required: true // 加上 required，保证以后数据都有主
+  },
   // 记录是谁操作的 (用于审计日志，不再用于数据隔离)
   operator: {
     type: mongoose.Schema.Types.ObjectId,
@@ -20,7 +26,7 @@ const PeriodSchema = mongoose.Schema({
   note: { type: String, default: "" }
 }, { timestamps: true });
 
-// 索引改了：不再需要按 user 索引，直接按 startDate 排序
-PeriodSchema.index({ startDate: -1 });
+// 🔥 优化索引：通常是查“某个用户”的“最近记录”
+PeriodSchema.index({ user: 1, startDate: -1 });
 
 module.exports = mongoose.model("period", PeriodSchema);

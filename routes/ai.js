@@ -20,6 +20,7 @@ const Todo = require("../models/Todo");
 const Project = require("../models/Project");
 const Post = require("../models/Post");
 const Resume = require("../models/Resume");
+const Period = require("../models/Period");
 const systemCache = require("../cache/memoryCache");
 // 建议加上 auth 中间件
 router.use(auth);
@@ -77,13 +78,17 @@ router.post("/ask-life/stream", auth, checkPermission(K.BRAIN_USE), async (req, 
       console.log(`🐢 [Cache Miss] 正在全量加载第二大脑数据...`);
       
       // 并行查询所有数据
-      const [userProfile, fitness, todos, projects, posts, resume] = await Promise.all([
+      const [userProfile, fitness, todos, projects, posts, resume, periods] = await Promise.all([
         User.findById(userId).select("-password -googleId -__v").lean(),
         Fitness.find({ user: userId }).sort({ date: -1 }).limit(30).select("-photos -__v -user").lean(),
         Todo.find({ user: userId }).sort({ date: -1 }).select("-__v -user").lean(),
-        Project.find({ user: userId }).select("-__v -user").lean(),
+       // 4. 🔥 项目经历 (全局数据，不查 user)
+        // 既然是你个人的全量项目，直接查所有
+        Project.find({}).select("-__v").lean(),
         Post.find({ user: userId }).sort({ date: -1 }).select("title tags date summary content").lean(),
-        Resume.findOne({ user: userId }).lean()
+        Resume.find({}).lean(),
+        // 查最近 12 次记录，足够 AI 分析周期规律了
+        Period.find({ user: userId }).sort({ startDate: -1 }).limit(12).select("-__v -user").lean()
       ]);
 
       // 截断过长的博客内容，防止 Token 爆炸
@@ -98,7 +103,8 @@ router.post("/ask-life/stream", auth, checkPermission(K.BRAIN_USE), async (req, 
         Todos: todos,
         Projects: projects,
         Blogs: processedPosts,
-        Resume: resume
+        Resume: resume,
+        PeriodRecords: periods
       };
 
       // 存入缓存，过期时间 1 小时 (3600秒)
@@ -122,6 +128,11 @@ router.post("/ask-life/stream", auth, checkPermission(K.BRAIN_USE), async (req, 
     3. 如果用户问关于自己的事 (如"我最近练得咋样")，请基于【知识库】回答。
     4. 如果用户问通用知识，忽略个人数据，正常回答。
     5. 回复风格：像个老朋友，幽默、专业、鼓励。
+
+    【生理周期与健康分析】
+    - 你拥有用户的生理周期记录 (PeriodRecords)。
+    - 如果用户询问"我下次什么时候来"或"最近身体不适"，请基于历史数据计算平均周期并进行预测。
+    - 在建议健身计划时，请智能结合生理期状态（例如：经期建议轻量运动，黄体期注意情绪波动）。
 
     【核心原则：主动确认与查重】
       1. **被动执行原则**：

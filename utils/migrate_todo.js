@@ -1,11 +1,11 @@
-// migrate_todos.js
+// migrate_periods.js
 require("dotenv").config();
 const mongoose = require("mongoose");
 const readline = require("readline");
 
 // 引入模型
 const User = require("../models/User");
-const Todo = require("../models/Todo");
+const Period = require("../models/Period");
 
 const rl = readline.createInterface({
   input: process.stdin,
@@ -22,47 +22,45 @@ async function main() {
     await mongoose.connect(process.env.MONGO_URI);
     console.log("✅ 数据库已连接");
 
-    // 1. 统计有多少旧数据
-    const orphanCount = await Todo.countDocuments({
-      $or: [{ user: { $exists: false } }, { user: null }]
-    });
+    // 1. 查找所有没有绑定用户的 Period
+    // 注意：因为刚才 Schema 加了 user 字段但数据库里还没有，所以查 user不存在的记录
+    const query = { user: { $exists: false } };
+    const orphanCount = await Period.countDocuments(query);
 
     if (orphanCount === 0) {
-      console.log("🎉 恭喜！你的数据库很干净，没有无主任务。无需迁移。");
+      console.log("🎉 所有生理期记录都有主人了，无需迁移。");
       process.exit(0);
     }
 
-    console.log(`⚠️  发现 [${orphanCount}] 条无主任务 (旧数据)。`);
-    console.log("🚀 准备开始迁移...");
+    console.log(`⚠️  发现 [${orphanCount}] 条未绑定的生理期记录。`);
+    console.log("💡 因为目前只有老婆用过，我们将全部划拨给指定账户。");
 
-    // 2. 询问新主人是谁
-    const email = await askQuestion("请输入要接收这些数据的用户邮箱 (Email): ");
-    
+    // 2. 获取老婆账户
+    const email = await askQuestion("👩 请输入老婆账户的邮箱 (Email): ");
     const targetUser = await User.findOne({ email: email.trim() });
+    
     if (!targetUser) {
       console.error(`❌ 未找到邮箱为 ${email} 的用户！`);
       process.exit(1);
     }
 
-    console.log(`👤 目标用户: ${targetUser.displayName} (${targetUser._id})`);
+    console.log(`✅ 锁定目标: ${targetUser.displayName} (${targetUser._id})`);
     
-    const confirm = await askQuestion(`❓ 确定要把这 ${orphanCount} 条任务全部划拨给 ${targetUser.displayName} 吗？(y/n): `);
-    
+    const confirm = await askQuestion(`❓ 确定将这 ${orphanCount} 条记录全部过户给她吗？(y/n): `);
     if (confirm.toLowerCase() !== 'y') {
-      console.log("🚫 操作已取消。");
+      console.log("🚫 操作已取消");
       process.exit(0);
     }
 
-    // 3. 执行批量更新
-    const result = await Todo.updateMany(
-      { $or: [{ user: { $exists: false } }, { user: null }] },
+    // 3. 执行更新
+    const result = await Period.updateMany(
+      query,
       { $set: { user: targetUser._id } }
     );
 
     console.log("------------------------------------------------");
     console.log(`🎉 迁移成功！共更新了 ${result.modifiedCount} 条数据。`);
-    console.log(`✅ 现在所有旧任务都属于 [${targetUser.displayName}] 了。`);
-    console.log("💡 前端刷新页面，应该就能正常显示且不会报错了。");
+    console.log(`✅ 现在这些数据归 [${targetUser.displayName}] 独有了。`);
 
   } catch (err) {
     console.error("❌ 发生错误:", err);
