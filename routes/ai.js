@@ -295,7 +295,7 @@ router.post("/ask-life/stream", auth, async (req, res) => {
   
       // 🔥 5. 遍历流并响应
       for await (const chunk of stream) {
-        const chunkText = chunk.text();
+        const chunkText = chunk.text;
         if (chunkText) {
           res.write(chunkText);
         }

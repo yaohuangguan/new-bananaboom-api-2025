@@ -140,62 +140,51 @@ function formatInput(input) {
 }
 
 /**
- * 🌊 流式生成工具 (最终稳定版)
- * @param {string | Array} prompt - 提示词
+ * 🌊 流式生成工具 (Final Version)
+ * @param {string | Array} promptInput - 提示词或对话数组
+ * @returns {Promise<AsyncGenerator>} - 返回可迭代的流对象
  */
-async function generateStream(prompt) {
+async function generateStream(promptInput) {
   let currentModel = CONFIG.PRIMARY_MODEL;
-  
-  // 1. 格式化输入
-  const formattedContents = formatInput(prompt);
+
+  // 格式化输入：虽然文档说支持 string，但包装成对象最稳妥
+  const formattedContents = typeof promptInput === 'string'
+    ? { role: 'user', parts: [{ text: promptInput }] }
+    : promptInput; // 如果已经是数组直接用
 
   try {
-    console.log(`🌊 [AI Stream] Attempting: ${currentModel}`);
+    console.log(`🌊 [AI Stream] Attempting model: ${currentModel}`);
 
-    // 2. 调用 SDK (注意：新版 SDK 传参结构)
-    const result = await ai.models.generateContentStream({
+    // 🔥 调用新版 SDK
+    // 注意：generateContentStream 返回的 response 本身就是 async iterable
+    const response = await ai.models.generateContentStream({
       model: currentModel,
       contents: formattedContents,
       config: {
-        // 可选：限制一下输出 Token，防止它没完没了说太多
-        // maxOutputTokens: 8192, 
+        // 可选配置
+        // maxOutputTokens: 8192,
       }
     });
 
-    // 3. 🔥 核心修复：防御性检查返回值
-    // 有时候 result 本身是 stream，有时候 result.stream 才是
-    if (result && result.stream) {
-      return result.stream;
-    } else if (result && result[Symbol.asyncIterator]) {
-      // 说明 result 本身就是个可迭代对象
-      return result;
-    } else {
-      // 打印出来看看是啥，方便调试
-      console.error("❌ [AI Stream Error] Unexpected result structure:", result);
-      throw new Error("SDK 返回结果不包含流数据");
-    }
+    // 这里直接返回 response 对象即可，因为它实现了 [Symbol.asyncIterator]
+    return response;
 
   } catch (err) {
     console.error(`⚠️ [AI Stream Error] ${currentModel} failed:`, err.message);
 
-    // 4. 自动降级逻辑 (Fallback)
+    // --- 自动降级逻辑 ---
     if (currentModel !== CONFIG.FALLBACK_MODEL) {
       console.warn(`🔄 [AI Stream Fallback] Switching to ${CONFIG.FALLBACK_MODEL}...`);
       try {
-        const fallbackResult = await ai.models.generateContentStream({
+        const fallbackResponse = await ai.models.generateContentStream({
           model: CONFIG.FALLBACK_MODEL,
           contents: formattedContents,
         });
-        
-        if (fallbackResult.stream) return fallbackResult.stream;
-        if (fallbackResult[Symbol.asyncIterator]) return fallbackResult;
-        
-        throw new Error("Fallback response also invalid");
+        return fallbackResponse;
       } catch (fallbackErr) {
         throw new Error(`AI Stream All Failed: ${fallbackErr.message}`);
       }
     }
-    
     throw err;
   }
 }
