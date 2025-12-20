@@ -185,30 +185,44 @@ async function* createAgentStream(params) {
 }
 
 /**
- * 🕵️ 内部核心逻辑：Agent 循环 (基于 ai.chats.create)
+ * 🕵️ 内部核心逻辑：Agent 循环
  */
 async function* _runAgentLoop(modelName, { systemInstruction, history, prompt, toolsSchema, functionsMap }) {
   
-  // 1. 创建 Chat 会话 (新版 SDK 方式)
-  // 文档指引: 使用 ai.chats.create({ model, config: { tools: ... } })
+  // 🔥🔥🔥 核心修复：智能处理 tools 格式 (防止双重包装) 🔥🔥🔥
+  let finalTools = undefined;
+  
+  if (toolsSchema) {
+    // 检查 1: 是否已经是标准的 [{ functionDeclarations: [...] }] 格式
+    const isAlreadyWrapped = Array.isArray(toolsSchema) && 
+                             toolsSchema.length > 0 && 
+                             toolsSchema[0].functionDeclarations;
+
+    if (isAlreadyWrapped) {
+      // 如果调用方已经包装好了，直接用
+      finalTools = toolsSchema;
+    } else if (Array.isArray(toolsSchema)) {
+      // 如果只是纯函数定义的数组，我们帮它包装
+      finalTools = [{ functionDeclarations: toolsSchema }];
+    }
+  }
+
+  // 1. 创建 Chat 会话
   const chat = ai.chats.create({
     model: modelName,
     history: history || [],
     config: {
       systemInstruction: systemInstruction,
-      // 注入工具定义: 格式必须是 [{ functionDeclarations: [...] }]
-      tools: toolsSchema ? [{ functionDeclarations: toolsSchema }] : undefined,
+      tools: finalTools, // ✅ 使用处理过的 tools
       maxOutputTokens: 8192,
     }
   });
 
-  // 2. 发送用户 Prompt (开启第一段流)
-  // 文档指引: chat.sendMessageStream({ message: ... })
+  // 2. 发送用户 Prompt
   let resultStream = await chat.sendMessageStream({ 
     message: prompt 
   });
 
-  // 临时状态
   let functionCallFound = false;
   let functionCallsToExecute = [];
 
@@ -217,7 +231,6 @@ async function* _runAgentLoop(modelName, { systemInstruction, history, prompt, t
   // =================================================
   for await (const chunk of resultStream) {
     // A. 检查函数调用
-    // 新版 SDK chunk.functionCalls 可能是一个 getter 或者是数组
     const calls = chunk.functionCalls; 
     
     if (calls && calls.length > 0) {
@@ -259,22 +272,17 @@ async function* _runAgentLoop(modelName, { systemInstruction, history, prompt, t
         toolResult = { error: `Function ${funcName} not found on server` };
       }
 
-      // 构造 Gemini 需要的 FunctionResponse 格式
-      // 新版 SDK 通常期望的格式:
-      // { functionResponse: { name: string, response: object } }
       functionResponsesParts.push({
         functionResponse: {
           name: funcName,
-          response: { content: toolResult } // 建议包一层 content 或者是 result
+          response: { content: toolResult } 
         }
       });
     }
 
-    // 2. 将执行结果发回给 AI (开启第二段流)
+    // 2. 将执行结果发回给 AI
     console.log(`📤 [Agent Output] Sending ${functionResponsesParts.length} tool results back...`);
     
-    // 新版 SDK: 直接将 part 数组作为 message 发送
-    // 这里不需要指定 role: 'function'，SDK 会根据 parts 类型自动推断，或者我们可以显式构造
     const result2 = await chat.sendMessageStream({
       message: functionResponsesParts
     });
