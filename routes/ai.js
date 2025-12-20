@@ -24,23 +24,28 @@ const Resume = require("../models/Resume");
 router.use(auth);
 
 
+// 引入 Day.js 处理时区
+const dayjs = require('dayjs');
+const utc = require('dayjs/plugin/utc');
+const timezone = require('dayjs/plugin/timezone');
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
+
 /**
  * =================================================================
- * 🧠 第二大脑 (God Mode - 智能判断 + 流式 + 全量数据)
+ * 🧠 第二大脑 (God Mode - 全量数据 + 1小时缓存 + 智能时区)
  * =================================================================
  * @route   POST /api/ai/ask-life/stream
- * @desc    读取用户 Fitness, Todo, Project, Post, Resume 所有数据进行回答
  */
 router.post("/ask-life/stream", auth, checkPermission(K.BRAIN_USE), async (req, res) => {
-  const {
-    prompt,
-    history
-  } = req.body;
-  const userId = req.user.id;
+  const { prompt, history } = req.body;
+  
+  // 1. 获取当前用户对象
+  const currentUser = req.user; 
+  const userId = currentUser.id;
 
-  if (!prompt) return res.status(400).json({
-    msg: "请说话"
-  });
+  if (!prompt) return res.status(400).json({ msg: "请说话" });
 
   // 设置流式响应头
   res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
@@ -49,55 +54,63 @@ router.post("/ask-life/stream", auth, checkPermission(K.BRAIN_USE), async (req, 
 
   try {
     // ==========================================
-    // 1. 准备全量数据 (God Mode Context)
+    // 2. 智能时间计算 (Day.js)
     // ==========================================
-    // 这里保留你原有的逻辑，把所有数据查出来
-    const [userProfile, fitness, todos, projects, posts, resume] = await Promise.all([
-      User.findById(userId).select("-password -googleId -__v").lean(),
-      Fitness.find({
-        user: userId
-      }).sort({
-        date: -1
-      }).limit(30).select("-photos -__v -user").lean(),
-      Todo.find({
-        user: userId
-      }).sort({
-        date: -1
-      }).select("-__v -user").lean(),
-      Project.find({
-        user: userId
-      }).select("-__v -user").lean(),
-      Post.find({
-        user: userId
-      }).sort({
-        date: -1
-      }).select("title tags date summary content").lean(),
-      Resume.findOne({
-        user: userId
-      }).lean()
-    ]);
-
-    // 截断过长的博客内容，防止 Token 爆炸
-    const processedPosts = posts.map(p => ({
-      ...p,
-      content: p.content ? p.content.substring(0, 500) + "..." : ""
-    }));
-
-    const contextData = {
-      UserProfile: userProfile,
-      FitnessRecords: fitness,
-      Todos: todos,
-      Projects: projects,
-      Blogs: processedPosts,
-      Resume: resume
-    };
+    const userTimezone = currentUser.timezone || "Asia/Shanghai";
+    
+    const nowObj = dayjs().tz(userTimezone);
+    const userLocalTime = nowObj.format("YYYY-MM-DD HH:mm:ss");
+    const userDate = nowObj.format("YYYY-MM-DD");
+    const weekDayMap = ["日", "一", "二", "三", "四", "五", "六"];
+    const currentWeekDay = weekDayMap[nowObj.day()];
 
     // ==========================================
-    // 2. 构建系统提示词 (System Instruction)
+    // 3. 准备全量数据 (优先查缓存)
+    // ==========================================
+    const cacheKey = `user_context_${userId}`;
+    let contextData = systemCache.get(cacheKey);
+
+    if (contextData) {
+      console.log(`📦 [Cache Hit] 命中缓存 (User: ${currentUser.displayName})`);
+    } else {
+      console.log(`🐢 [Cache Miss] 正在全量加载第二大脑数据...`);
+      
+      // 并行查询所有数据
+      const [userProfile, fitness, todos, projects, posts, resume] = await Promise.all([
+        User.findById(userId).select("-password -googleId -__v").lean(),
+        Fitness.find({ user: userId }).sort({ date: -1 }).limit(30).select("-photos -__v -user").lean(),
+        Todo.find({ user: userId }).sort({ date: -1 }).select("-__v -user").lean(),
+        Project.find({ user: userId }).select("-__v -user").lean(),
+        Post.find({ user: userId }).sort({ date: -1 }).select("title tags date summary content").lean(),
+        Resume.findOne({ user: userId }).lean()
+      ]);
+
+      // 截断过长的博客内容，防止 Token 爆炸
+      const processedPosts = posts.map(p => ({
+        ...p,
+        content: p.content ? p.content.substring(0, 500) + "..." : ""
+      }));
+
+      contextData = {
+        UserProfile: userProfile,
+        FitnessRecords: fitness,
+        Todos: todos,
+        Projects: projects,
+        Blogs: processedPosts,
+        Resume: resume
+      };
+
+      // 存入缓存，过期时间 1 小时 (3600秒)
+      systemCache.set(cacheKey, contextData, 3600);
+    }
+
+    // ==========================================
+    // 4. 构建系统提示词 (System Instruction)
     // ==========================================
     const systemInstruction = `
     你是一个拥有用户【全量第二大脑数据】的智能私人助理。
-    当前日期: ${new Date().toISOString().split('T')[0]}
+    当前用户时区: ${userTimezone}
+    当前本地日期: ${userDate} (星期${currentWeekDay})
 
     【你的知识库】
     ${JSON.stringify(contextData)}
@@ -122,58 +135,55 @@ router.post("/ask-life/stream", auth, checkPermission(K.BRAIN_USE), async (req, 
 
       3. **智能上下文理解**：
         - 用户说“行，你怎么提醒我呢” -> 这是一个关于“提醒方式”的询问，**不是**让你再创建一个“阿凡达”任务。你应该解释提醒机制，而不是调用工具。
+        
       【关于时间和提醒】
-      1. **当前时间**：${new Date().toISOString()} (请根据此时间计算相对时间)。
+      1. **当前用户本地时间**：${userLocalTime}。
+         - ⚠️ 极其重要：当用户说“5分钟后提醒我”或“明晚8点”时，你**必须**基于上述 [${userLocalTime}] 进行计算，得出准确的 ISO 时间戳。
       2. **通知能力**：你**拥有**向用户发送手机推送(Bark)和网页弹窗的能力。
-        - 当用户说“5分钟后提醒我”时，你**必须**计算出当前时间 + 5分钟后的 ISO 时间戳，并将其传入 add_todo 的 'remindAt' 字段。
+        - **必须**计算出准确的 'remindAt' 时间戳传入 add_todo。
         - **不要**告诉用户你无法通知，直接告诉他们：“好的，会在 xx:xx 给您发送手机提醒”。
 
       【提醒策略】
       - 如果用户只是说“提醒我看电影”，默认设置提醒时间为电影开始前 **30分钟**。
       - 如果是重要行程（如旅行），可以额外创建一个“前一天晚上”的提醒任务。
       - 只要涉及“提醒”，**务必**填写 'remindAt' 字段，否则系统不会触发推送。
-
-      当用户要求删除任务时（如'把喝水提醒删了'），如果当前对话中不知道该任务的 ID，你必须先调用 get_todos 查出 ID，然后再调用 delete_todo。
+      
+      当用户要求删除任务时，如果不知道ID，必须先调用 get_todos 查出 ID，然后再调用 delete_todo。
     `;
 
     // ==========================================
-    // 3. 处理历史记录
+    // 5. 处理历史记录
     // ==========================================
     const geminiHistory = [];
     if (history && Array.isArray(history)) {
       history.slice(-10).forEach(h => {
         geminiHistory.push({
           role: h.role === 'ai' ? 'model' : 'user',
-          parts: [{
-            text: h.content
-          }]
+          parts: [{ text: h.content }]
         });
       });
     }
 
     // ==========================================
-    // 4. 🔥 关键步骤：绑定 userId
+    // 6. 透传 User 对象给工具
     // ==========================================
-    // aiTools.js 里的函数签名是 (args, userId)，但 AI 调用时只会传 args。
-    // 我们在这里创建一个映射，把当前的 userId 预先“注入”进去。
     const boundFunctions = {};
     Object.keys(functions).forEach(funcName => {
-      boundFunctions[funcName] = (args) => functions[funcName](args, userId);
+      // 将当前用户对象注入到每个工具调用的 context 中
+      boundFunctions[funcName] = (args) => functions[funcName](args, { user: currentUser });
     });
 
     // ==========================================
-    // 5. 启动 Agent 流
+    // 7. 启动 Agent 流
     // ==========================================
-    // 调用 utils/aiProvider.js 里封装好的生成器
     const stream = createAgentStream({
       systemInstruction,
       history: geminiHistory,
       prompt,
       toolsSchema,
-      functionsMap: boundFunctions // 传进去已经绑定好用户的函数
+      functionsMap: boundFunctions
     });
 
-    // 遍历生成器，将纯文本推给前端
     for await (const chunkText of stream) {
       res.write(chunkText);
     }

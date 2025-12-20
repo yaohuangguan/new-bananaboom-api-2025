@@ -166,7 +166,27 @@ const toolsSchema = [{
                 },
                 required: ["mood", "dateStr"]
             }
+        },
+        // -----------------------------------------------------
+      // ✅ 工具 E: 更新用户设置 (换时区/改称呼等)
+      // -----------------------------------------------------
+      {
+        name: "update_user_settings",
+        description: "更新用户的个人设置，比如所在时区、昵称等。当用户说'我到东京了'、'修改时区为纽约'、'以后叫我老大'时调用。",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            timezone: {
+              type: "STRING",
+              description: "IANA Timezone format (e.g., 'Asia/Tokyo', 'America/New_York', 'Europe/London'). Inference this from user's location name."
+            },
+            displayName: {
+              type: "STRING",
+              description: "New display name if user wants to change it."
+            }
+          }
         }
+      }
     ]
 }];
 
@@ -316,6 +336,7 @@ const functions = {
           return { error: `数据库错误: ${err.message}` };
         }
       },
+      
 
     /**
      * 记录运动
@@ -405,7 +426,38 @@ const functions = {
                 message: "记录心情失败: " + e.message
             };
         }
-    }
+    },
+    // 在 functionsMap 中添加：
+    update_user_settings: async ({ timezone, displayName }, { user }) => {
+        // 注意：这里需要传入 user 对象（从 req.user 获取）
+        // 如果你的 createAgentStream 里没有透传 user，需要改一下传参逻辑
+        // 或者直接根据 user.id 查库
+        
+        try {
+          const updateData = {};
+          let msg = [];
+  
+          if (timezone) {
+            updateData.timezone = timezone;
+            msg.push(`时区已切换为 ${timezone}`);
+          }
+          if (displayName) {
+            updateData.displayName = displayName;
+            msg.push(`昵称已改为 ${displayName}`);
+          }
+  
+          if (Object.keys(updateData).length === 0) {
+            return { error: "没有检测到需要修改的设置" };
+          }
+  
+          await User.findByIdAndUpdate(user._id, { $set: updateData });
+  
+          return { success: true, message: msg.join("，") + "。时间计算将立即生效。" };
+  
+        } catch (err) {
+          return { error: `更新失败: ${err.message}` };
+        }
+      },
 };
 
 module.exports = {
