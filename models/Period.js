@@ -1,5 +1,7 @@
 const mongoose = require("mongoose");
-const { VALID_COLOR_CODES } = require("../config/periodConstants");
+const {
+  VALID_COLOR_CODES
+} = require("../config/periodConstants");
 
 const PeriodSchema = mongoose.Schema({
   // 🔥 新增：绑定所属用户
