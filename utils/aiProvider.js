@@ -227,7 +227,7 @@ async function* createAgentStream(params) {
 async function* _runAgentLoop(modelName, { systemInstruction, history, prompt, toolsSchema, functionsMap }) {
   
   // 1. 初始化模型实例
-  const model = ai.models.getGenerativeModel({
+  const model = ai.getGenerativeModel({
     model: modelName,
     systemInstruction: systemInstruction,
     tools: toolsSchema, // 注入工具定义
