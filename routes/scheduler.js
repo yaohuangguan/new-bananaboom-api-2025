@@ -27,7 +27,10 @@ router.get("/trigger", async (req, res) => {
       remindAt: { $exists: true, $lte: now },
       isNotified: false,
       status: { $ne: 'done' }
-    }).populate('user'); // 关联用户，为了拿 barkUrl 和 role
+    }).populate({
+        path: 'user',
+        select: 'displayName role email barkUrl' // 👈 这里要把所有需要的字段都列出来，加上 barkUrl
+      });
 
     // 如果没任务，直接返回，节省计算资源
     if (tasksToRemind.length === 0) {

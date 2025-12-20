@@ -46,6 +46,7 @@
     "start": "node --experimental-specifier-resolution=node index.js",
     "dev": "nodemon index.js --use-strict",
     "test": "jest",
+    "bark":"node ./utils/updateBark.js",
     "prepare": "husky install"
   },
   "author": "samyao",
