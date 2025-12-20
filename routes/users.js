@@ -148,20 +148,24 @@ router.post(
       await user.save();
       const payload = {
         user: {
-          id: user.id
+          id: user.id,
+          name: user.displayName,
+          email: user.email,
+          photoURL: user.photoURL || "", // 注册时可能还没有头像
+          vip: false // 注册默认非 VIP
         }
       };
 
       const token = signToken(payload);
       await setToken(token, token);
       logOperation({
-        operatorId: req.user.id,
+        operatorId: user.id, // ❌ 原来是 req.user.id (报错原因)，✅ 改为 user.id (新用户的ID)
         action: "SIGN_UP",
         target: `SIGN UP [${user.displayName}]`,
-        details: {user},
+        details: { user }, // 这里可以直接存 user 对象
         ip: req.ip,
         io: req.app.get('socketio')
-    });
+      });
       sendToken(req, res, token);
     } catch (error) {
       console.log(error);
