@@ -13,7 +13,9 @@ const {
   createAgentStream
 } = require("../utils/aiProvider");
 const K = require('../config/constants');
-const { PERIOD_COLORS } = require('../config/periodConstants')
+const {
+  PERIOD_COLORS
+} = require('../config/periodConstants')
 // 引入所有数据模型 (根据你实际的文件路径调整)
 const User = require("../models/User");
 const Fitness = require("../models/Fitness");
@@ -42,13 +44,18 @@ dayjs.extend(timezone);
  * @route   POST /api/ai/ask-life/stream
  */
 router.post("/ask-life/stream", auth, checkPermission(K.BRAIN_USE), async (req, res) => {
-  const { prompt, history } = req.body;
-  
+  const {
+    prompt,
+    history
+  } = req.body;
+
   // 1. 获取当前用户对象
-  const currentUser = req.user; 
+  const currentUser = req.user;
   const userId = currentUser.id;
 
-  if (!prompt) return res.status(400).json({ msg: "请说话" });
+  if (!prompt) return res.status(400).json({
+    msg: "请说话"
+  });
 
   // 设置流式响应头
   res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
@@ -60,7 +67,7 @@ router.post("/ask-life/stream", auth, checkPermission(K.BRAIN_USE), async (req, 
     // 2. 智能时间计算 (Day.js)
     // ==========================================
     const userTimezone = currentUser.timezone || "Asia/Shanghai";
-    
+
     const nowObj = dayjs().tz(userTimezone);
     const userLocalTime = nowObj.format("YYYY-MM-DD HH:mm:ss");
     const userDate = nowObj.format("YYYY-MM-DD");
@@ -77,19 +84,35 @@ router.post("/ask-life/stream", auth, checkPermission(K.BRAIN_USE), async (req, 
       console.log(`📦 [Cache Hit] 命中缓存 (User: ${currentUser.displayName})`);
     } else {
       console.log(`🐢 [Cache Miss] 正在全量加载第二大脑数据...`);
-      
+
       // 并行查询所有数据
       const [userProfile, fitness, todos, projects, posts, resume, periods] = await Promise.all([
         User.findById(userId).select("-password -googleId -__v").lean(),
-        Fitness.find({ user: userId }).sort({ date: -1 }).limit(30).select("-photos -__v -user").lean(),
-        Todo.find({ user: userId }).sort({ date: -1 }).select("-__v -user").lean(),
-       // 4. 🔥 项目经历 (全局数据，不查 user)
+        Fitness.find({
+          user: userId
+        }).sort({
+          date: -1
+        }).limit(30).select("-photos -__v -user").lean(),
+        Todo.find({
+          user: userId
+        }).sort({
+          date: -1
+        }).select("-__v -user").lean(),
+        // 4. 🔥 项目经历 (全局数据，不查 user)
         // 既然是你个人的全量项目，直接查所有
         Project.find({}).select("-__v").lean(),
-        Post.find({ user: userId }).sort({ date: -1 }).select("title tags date summary content").lean(),
+        Post.find({
+          user: userId
+        }).sort({
+          date: -1
+        }).select("title tags date summary content").lean(),
         Resume.find({}).lean(),
         // 查最近 12 次记录，足够 AI 分析周期规律了
-        Period.find({ user: userId }).sort({ startDate: -1 }).limit(12).select("-__v -user").lean()
+        Period.find({
+          user: userId
+        }).sort({
+          startDate: -1
+        }).limit(12).select("-__v -user").lean()
       ]);
 
       // 截断过长的博客内容，防止 Token 爆炸
@@ -129,6 +152,23 @@ router.post("/ask-life/stream", auth, checkPermission(K.BRAIN_USE), async (req, 
     3. 如果用户问关于自己的事 (如"我最近练得咋样")，请基于【知识库】回答。
     4. 如果用户问通用知识，忽略个人数据，正常回答。
     5. 回复风格：像个老朋友，幽默、专业、鼓励。
+
+    ## 核心原则 (Critical Constraints):
+    1. **去油腻化 (No Flattery)**：禁止过度调侃或在非相关场景下进行煽情。
+    3. **拒绝强行关联 (Avoid Forced Links)**：
+      - 不要每个回复都提及用户的“健身”、“刷脂”或“Soulframe”。
+      - 只有当用户明确询问健身建议或游戏攻略时，才允许提及相关背景。
+      - 严禁在日常琐事中强行植入这些背景信息。
+    4. **决策确认 (Confirmation Logic)**：
+      - 严禁基于几轮对话之前的过时信息自动创建提醒。
+      - 只有当用户在当前语境下明确说“帮我设个提醒”或“十分钟后叫我”时，才能调用 add_todo。
+      - 对“是的”、“好”等模糊回复，若不确定意图，应先询问：“你是需要我为你设置刚才提到的提醒吗？”
+
+## 任务处理逻辑:
+- **喝水/吃药/运动提醒**：必须分类为
+    type: "routine"
+
+- **回复风格**：直接、自然、高效。严禁使用“嘿，勇士”、“正式写入大脑”等过度拟人或中二的词汇。
 
     【生理周期与健康分析】
     - 你拥有用户的生理周期记录 (PeriodRecords)。
@@ -177,7 +217,9 @@ router.post("/ask-life/stream", auth, checkPermission(K.BRAIN_USE), async (req, 
       history.slice(-10).forEach(h => {
         geminiHistory.push({
           role: h.role === 'ai' ? 'model' : 'user',
-          parts: [{ text: h.content }]
+          parts: [{
+            text: h.content
+          }]
         });
       });
     }
@@ -188,7 +230,9 @@ router.post("/ask-life/stream", auth, checkPermission(K.BRAIN_USE), async (req, 
     const boundFunctions = {};
     Object.keys(functions).forEach(funcName => {
       // 将当前用户对象注入到每个工具调用的 context 中
-      boundFunctions[funcName] = (args) => functions[funcName](args, { user: currentUser });
+      boundFunctions[funcName] = (args) => functions[funcName](args, {
+        user: currentUser
+      });
     });
 
     // ==========================================

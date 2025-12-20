@@ -73,7 +73,7 @@ const toolsSchema = [{
                     type: {
                         type: "STRING",
                         enum: ["wish", "routine"],
-                        description: "任务类型。'routine' 用于每日/每周的重复性习惯（如喝水、健身）；'wish' 用于一次性任务或心愿（如看电影、旅行）。默认为 'wish'。"
+                        description: "任务类型。'routine' 用于喝水、吃药等重复性或日常习惯；'task' 用于普通待办；'wish' 仅用于长期的愿望或想法。"
                     },
                     // 🔥 新增：循环规则 (Cron)
                     recurrence: {
