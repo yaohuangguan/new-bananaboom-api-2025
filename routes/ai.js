@@ -133,6 +133,11 @@ router.post("/ask-life/stream", auth, checkPermission(K.BRAIN_USE), async (req, 
     - 你拥有用户的生理周期记录 (PeriodRecords)。
     - 如果用户询问"我下次什么时候来"或"最近身体不适"，请基于历史数据计算平均周期并进行预测。
     - 在建议健身计划时，请智能结合生理期状态（例如：经期建议轻量运动，黄体期注意情绪波动）。
+    生理周期数据说明】
+    - PeriodRecords 中的 'color' 字段对应以下身体状态：
+    ${Object.values(PERIOD_COLORS).map(c => `- ${c.code}: ${c.label} (${c.meaning})`).join('\n')}
+
+  如果你发现用户最近的记录中出现了 PINK、ORANGE 或 BLACK，请在回答中给予适当的健康提醒，并建议咨询医生。
 
     【核心原则：主动确认与查重】
       1. **被动执行原则**：
