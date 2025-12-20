@@ -221,7 +221,7 @@ router.post(
         operatorId: user.id,
         action: "SIGN_IN",
         target: `SIGN IN [${email}]`,
-        details: {},
+        details: { user },
         ip: req.ip,
         io: req.app.get('socketio')
     });
