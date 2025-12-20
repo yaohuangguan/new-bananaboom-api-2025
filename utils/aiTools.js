@@ -48,13 +48,12 @@ const toolsSchema = [
           required: ["weight", "dateStr"]
         }
       },
-
-      // -----------------------------------------------------
-      // ✅ 工具 C: 添加待办事项 (适配你的新 Todo Schema)
+// -----------------------------------------------------
+      // ✅ 工具 C: 添加待办事项 (升级版：支持提醒和日期)
       // -----------------------------------------------------
       {
         name: "add_todo",
-        description: "添加一条新的待办事项或愿望清单。当用户说'提醒我...'、'我要做...'、'把xx加入计划'时调用。",
+        description: "添加一条新的待办事项或愿望清单。当用户说'提醒我...'、'我要做...'、'把xx加入计划'时调用。如果用户提到了具体时间（如'5分钟后'），必须计算出 remindAt 时间戳。",
         parameters: {
           type: "OBJECT",
           properties: {
@@ -70,6 +69,16 @@ const toolsSchema = [
               type: "STRING",
               enum: ["todo", "in_progress", "done"],
               description: "初始状态，默认为 todo (想做/未开始)"
+            },
+            // 🔥 新增：提醒时间 (Bark 推送的关键)
+            remindAt: {
+              type: "STRING",
+              description: "精确的提醒时间 (ISO 8601 格式, 如 '2025-12-20T14:30:00.000Z')。务必根据当前时间和用户的相对时间描述（如'5分钟后'、'明晚8点'）进行计算并填入。"
+            },
+            // 🔥 新增：目标日期 (Bucket List 规划用)
+            targetDate: {
+              type: "STRING",
+              description: "计划的目标日期 (如 '2025-12-25')，用于愿望清单的宽泛时间规划，不同于精确提醒。"
             }
           },
           required: ["title"]
