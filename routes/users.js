@@ -57,23 +57,21 @@ router.get("/profile", auth, async (req, res) => {
 });
 
 // @route   GET api/users
-// @desc    获取所有用户 (支持分页、搜索、动态排序)
+// @desc    获取所有用户 (支持分页、搜索、自定义权重排序)
 // @access  Private
 router.get("/", auth, async (req, res) => {
   try {
+    // 1. 分页参数
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
     const skip = (page - 1) * limit;
 
-    const sortBy = req.query.sortBy || "date";
-    const order = req.query.order === "asc" ? 1 : -1;
-    const sortOptions = { [sortBy]: order };
-
+    // 2. 搜索参数 (保持不变)
     const { search } = req.query;
-    let query = {};
+    let matchQuery = {};
 
     if (search) {
-      query = {
+      matchQuery = {
         $or: [
           { displayName: { $regex: search, $options: "i" } },
           { name: { $regex: search, $options: "i" } },
@@ -82,15 +80,82 @@ router.get("/", auth, async (req, res) => {
       };
     }
 
-    const [users, total] = await Promise.all([
-      User.find(query)
-        .sort(sortOptions)
-        .skip(skip)
-        .limit(limit)
-        .select("-password"),
-      User.countDocuments(query)
-    ]);
+    // 3. 排序逻辑处理
+    const sortBy = req.query.sortBy; // 前端传来的排序字段
+    const order = req.query.order === "asc" ? 1 : -1;
 
+    let users = [];
+    let total = 0;
+
+    // ============================================================
+    // 场景 A: 默认排序 OR 按角色排序 (需要走聚合管道，实现自定义权重)
+    // ============================================================
+    // 如果没有传 sortBy，或者明确要求 sortBy=role，就走这套逻辑
+    if (!sortBy || sortBy === 'role') {
+      
+      const pipeline = [
+        // 1. 筛选 (Search)
+        { $match: matchQuery },
+
+        // 2. 🔥 核心：添加权重字段 (用于排序)
+        {
+          $addFields: {
+            roleWeight: {
+              $switch: {
+                branches: [
+                  { case: { $eq: ["$role", "super_admin"] }, then: 3 }, // 权重最高
+                  { case: { $eq: ["$role", "admin"] }, then: 2 },
+                  { case: { $eq: ["$role", "user"] }, then: 1 },
+                  { case: { $eq: ["$role", "bot"] }, then: 0 }       // 机器人排最后
+                ],
+                default: 0
+              }
+            }
+          }
+        },
+
+        // 3. 🔥 排序
+        // 先按权重降序 (3->2->1)，如果权重相同(同级)，按注册时间降序(最新在前)
+        { $sort: { roleWeight: -1, date: -1 } },
+
+        // 4. 分页
+        { $skip: skip },
+        { $limit: limit },
+
+        // 5. 数据清洗 (去掉临时生成的 roleWeight 字段，去掉密码)
+        { $project: { password: 0, roleWeight: 0 } }
+      ];
+
+      // 并行执行：获取数据(聚合) + 获取总数(Count)
+      const [aggUsers, count] = await Promise.all([
+        User.aggregate(pipeline),
+        User.countDocuments(matchQuery)
+      ]);
+
+      users = aggUsers;
+      total = count;
+    } 
+    
+    // ============================================================
+    // 场景 B: 普通排序 (按名字、邮箱、日期等简单字段排序)
+    // ============================================================
+    else {
+      const sortOptions = { [sortBy]: order };
+      
+      const [findUsers, count] = await Promise.all([
+        User.find(matchQuery)
+          .sort(sortOptions)
+          .skip(skip)
+          .limit(limit)
+          .select("-password"),
+        User.countDocuments(matchQuery)
+      ]);
+
+      users = findUsers;
+      total = count;
+    }
+
+    // 4. 返回结果
     res.json({
       data: users,
       pagination: {
