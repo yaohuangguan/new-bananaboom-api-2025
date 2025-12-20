@@ -22,7 +22,8 @@ const PERMISSIONS = {
     K.CAPSULE_USE,
     K.LEISURE_READ,
     K.FITNESS_USE,
-    K.FITNESS_READ_ALL // 看大盘
+    K.FITNESS_READ_ALL, // 看大盘,
+    K.EXTERNAL_RESOURCES_USE
   ],
 
   // Super Admin

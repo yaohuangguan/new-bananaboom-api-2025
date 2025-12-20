@@ -2,10 +2,10 @@ const express = require("express");
 const router = express.Router();
 const Photo = require("../models/Photo");
 const auth = require("../middleware/auth");
-const checkPrivate = require("../middleware/checkPrivate");
-
+const checkPermission = require("../middleware/checkPermission");
+const K = require('../config/constants')
 // 🔥 全局鉴权
-router.use(auth, checkPrivate);
+router.use(auth, checkPermission(K.CAPSULE_USE));
 
 // ==========================================
 // 1. 【查阅】获取所有照片

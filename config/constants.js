@@ -29,6 +29,8 @@ const PERM_KEYS = {
   
     // --- 系统/日志 (最高机密) ---
     SYSTEM_LOGS: 'system:logs',
+
+    EXTERNAL_RESOURCES_USE:'external:use'
   };
   
   module.exports = PERM_KEYS;

@@ -3,13 +3,13 @@ const router = express.Router();
 const axios = require("axios");
 const ExternalResource = require("../models/ExternalResource");
 const auth = require("../middleware/auth");
-const checkPrivate = require("../middleware/checkPrivate");
+const K = require('../config/constants')
+const checkPermission = require("../middleware/checkPermission");
 
 // 从环境变量获取天行 API Key
 const TIAN_KEY = process.env.TIAN_API_KEY; 
 
-// 全局中间件：只有 VIP (家人) 才能调用
-router.use(auth, checkPrivate);
+router.use(auth, checkPermission(K.EXTERNAL_RESOURCES_USE));
 
 /**
  * =================================================================
