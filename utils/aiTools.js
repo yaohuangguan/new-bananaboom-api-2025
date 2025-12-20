@@ -227,18 +227,28 @@ const functions = {
 
     /**
      * 记录体重
+     * 优化：增加 markModified 和 userId 异常处理
      */
     async log_weight({
         weight,
         dateStr
     }, userId) {
         try {
+            if (!userId) throw new Error("缺少用户 ID");
+
             let record = await Fitness.findOne({
                 user: userId,
                 dateStr
             });
+
             if (record) {
+                // 🔥 必须确保 body 对象存在，并标记修改
+                if (!record.body) record.body = {};
                 record.body.weight = weight;
+
+                // 显式标记嵌套对象已更改
+                record.markModified('body');
+
                 await record.save();
                 return {
                     success: true,
@@ -252,7 +262,7 @@ const functions = {
                     dateStr: dateStr,
                     body: {
                         weight: weight,
-                        height: user.height || 175
+                        height: user ? .height || 175 // 增加安全调用符
                     }
                 });
                 await newRecord.save();
@@ -357,6 +367,7 @@ const functions = {
 
     /**
      * 记录运动
+     * 优化：处理数组推入和时长累加的持久化问题
      */
     async log_workout({
         type,
@@ -364,12 +375,13 @@ const functions = {
         dateStr
     }, userId) {
         try {
+            if (!userId) throw new Error("缺少用户 ID");
+
             let record = await Fitness.findOne({
                 user: userId,
                 dateStr
             });
             if (!record) {
-                // 如果当天没记录，新建一条
                 record = new Fitness({
                     user: userId,
                     date: new Date(dateStr),
@@ -377,17 +389,25 @@ const functions = {
                 });
             }
 
-            // 确保 workout 对象存在
-            if (!record.workout) record.workout = {};
+            // 确保子对象存在
+            if (!record.workout) record.workout = {
+                types: [],
+                duration: 0,
+                isDone: true
+            };
 
             record.workout.isDone = true;
-            record.workout.duration = (record.workout.duration || 0) + duration;
+            // 累加时长
+            record.workout.duration = (record.workout.duration || 0) + Number(duration);
 
-            // 记录类型
+            // 处理数组：Mongoose 的数组方法 push 通常能触发更新，但显式标记更稳
             if (!record.workout.types) record.workout.types = [];
             if (!record.workout.types.includes(type)) {
                 record.workout.types.push(type);
             }
+
+            // 🔥 核心：标记 workout 整个对象已修改
+            record.markModified('workout');
 
             await record.save();
             return {
@@ -404,6 +424,7 @@ const functions = {
 
     /**
      * 记录心情
+     * 优化：修复 workout.note 不更新的问题
      */
     async log_mood({
         mood,
@@ -411,6 +432,8 @@ const functions = {
         dateStr
     }, userId) {
         try {
+            if (!userId) throw new Error("缺少用户 ID");
+
             let record = await Fitness.findOne({
                 user: userId,
                 dateStr
@@ -423,14 +446,19 @@ const functions = {
                 });
             }
 
-            // 确保 status 对象存在 (假设 mood 在 status.mood)
+            // 1. 处理状态 (mood)
             if (!record.status) record.status = {};
             record.status.mood = mood;
+            record.markModified('status');
 
-            // 记录笔记到 workout.note 或专门的 note 字段
+            // 2. 处理笔记 (workout.note)
             if (!record.workout) record.workout = {};
             const oldNote = record.workout.note || "";
+            // 智能拼接
             record.workout.note = oldNote ? `${oldNote} | ${note}` : note;
+
+            // 🔥 核心：必须标记 workout 修改，否则 note 不会存入库
+            record.markModified('workout');
 
             await record.save();
             return {
