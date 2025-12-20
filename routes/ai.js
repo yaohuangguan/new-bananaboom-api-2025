@@ -22,7 +22,7 @@ const Post = require("../models/Post");
 const Resume = require("../models/Resume");
 // 建议加上 auth 中间件
 router.use(auth);
-
+const systemCache = require("../utils/memoryCache");
 
 // 引入 Day.js 处理时区
 const dayjs = require('dayjs');
