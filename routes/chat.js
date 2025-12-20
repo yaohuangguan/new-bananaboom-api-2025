@@ -161,14 +161,17 @@ router.get("/ai", auth, async (req, res) => {
 router.post("/ai/save", auth, async (req, res) => {
   try {
     const userId = req.user.id;
-    const { text, role } = req.body; // role 决定是谁发的
+    // 前端传过来的是 text，我们也兼容一下 content
+    const { text, content, role } = req.body; 
+    
+    // 🔥 确保拿到内容
+    const msgContent = text || content;
 
-    if (!text) return res.status(400).json({ msg: "内容不能为空" });
+    if (!msgContent) return res.status(400).json({ msg: "内容不能为空" });
 
     const aiRoomName = `ai_session_${userId}`;
     
     // 构造消息对象
-    // 注意：AI 没有真实 ID，我们用字符串 'ai_assistant' 标记
     const userObj = role === 'user' 
       ? { id: userId, displayName: req.user.name || '我', photoURL: req.user.avatar } 
       : { id: 'ai_assistant', displayName: 'Second Brain', photoURL: 'https://cdn-icons-png.flaticon.com/512/4712/4712027.png' };
@@ -176,8 +179,11 @@ router.post("/ai/save", auth, async (req, res) => {
     const newMsg = new Chat({
       room: aiRoomName,
       user: userObj,
-      text: text,
-      // 标记这是 AI 对话，方便以后分析
+      
+      // 🔥🔥🔥 核心修复点在这里 🔥🔥🔥
+      // 你的数据库 Schema 要的是 'content'，不是 'text'
+      content: msgContent, 
+      
       toUser: null 
     });
 

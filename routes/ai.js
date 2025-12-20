@@ -218,6 +218,8 @@ router.post("/ask-life", auth, async (req, res) => {
  * =================================================================
  * 🧠 第二大脑 (God Mode - 智能判断 + 流式 + 全量数据)
  * =================================================================
+ * @route   POST /api/ai/ask-life/stream
+ * @desc    读取用户 Fitness, Todo, Project, Post, Resume 所有数据进行回答
  */
 router.post("/ask-life/stream", auth, async (req, res) => {
     const { prompt, history } = req.body;
