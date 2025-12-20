@@ -5,59 +5,70 @@ const jwt = require("jsonwebtoken");
 const auth = require("../middleware/auth");
 const redis = require("../cache/cache");
 const getCreateTime = require("../utils")
-const checkPrivate = require("../middleware/checkPrivate"); // 引入新中间件
-const logOperation = require("../utils/audit"); // 引入工具
-
+const checkPrivate = require("../middleware/checkPrivate");
+const logOperation = require("../utils/audit");
+const checkPermission = require('../middleware/checkPermission');
+const K = require('../config/constants');
+const PERMISSIONS = require('../config/permissions'); // 🔥 引入权限字典
 
 const SECRET = process.env.SECRET_JWT || require("../config/keys").SECRET_JWT;
 const router = express.Router();
 const { check, validationResult } = require("express-validator");
 
+// ==========================================
+// 🛠️ 辅助函数：计算合并权限 (Role + Extra)
+// ==========================================
+const getMergedPermissions = (user) => {
+  const rolePerms = PERMISSIONS[user.role] || [];
+  const extraPerms = user.extraPermissions || [];
+  // 合并并去重
+  return [...new Set([...rolePerms, ...extraPerms])];
+};
+
+// ==========================================
+// 👤 获取当前用户信息 (Load User)
+// ==========================================
 router.get("/profile", auth, async (req, res) => {
   try {
     const { id } = req.user;
-
-    // 🔥 修改点：使用 .select("-password")
-    // 意思是：查询所有字段，唯独不要 password
     let user = await User.findById(id).select("-password");
 
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
 
+    // 转为普通对象以便修改
+    let userObj = user.toObject();
+
+    // 🔥 1. 注入权限列表
+    userObj.permissions = getMergedPermissions(user);
+
+    // 🔥 2. VIP 彩蛋逻辑 (保持原样)
     if (user.vip) {
-      // 保持你原有的 VIP 彩蛋逻辑
-      // user.toObject() 把 mongoose 对象转为普通 JS 对象，方便扩展属性
-      let privateUser = { ...user.toObject(), private_token: "ilovechenfangting" };
-      return res.json(privateUser);
-    } else {
-      return res.json(user);
+      userObj.private_token = "ilovechenfangting";
     }
+
+    return res.json(userObj);
+
   } catch (err) {
     console.error(err);
     res.status(500).send("Server Error");
   }
 });
+
 // @route   GET api/users
 // @desc    获取所有用户 (支持分页、搜索、动态排序)
 // @access  Private
 router.get("/", auth, async (req, res) => {
   try {
-    // 1. 分页参数
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
     const skip = (page - 1) * limit;
 
-    // 2. 排序参数
-    // sortBy: 前端想按哪个字段排 (比如 'date', 'name', 'email')
-    // order: 'asc' (正序) 或 'desc' (倒序)
-    const sortBy = req.query.sortBy || "date"; // 默认按注册时间
-    const order = req.query.order === "asc" ? 1 : -1; // 默认倒序 (最新在前)
-
-    // 构建排序对象 { date: -1 } 或 { name: 1 }
+    const sortBy = req.query.sortBy || "date";
+    const order = req.query.order === "asc" ? 1 : -1;
     const sortOptions = { [sortBy]: order };
 
-    // 3. 搜索参数
     const { search } = req.query;
     let query = {};
 
@@ -71,18 +82,15 @@ router.get("/", auth, async (req, res) => {
       };
     }
 
-    // 4. 查询数据库
     const [users, total] = await Promise.all([
       User.find(query)
-        .sort(sortOptions) // 🔥 使用动态排序对象
+        .sort(sortOptions)
         .skip(skip)
         .limit(limit)
-        .select("-password"), // 依然要排除密码
-      
+        .select("-password"),
       User.countDocuments(query)
     ]);
 
-    // 5. 返回结果
     res.json({
       data: users,
       pagination: {
@@ -99,26 +107,22 @@ router.get("/", auth, async (req, res) => {
   }
 });
 
+// @route   POST api/users (注册)
 router.post(
   "/",
   [
-    check("displayName", "Please provide a name")
-      .not()
-      .isEmpty(),
+    check("displayName", "Please provide a name").not().isEmpty(),
     check("email", "Please provide a valid email").isEmail(),
     check("password", "Please enter a password and not less than 8 characters")
       .isLength({ min: 8 })
-      .custom((value, { req, _loc, _path }) => {
+      .custom((value, { req }) => {
         let re = /^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d]{8,}$/;
         if (value !== req.body.passwordConf) {
           throw new Error("Passwords don't match");
         } else if (!re.test(value)) {
-          throw new Error(
-            "Password should have letters and numbers and more than 8 characters."
-          );
-        } else {
-          return value;
+          throw new Error("Password should have letters and numbers and more than 8 characters.");
         }
+        return value;
       })
   ],
   async (req, res) => {
@@ -146,27 +150,36 @@ router.post(
       const salt = await bcrypt.genSalt(10);
       user.password = await bcrypt.hash(password, salt);
       await user.save();
+      
       const payload = {
         user: {
           id: user.id,
           name: user.displayName,
           email: user.email,
-          photoURL: user.photoURL || "", // 注册时可能还没有头像
-          vip: false // 注册默认非 VIP
+          photoURL: user.photoURL || "",
+          vip: false
         }
       };
 
       const token = signToken(payload);
       await setToken(token, token);
+      
       logOperation({
-        operatorId: user.id, // ❌ 原来是 req.user.id (报错原因)，✅ 改为 user.id (新用户的ID)
+        operatorId: user.id,
         action: "SIGN_UP",
         target: `SIGN UP [${user.displayName}]`,
-        details: { user }, // 这里可以直接存 user 对象
+        details: { user },
         ip: req.ip,
         io: req.app.get('socketio')
       });
-      sendToken(req, res, token);
+      
+      // 注册成功也返回用户信息和权限
+      const userObj = user.toObject();
+      delete userObj.password;
+      userObj.permissions = getMergedPermissions(user);
+
+      res.json({ token, user: userObj });
+
     } catch (error) {
       console.log(error);
       res.status(500).json({ message: "Error out" });
@@ -174,6 +187,7 @@ router.post(
   }
 );
 
+// @route   POST api/users/signin (登录)
 router.post(
   "/signin",
   [
@@ -201,22 +215,21 @@ router.post(
           message_cn: "你输入的密码和账户名不匹配"
         });
       }
-    // 🔥🔥🔥 核心修改在这里 🔥🔥🔥
-      // 我们把 User 表里的关键信息都塞进 payload
-      // 这样 Auth 中间件解密后，req.user 直接就有了这些数据，不用再查库
+
+      // Payload 用于生成 Token
       const payload = {
         user: {
           id: user.id,
-          name: user.displayName, // 或者是 user.name，看你数据库字段
+          name: user.displayName,
           email: user.email,
-          photoURL: user.photoURL, // 头像，前端展示常用
-          vip: user.vip,           // 权限字段，鉴权常用
-          // 注意：不要塞太大的数据（比如 hugeBio），会增加网络传输流量
+          photoURL: user.photoURL,
+          vip: user.vip
         }
       };
 
       const token = signToken(payload);
       await setToken(token, token);
+
       logOperation({
         operatorId: user.id,
         action: "SIGN_IN",
@@ -224,8 +237,17 @@ router.post(
         details: { user },
         ip: req.ip,
         io: req.app.get('socketio')
-    });
-      sendToken(req, res, token);
+      });
+
+      // 🔥🔥🔥 改动：登录直接返回 User 信息和 Permissions
+      // 这样前端登录完不需要再请求一次 /profile 就能渲染菜单
+      let userObj = user.toObject();
+      delete userObj.password;
+      delete userObj.__v;
+      userObj.permissions = getMergedPermissions(user);
+
+      res.json({ token, user: userObj });
+
     } catch (error) {
       console.log(error.message);
       res.status(500).json({ message: "Server error" });
@@ -235,31 +257,18 @@ router.post(
 
 router.post("/logout", auth, async (req, res) => {
   const { token } = req.user;
-  
   await deleteToken(token);
   res.json("OK");
 });
 
-
-// 1. 修改 Token 生成逻辑
+// 1. Token 生成逻辑
 function signToken(payload) {
-  // 建议直接用字符串格式，清晰明了
-  // '7d' = 7天, '30d' = 30天
-  return jwt.sign(payload, SECRET, {
-    expiresIn: "30d" 
-  });
+  return jwt.sign(payload, SECRET, { expiresIn: "30d" });
 }
 
-// 2. 修改 Redis 存储逻辑
+// 2. Redis 存储逻辑
 function setToken(key, value) {
-  // 注意：Redis 也需要设置过期时间，否则内存会爆
-  // 30天 = 30 * 24 * 60 * 60 = 2592000 秒
-  // 'EX' 代表单位是秒
   return Promise.resolve(redis.set(key, value, 'EX', 2592000));
-}
-
-function sendToken(req, res, token) {
-  res.json({ token });
 }
 
 function deleteToken(token) {
@@ -267,47 +276,32 @@ function deleteToken(token) {
 }
 
 // @route   PUT /api/users/password
-// @desc    Change password
-// @access  Private (需要登录)
 router.put("/password", auth, async (req, res) => {
   const { oldPassword, newPassword } = req.body;
 
-  // 1. 简单校验：前端必须传两个密码
   if (!oldPassword || !newPassword) {
     return res.status(400).json({ message: "Please provide old and new passwords" });
   }
 
-  // 2. 校验新密码长度 (可选，建议加)
   if (newPassword.length < 6) {
     return res.status(400).json({ message: "New password must be at least 6 characters" });
   }
 
   try {
-    // 3. 在数据库找当前用户
-    // req.user.id 来自 auth 中间件的解析
     const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: "User not found" });
 
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
-
-    // 4. 特殊情况处理：如果是 Google 登录用户，可能没有 password 字段
     if (!user.password) {
       return res.status(400).json({ message: "You use Google Login, no password to change." });
     }
 
-    // 5. 验证旧密码是否正确
-    // bcrypt.compare(明文, 数据库里的哈希)
     const isMatch = await bcrypt.compare(oldPassword, user.password);
     if (!isMatch) {
       return res.status(400).json({ message: "Invalid old password" });
     }
 
-    // 6. 加密新密码
     const salt = await bcrypt.genSalt(10);
     user.password = await bcrypt.hash(newPassword, salt);
-
-    // 7. 保存更新
     await user.save();
 
     res.json({ message: "Password updated successfully" });
@@ -319,10 +313,8 @@ router.put("/password", auth, async (req, res) => {
 });
 
 // @route   PUT /api/users/fitness-goal
-// @desc    切换健身模式 (Fitness 空间专用)
-// @access  Private
 router.put("/fitness-goal", auth, async (req, res) => {
-  const { goal, userId } = req.body; // 'cut' | 'bulk' | 'maintain'
+  const { goal, userId } = req.body;
 
   if (!['cut', 'bulk', 'maintain'].includes(goal)) {
     return res.status(400).json({ msg: "无效的模式" });
@@ -331,7 +323,7 @@ router.put("/fitness-goal", auth, async (req, res) => {
   try {
     const user = await User.findById(userId);
     user.fitnessGoal = goal;
-    await user.save(); // 只保存，不影响其他业务逻辑
+    await user.save(); 
 
     res.json({ 
       success: true, 
@@ -344,18 +336,13 @@ router.put("/fitness-goal", auth, async (req, res) => {
 });
 
 // @route   POST /api/users/reset-by-secret
-// @desc    【私域专用】通过超级暗号直接重置密码
-// @access  Public
 router.post("/reset-by-secret", async (req, res) => {
   const { email, newPassword, secretKey } = req.body;
 
-  // 1. 简单的参数校验
   if (!email || !newPassword || !secretKey) {
     return res.status(400).json({ message: "请填写邮箱、新密码和超级暗号" });
   }
 
-  // 2. 验证超级暗号 (这是安全的关键！)
-  // 建议把这个字符串放在环境变量里，或者直接硬编码在这里也行（反正私用）
   const ADMIN_SECRET = process.env.ADMIN_RESET_SECRET || "bananaboom-666"; 
 
   if (secretKey !== ADMIN_SECRET) {
@@ -363,26 +350,24 @@ router.post("/reset-by-secret", async (req, res) => {
   }
 
   try {
-    // 3. 查找用户
     const user = await User.findOne({ email });
     if (!user) {
       return res.status(404).json({ message: "找不到这个邮箱的用户" });
     }
 
-    // 4. 直接加密新密码并保存
     const salt = await bcrypt.genSalt(10);
     user.password = await bcrypt.hash(newPassword, salt);
 
     await user.save();
-    // 🔥🔥🔥 记录日志
+    
     logOperation({
-      operatorId: req.user.id,
+      operatorId: req.user.id, // 注意：如果未登录调用此接口，req.user可能不存在，建议判空处理
       action: "RESET_BY_SECRET",
       target: `密码已通过暗号强制重置 [${email}]`,
       details: {},
       ip: req.ip,
       io: req.app.get('socketio')
-  });
+    });
 
     res.json({ success: true, message: "密码已通过暗号强制重置！请直接登录。" });
 
@@ -393,24 +378,18 @@ router.post("/reset-by-secret", async (req, res) => {
 });
 
 // @route   PUT /api/users/grant-vip
-// @desc    【私域专用】给指定用户开通 VIP 权限
-// @access  Private (需要 VIP 权限才能操作)
 router.put("/grant-vip", auth, checkPrivate, async (req, res) => {
   const { email, username } = req.body;
 
-  // 1. 校验参数：必须提供邮箱或用户名其中之一
   if (!email && !username) {
     return res.status(400).json({ message: "请提供目标用户的邮箱或用户名" });
   }
 
   try {
     let targetUser = null;
-
-    // 2. 查找用户
     if (email) {
       targetUser = await User.findOne({ email });
     } else if (username) {
-      // 注意：你的 User 模型里用户名字段叫 'displayName'
       targetUser = await User.findOne({ displayName: username });
     }
 
@@ -418,21 +397,19 @@ router.put("/grant-vip", auth, checkPrivate, async (req, res) => {
       return res.status(404).json({ message: "找不到该用户" });
     }
 
-    // 3. 核心操作：修改 VIP 状态
     targetUser.vip = true;
     await targetUser.save();
 
     console.log(`User [${targetUser.displayName}] has been promoted to VIP by [${req.user.name}]`);
 
-     // 🔥🔥🔥 记录日志
-     logOperation({
+    logOperation({
       operatorId: req.user.id,
       action: "GRANT_VIP",
       target: `User [${targetUser.displayName}] has been promoted to VIP by [${req.user.name}]`,
       details: {},
       ip: req.ip,
       io: req.app.get('socketio')
-  });
+    });
 
     res.json({ 
       success: true, 
@@ -451,23 +428,17 @@ router.put("/grant-vip", auth, checkPrivate, async (req, res) => {
 });
 
 // @route   PUT /api/users/revoke-vip
-// @desc    【私域专用】撤销指定用户的 VIP 权限
-// @access  Private (需要 VIP/管理员 权限)
 router.put("/revoke-vip", auth, checkPrivate, async (req, res) => {
   const { email, username } = req.body;
-
-  // 1. 校验参数：必须提供邮箱或用户名
   if (!email && !username) {
     return res.status(400).json({ message: "请提供目标用户的邮箱或用户名" });
   }
 
   try {
-    // 2. 查找目标用户
-    // 根据你的 Model，名字字段是 displayName，所以我们查 email 或 displayName
     const targetUser = await User.findOne({
       $or: [
         { email: email },
-        { displayName: username } // 对应 Schema 中的 displayName
+        { displayName: username }
       ]
     });
 
@@ -475,21 +446,16 @@ router.put("/revoke-vip", auth, checkPrivate, async (req, res) => {
       return res.status(404).json({ message: "未找到该用户" });
     }
 
-    // 3. 修改状态
-    // 根据 Schema，vip 是 Boolean 类型
     targetUser.vip = false;
-
-    // 4. 保存到数据库
     await targetUser.save();
 
-    // 5. 返回成功信息
     res.json({ 
       message: `已成功取消用户 [${targetUser.displayName}] 的 VIP 权限`,
       user: {
           id: targetUser._id,
           email: targetUser.email,
           displayName: targetUser.displayName,
-          vip: targetUser.vip // 返回 false
+          vip: targetUser.vip
       }
     });
 
@@ -501,88 +467,192 @@ router.put("/revoke-vip", auth, checkPrivate, async (req, res) => {
 
 // @route   PUT /api/users/:id
 // @desc    修改个人资料 (名字、头像、身高、健身目标)
-// @access  Private
 router.put("/:id", auth, async (req, res) => {
-  // 🔥 1. 新增 height 和 fitnessGoal 字段的获取
   const { displayName, photoURL, height, fitnessGoal } = req.body;
   const userId = req.params.id;
 
-  // 安全检查：确保用户只能修改自己的资料
   if (req.user.id !== userId) {
     return res.status(403).json({ message: "你无权修改他人的资料" });
   }
 
-  // 2. 构建更新对象 (只更新传了的字段)
-  const updateFields = {};
-  
-  if (displayName) updateFields.displayName = displayName;
-  if (photoURL) updateFields.photoURL = photoURL;
-  
-  // 🔥 新增：身高逻辑 (确保是数字)
-  if (height) {
-    const heightNum = Number(height);
-    // 简单的合理性检查，虽然Schema里也有min/max
-    if (!isNaN(heightNum) && heightNum > 0) {
-      updateFields.height = heightNum;
-    }
-  }
-
-  // 🔥 新增：健身目标逻辑
-  // 允许的值: 'cut' | 'bulk' | 'maintain'
-  if (fitnessGoal) {
-    updateFields.fitnessGoal = fitnessGoal;
-  }
-
-  // 如果没有要更新的字段，直接返回
-  if (Object.keys(updateFields).length === 0) {
-    return res.status(400).json({ message: "请提供要修改的资料 (名字/头像/身高/目标)" });
-  }
-
   try {
-    // 3. 执行更新
-    const updatedUser = await User.findByIdAndUpdate(
-      userId,
-      { $set: updateFields },
-      { 
-        new: true, // 返回更新后的数据
-        runValidators: true // 🔥 重要：开启Schema验证 (确保height不超限，goal在枚举内)
-      }
-    ).select("-password -googleId");
+    const user = await User.findById(userId);
 
-    if (!updatedUser) {
+    if (!user) {
       return res.status(404).json({ message: "用户不存在" });
     }
 
-    // 记录日志 (保持原有逻辑)
+    const changes = {};
+
+    if (displayName) {
+      user.displayName = displayName;
+      changes.displayName = displayName;
+    }
+    
+    if (photoURL) {
+      user.photoURL = photoURL;
+      changes.photoURL = photoURL;
+    }
+
+    if (height) {
+      const heightNum = Number(height);
+      if (!isNaN(heightNum) && heightNum > 0) {
+        user.height = heightNum;
+        changes.height = heightNum;
+      }
+    }
+
+    if (fitnessGoal) {
+      const allowedGoals = ['cut', 'bulk', 'maintain'];
+      if (allowedGoals.includes(fitnessGoal)) {
+        user.fitnessGoal = fitnessGoal;
+        changes.fitnessGoal = fitnessGoal;
+      }
+    }
+
+    if (Object.keys(changes).length === 0) {
+       return res.json({ success: true, message: "资料未变动", user });
+    }
+
+    // 🔥 .save() 触发 VIP/Role 同步钩子
+    const updatedUser = await user.save();
+
+    // 数据脱敏 + 权限注入
+    const userObj = updatedUser.toObject();
+    delete userObj.password;
+    delete userObj.googleId;
+    delete userObj.__v;
+    // 🔥 重新计算权限 (因为角色可能变了)
+    userObj.permissions = getMergedPermissions(updatedUser);
+
     if (typeof logOperation === 'function') {
         logOperation({
           operatorId: req.user.id,
           action: "UPDATE_USER_INFO",
           target: `UPDATE_USER_INFO [${req.user.name || displayName}]`,
-          details: updateFields, // 记录改了什么
+          details: changes,
           ip: req.ip,
           io: req.app.get('socketio')
         });
     }
 
-    // 4. 返回结果
     res.json({
       success: true,
       message: "修改成功",
-      user: updatedUser
+      user: userObj
     });
 
   } catch (error) {
     console.error("Update profile error:", error);
-    
-    // 专门捕获 Mongoose 的验证错误 (比如 height 超出范围)
     if (error.name === 'ValidationError') {
        return res.status(400).json({ message: "参数错误: " + error.message });
     }
-
     res.status(500).json({ message: "修改失败，服务器错误" });
   }
 });
 
+// @route   PUT /api/users/:id/role
+// @desc    修改用户角色 (权限管理)
+router.put("/:id/role", auth, async (req, res) => {
+  const targetUserId = req.params.id;
+  const { role: newRole } = req.body;
+
+  const ALLOWED_ROLES = ['user', 'admin', 'super_admin', 'bot'];
+  if (!ALLOWED_ROLES.includes(newRole)) {
+    return res.status(400).json({ msg: "无效的角色类型" });
+  }
+
+  try {
+    const requester = await User.findById(req.user.id);
+    if (!requester) return res.status(401).json({ msg: "操作人不存在" });
+
+    const targetUser = await User.findById(targetUserId);
+    if (!targetUser) return res.status(404).json({ msg: "目标用户不存在" });
+
+    // 权限逻辑
+    if (requester.role === 'user') {
+      return res.status(403).json({ msg: "权限不足：普通用户无法修改角色" });
+    }
+    if (requester.role === 'admin') {
+      if (newRole === 'super_admin') return res.status(403).json({ msg: "权限不足：Admin 不能任命超级管理员" });
+      if (targetUser.role === 'super_admin') return res.status(403).json({ msg: "权限不足：Admin 无法修改超级管理员的账号" });
+    }
+
+    if (targetUser.role === newRole) {
+      return res.status(400).json({ msg: "该用户已经是这个角色了" });
+    }
+
+    targetUser.role = newRole;
+    await targetUser.save(); // 触发 Hook
+
+    console.log(`👮 [Role Change] ${requester.displayName} changed ${targetUser.displayName} to ${newRole}`);
+
+    // 🔥 返回带权限的用户对象
+    const userObj = targetUser.toObject();
+    delete userObj.password;
+    userObj.permissions = getMergedPermissions(targetUser);
+
+    res.json({ 
+      success: true, 
+      msg: `修改成功！用户 ${targetUser.displayName} 现在是 ${newRole}`,
+      user: userObj
+    });
+
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send("Server Error");
+  }
+});
+
+// @route   PUT /api/users/:id/permissions
+// @desc    授予/修改用户额外权限 (Super Admin Only)
+router.put("/:id/permissions", 
+  auth, 
+  checkPermission('*'), 
+  async (req, res) => {
+    const userId = req.params.id;
+    const { permissions } = req.body;
+
+    if (!Array.isArray(permissions)) {
+      return res.status(400).json({ msg: "Permissions must be an array" });
+    }
+
+    try {
+      const user = await User.findById(userId);
+      if (!user) return res.status(404).json({ msg: "User not found" });
+
+      // 安全过滤
+      const validPermissionKeys = Object.values(K);
+      const cleanPermissions = permissions.filter(p => {
+        const isValid = validPermissionKeys.includes(p);
+        if (!isValid) console.warn(`⚠️ Warning: Ignoring invalid permission key: ${p}`);
+        return isValid;
+      });
+
+      user.extraPermissions = cleanPermissions;
+      await user.save();
+
+      console.log(`👮 [Permission Grant] ${req.user.displayName} gave [${cleanPermissions}] to ${user.displayName}`);
+
+      // 返回结果
+      const userObj = user.toObject();
+      delete userObj.password;
+      delete userObj.googleId;
+      delete userObj.__v;
+      // 🔥 别忘了注入合并后的最终权限
+      userObj.permissions = getMergedPermissions(user);
+
+      res.json({
+        success: true,
+        msg: `权限已更新，${user.displayName} 现在拥有: ${cleanPermissions.join(', ')}`,
+        user: userObj
+      });
+
+    } catch (err) {
+      console.error(err);
+      res.status(500).send("Server Error");
+    }
+  }
+);
 
 module.exports = router;

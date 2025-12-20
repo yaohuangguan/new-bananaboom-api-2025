@@ -1,9 +1,11 @@
 const express = require("express");
 const router = express.Router();
-const { generateJSON, generateStream } = require("../utils/aiProvider"); // 引入我们刚才封装好的工具
+const { generateJSON } = require("../utils/aiProvider"); // 引入我们刚才封装好的工具
 const auth = require("../middleware/auth"); // 依然建议加上鉴权，防止被路人刷爆
-
-  
+const checkPermission = require("../middleware/checkPermission");
+const { toolsSchema, functions } = require("../utils/aiTools");
+const { createAgentStream } = require("../utils/aiProvider");
+const K = require('../config/constants');
 // 引入所有数据模型 (根据你实际的文件路径调整)
 const User = require("../models/User");
 const Fitness = require("../models/Fitness");
@@ -14,6 +16,125 @@ const Resume = require("../models/Resume");
 // 建议加上 auth 中间件
 router.use(auth); 
 
+
+/**
+ * =================================================================
+ * 🧠 第二大脑 (God Mode - 智能判断 + 流式 + 全量数据)
+ * =================================================================
+ * @route   POST /api/ai/ask-life/stream
+ * @desc    读取用户 Fitness, Todo, Project, Post, Resume 所有数据进行回答
+ */
+router.post("/ask-life/stream", auth, checkPermission(K.BRAIN_USE), async (req, res) => {
+  const { prompt, history } = req.body;
+  const userId = req.user.id;
+
+  if (!prompt) return res.status(400).json({ msg: "请说话" });
+
+  // 设置流式响应头
+  res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+
+  try {
+    // ==========================================
+    // 1. 准备全量数据 (God Mode Context)
+    // ==========================================
+    // 这里保留你原有的逻辑，把所有数据查出来
+    const [userProfile, fitness, todos, projects, posts, resume] = await Promise.all([
+      User.findById(userId).select("-password -googleId -__v").lean(),
+      Fitness.find({ user: userId }).sort({ date: -1 }).limit(30).select("-photos -__v -user").lean(),
+      Todo.find({ user: userId }).sort({ date: -1 }).select("-__v -user").lean(),
+      Project.find({ user: userId }).select("-__v -user").lean(),
+      Post.find({ user: userId }).sort({ date: -1 }).select("title tags date summary content").lean(),
+      Resume.findOne({ user: userId }).lean()
+    ]);
+
+    // 截断过长的博客内容，防止 Token 爆炸
+    const processedPosts = posts.map(p => ({
+      ...p,
+      content: p.content ? p.content.substring(0, 500) + "..." : ""
+    }));
+
+    const contextData = {
+      UserProfile: userProfile,
+      FitnessRecords: fitness,
+      Todos: todos,
+      Projects: projects,
+      Blogs: processedPosts,
+      Resume: resume
+    };
+
+    // ==========================================
+    // 2. 构建系统提示词 (System Instruction)
+    // ==========================================
+    const systemInstruction = `
+    你是一个拥有用户【全量第二大脑数据】的智能私人助理。
+    当前日期: ${new Date().toISOString().split('T')[0]}
+
+    【你的知识库】
+    ${JSON.stringify(contextData)}
+
+    【核心指令】
+    1. 你拥有调用工具的能力 (记录体重、修改健身计划、添加待办等)。
+    2. 当用户意图明确时，请**务必调用工具**，不要犹豫。
+    3. 如果用户问关于自己的事 (如"我最近练得咋样")，请基于【知识库】回答。
+    4. 如果用户问通用知识，忽略个人数据，正常回答。
+    5. 回复风格：像个老朋友，幽默、专业、鼓励。
+    `;
+
+    // ==========================================
+    // 3. 处理历史记录
+    // ==========================================
+    const geminiHistory = [];
+    if (history && Array.isArray(history)) {
+      history.slice(-10).forEach(h => {
+        geminiHistory.push({
+          role: h.role === 'ai' ? 'model' : 'user',
+          parts: [{ text: h.content }]
+        });
+      });
+    }
+
+    // ==========================================
+    // 4. 🔥 关键步骤：绑定 userId
+    // ==========================================
+    // aiTools.js 里的函数签名是 (args, userId)，但 AI 调用时只会传 args。
+    // 我们在这里创建一个映射，把当前的 userId 预先“注入”进去。
+    const boundFunctions = {};
+    Object.keys(functions).forEach(funcName => {
+      boundFunctions[funcName] = (args) => functions[funcName](args, userId);
+    });
+
+    // ==========================================
+    // 5. 启动 Agent 流
+    // ==========================================
+    // 调用 utils/aiProvider.js 里封装好的生成器
+    const stream = createAgentStream({
+      systemInstruction,
+      history: geminiHistory,
+      prompt,
+      toolsSchema,
+      functionsMap: boundFunctions // 传进去已经绑定好用户的函数
+    });
+
+    // 遍历生成器，将纯文本推给前端
+    for await (const chunkText of stream) {
+      res.write(chunkText);
+    }
+
+    res.end();
+
+  } catch (err) {
+    console.error("AI Route Error:", err);
+    if (!res.headersSent) {
+      res.status(500).json({ msg: "大脑短路了", error: err.message });
+    } else {
+      res.write("\n\n[System Error: 连接中断]");
+      res.end();
+    }
+  }
+});
+
 /**
  * =================================================================
  * 🤖 接口1：通用智能问答 (Q&A)
@@ -22,7 +143,7 @@ router.use(auth);
  * @desc    前端传什么就问什么，AI 返回 JSON 格式的答案
  * @body    { "prompt": "如何评价红楼梦？" }
  */
-router.post("/ask", async (req, res) => {
+router.post("/ask", auth, checkPermission(K.BRAIN_USE), async (req, res) => {
   const { prompt } = req.body;
 
   if (!prompt) return res.status(400).json({ msg: "请提供问题内容" });
@@ -54,7 +175,7 @@ router.post("/ask", async (req, res) => {
  * @desc    前端传菜名，AI 返回：详细做法 + 3道推荐配菜
  * @body    { "dishName": "红烧肉" }
  */
-router.post("/recipe-recommend", async (req, res) => {
+router.post("/recipe-recommend", auth, async (req, res) => {
   const { dishName } = req.body;
 
   if (!dishName) return res.status(400).json({ msg: "请提供菜品名称" });
@@ -114,7 +235,7 @@ router.post("/recipe-recommend", async (req, res) => {
  * @desc    读取用户 Fitness, Todo, Project, Post, Resume 所有数据进行回答
  * @body    { "prompt": "我最近健身效果咋样？顺便看看我项目进度和待办还剩多少？" }
  */
-router.post("/ask-life", auth, async (req, res) => {
+router.post("/ask-life", auth, checkPermission(K.BRAIN_USE), async (req, res) => {
     const { prompt } = req.body;
     const userId = req.user.id;
   
@@ -214,101 +335,6 @@ router.post("/ask-life", auth, async (req, res) => {
     }
   });
 
-/**
- * =================================================================
- * 🧠 第二大脑 (God Mode - 智能判断 + 流式 + 全量数据)
- * =================================================================
- * @route   POST /api/ai/ask-life/stream
- * @desc    读取用户 Fitness, Todo, Project, Post, Resume 所有数据进行回答
- */
-router.post("/ask-life/stream", auth, async (req, res) => {
-    const { prompt, history } = req.body;
-    const userId = req.user.id;
-  
-    if (!prompt) return res.status(400).json({ msg: "请说话" });
-  
-    // 设置流式响应头
-    res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
-    res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Connection", "keep-alive");
-  
-    try {
-      // 2. 加载全量数据 (逻辑不变)
-      const [userProfile, fitness, todos, projects, posts, resume] = await Promise.all([
-        User.findById(userId).select("-password -googleId -__v").lean(),
-        Fitness.find({ user: userId }).sort({ date: -1 }).select("-photos -__v -user").lean(),
-        Todo.find({ user: userId }).sort({ date: -1 }).select("-__v -user").lean(),
-        Project.find({ user: userId }).select("-__v -user").lean(),
-        Post.find({ user: userId }).sort({ date: -1 }).select("title tags date summary content").lean(),
-        Resume.findOne({ user: userId }).lean()
-      ]);
-  
-      // 内容截断处理
-      const processedPosts = posts.map(p => ({
-        ...p,
-        content: p.content ? p.content.substring(0, 500) + "..." : ""
-      }));
-  
-      const contextData = {
-        UserProfile: userProfile,
-        FitnessRecords: fitness,
-        Todos: todos,
-        Projects: projects,
-        Blogs: processedPosts,
-        Resume: resume
-      };
-  
-      // 3. 构建 Prompt (逻辑不变)
-      let fullPrompt = `
-        你是一个拥有用户【全量第二大脑数据】的智能助手。
-        
-        【你的知识库 (用户的真实历史)】：
-        ${JSON.stringify(contextData)}
-  
-        【💡 核心指令 - 请严格遵守】：
-        请先**判断**用户的当前问题是否与【个人数据】相关：
-  
-        👉 **情况 A：如果用户问的是关于自己的事**
-        (例如："我最近练得咋样？", "我去年那个项目叫啥？", "帮我总结一下我的博客")
-        - 请**务必**深入分析上述【知识库】数据。
-        - 引用具体的数据点（日期、数值、项目名）来支持你的回答。
-  
-        👉 **情况 B：如果用户问的是通用知识/闲聊/无关话题**
-        (例如："如何用 Python 写爬虫？", "讲个笑话", "西红柿炒鸡蛋怎么做？")
-        - 请**完全忽略**上述【知识库】中的个人数据。
-        - 直接作为一个博学的 AI 助手正常回答即可。
-  
-        【用户当前问题】：
-        ${prompt}
-      `;
-  
-      if (history && Array.isArray(history)) {
-        fullPrompt += "\n\n【历史对话参考】:\n";
-        history.slice(-6).forEach(h => {
-          fullPrompt += `${h.role === 'user' ? 'User' : 'AI'}: ${h.content}\n`;
-        });
-      }
-  
-      // 🔥 4. 使用 utils/aiProvider.js 提供的流式工具
-      // 这里不再直接调用 ai.models.generateContentStream，而是用封装好的
-      const stream = await generateStream(fullPrompt);
-  
-      // 🔥 5. 遍历流并响应
-      for await (const chunk of stream) {
-        const chunkText = chunk.text;
-        if (chunkText) {
-          res.write(chunkText);
-        }
-      }
-  
-      res.end();
-  
-    } catch (err) {
-      console.error("God Mode Error:", err);
-      if (!res.headersSent) res.status(500).json({ msg: "AI 生成失败" });
-      else res.write("\n[生成中断，请重试]");
-      res.end();
-    }
-  });
+
 
 module.exports = router;

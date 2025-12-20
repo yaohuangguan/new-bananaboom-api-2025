@@ -56,6 +56,48 @@ const UserSchema = mongoose.Schema({
     default: 'user', // 默认注册进来都是普通用户
     required: true   // 建议设为必填，配合 default 使用
   },
+  // 🔥 新增：额外权限列表 (特权)
+  // 例如: ['fitness:read_all', 'logs:read']
+  extraPermissions: { 
+    type: [String], 
+    default: [] 
+  }
+});
+
+// =========================================================
+// 🪝 Schema Hook: 自动同步 VIP 和 Role
+// =========================================================
+UserSchema.pre('save', function(next) {
+  // 1. 如果是机器人(bot)，跳过同步逻辑 (防止机器人的特殊权限被覆盖)
+  if (this.role === 'bot') {
+    return next();
+  }
+
+  // 2. 场景 A: 角色(Role) 发生了变化
+  // 优先级：Role > Vip (以 Role 为准)
+  if (this.isModified('role')) {
+    if (this.role === 'super_admin') {
+      this.vip = true; // 升官必带 VIP
+    } else {
+      this.vip = false; // 降级自动取消 VIP (admin 也不算 vip, 只有 super_admin 算)
+    }
+  } 
+  
+  // 3. 场景 B: VIP 状态发生了变化 (且 Role 没变，防止冲突)
+  // 这是一个快捷入口，比如支付成功后只把 vip 设为了 true
+  else if (this.isModified('vip')) {
+    if (this.vip === true) {
+      this.role = 'super_admin'; // 充钱变强
+    } else {
+      // 如果取消了 VIP，且当前是 Super Admin，则降级为普通用户
+      // 注意：如果本来是 admin，取消 vip 不应该变成 user，所以要判断一下
+      if (this.role === 'super_admin') {
+        this.role = 'user';
+      }
+    }
+  }
+
+  next();
 });
 
 module.exports = mongoose.model("users", UserSchema);
