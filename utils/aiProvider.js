@@ -123,45 +123,81 @@ async function generateJSON(prompt, modelName = CONFIG.PRIMARY_MODEL) {
 
 
 /**
- * 🌊 流式生成工具 (新增)
- * @param {string} prompt - 提示词
- * @returns {Promise<AsyncGenerator>} - 返回流对象
+ * 辅助函数：清洗 Prompt 格式
+ * 确保发给 SDK 的永远是标准数组结构，防止报错
+ */
+function formatInput(input) {
+  // 如果已经是数组（比如你以后做原生 Chat），直接返回
+  if (Array.isArray(input)) return input;
+  
+  // 如果是字符串（God Mode 拼凑的大文本），包装成 User Message
+  return [
+    {
+      role: "user",
+      parts: [{ text: String(input) }] // 强制转 string 防止传进来 undefined
+    }
+  ];
+}
+
+/**
+ * 🌊 流式生成工具 (最终稳定版)
+ * @param {string | Array} prompt - 提示词
  */
 async function generateStream(prompt) {
   let currentModel = CONFIG.PRIMARY_MODEL;
+  
+  // 1. 格式化输入
+  const formattedContents = formatInput(prompt);
 
   try {
-    console.log(`🌊 [AI Stream] Start: ${currentModel}`);
-    
-    // 尝试使用主模型
+    console.log(`🌊 [AI Stream] Attempting: ${currentModel}`);
+
+    // 2. 调用 SDK (注意：新版 SDK 传参结构)
     const result = await ai.models.generateContentStream({
       model: currentModel,
-      contents: prompt,
+      contents: formattedContents,
+      config: {
+        // 可选：限制一下输出 Token，防止它没完没了说太多
+        // maxOutputTokens: 8192, 
+      }
     });
-    
-    // 返回流对象，让调用者去 for await
-    return result.stream;
+
+    // 3. 🔥 核心修复：防御性检查返回值
+    // 有时候 result 本身是 stream，有时候 result.stream 才是
+    if (result && result.stream) {
+      return result.stream;
+    } else if (result && result[Symbol.asyncIterator]) {
+      // 说明 result 本身就是个可迭代对象
+      return result;
+    } else {
+      // 打印出来看看是啥，方便调试
+      console.error("❌ [AI Stream Error] Unexpected result structure:", result);
+      throw new Error("SDK 返回结果不包含流数据");
+    }
 
   } catch (err) {
     console.error(`⚠️ [AI Stream Error] ${currentModel} failed:`, err.message);
 
-    // 自动降级逻辑
+    // 4. 自动降级逻辑 (Fallback)
     if (currentModel !== CONFIG.FALLBACK_MODEL) {
-      console.warn(`🔄 [AI Stream Fallback] Switching to ${CONFIG.FALLBACK_MODEL}`);
+      console.warn(`🔄 [AI Stream Fallback] Switching to ${CONFIG.FALLBACK_MODEL}...`);
       try {
         const fallbackResult = await ai.models.generateContentStream({
           model: CONFIG.FALLBACK_MODEL,
-          contents: prompt,
+          contents: formattedContents,
         });
-        return fallbackResult.stream;
+        
+        if (fallbackResult.stream) return fallbackResult.stream;
+        if (fallbackResult[Symbol.asyncIterator]) return fallbackResult;
+        
+        throw new Error("Fallback response also invalid");
       } catch (fallbackErr) {
-        throw new Error(`AI Stream completely failed: ${fallbackErr.message}`);
+        throw new Error(`AI Stream All Failed: ${fallbackErr.message}`);
       }
     }
     
     throw err;
   }
 }
-
 
 module.exports = { generateJSON, generateStream };
