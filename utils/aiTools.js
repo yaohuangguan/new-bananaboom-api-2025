@@ -262,7 +262,7 @@ const functions = {
                     dateStr: dateStr,
                     body: {
                         weight: weight,
-                        height: user ? .height || 175 // 增加安全调用符
+                        height: user?.height || 175 // 增加安全调用符
                     }
                 });
                 await newRecord.save();
