@@ -1,6 +1,6 @@
 const router = require("express").Router();
 const Period = require("../models/Period");
-const User = require("../models/User"); // 引入 User 以便做更复杂的家庭查询(可选)
+const User = require("../models/User"); 
 const auth = require("../middleware/auth");
 const checkPrivate = require("../middleware/checkPrivate"); 
 const logOperation = require("../utils/audit");
@@ -52,29 +52,35 @@ const calculateCycleDetails = (records) => {
 
 /**
  * GET /api/period
- * 获取记录 (权限控制：普通用户看自己，管理员看所有)
+ * 获取记录 
+ * 支持 query 参数: ?targetUserId=xxx
+ * (管理员可以查看特定用户的记录，不传则看所有或自己)
  */
 router.get("/", auth, checkPrivate, async (req, res) => {
   try {
     let query = {};
+    const { targetUserId } = req.query; // 🔥 支持前端筛选
 
-    // 🔥 权限控制核心逻辑
     if (req.user.role === 'super_admin') {
-      // 👑 管理员(你): 可以看到所有人的记录 (主要是你老婆的)
-      // 如果需要过滤只看家庭组，可以先查 User 表拿到 ID 列表，这里暂时全量查
-      query = {}; 
+      // 👑 管理员模式
+      if (targetUserId) {
+        // 如果指定了看谁，就只看那个人的 (比如只看老婆的)
+        query = { user: targetUserId };
+      } else {
+        // 没指定，就看所有人 (全家总览)
+        query = {}; 
+      }
     } else {
-      // 👩 普通用户(老婆): 只能看到属于自己的记录
+      // 👩 普通模式：强制只看自己，忽略 targetUserId
       query = { user: req.user.id };
     }
 
     const records = await Period.find(query)
       .sort({ startDate: -1 })
       .limit(24)
-      .populate('user', 'displayName photoURL email'); // 关联用户信息，方便前端展示是谁的
+      .populate('user', 'displayName photoURL email'); 
 
-    // 计算周期详情 (注意：如果是管理员看多人数据，这个算法是基于“混合数据”算的，或者前端应该选人查看)
-    // 简单起见，这里直接返回 records，由前端决定怎么展示统计
+    // 如果是查单人的，计算的数据才准确；如果是查多人的，这个 cycleData 只有参考意义
     const cycleData = calculateCycleDetails(records);
 
     res.json({
@@ -89,14 +95,23 @@ router.get("/", auth, checkPrivate, async (req, res) => {
 
 /**
  * POST /api/period
- * 新增记录 (强制绑定到当前登录用户)
+ * 新增记录 (支持代打卡)
+ * Body: { ..., targetUserId: "xxx" }
  */
 router.post("/", auth, checkPrivate, async (req, res) => {
-  const { startDate, endDate, symptoms, flow, note } = req.body;
+  const { startDate, endDate, symptoms, flow, note, targetUserId } = req.body;
 
   try {
-    // 1. 找上一条记录 (🔥 只找自己的上一条，计算周期才准确)
-    const lastRecord = await Period.findOne({ user: req.user.id }).sort({ startDate: -1 });
+    // 🔥 1. 确定“目标用户”是谁
+    let finalUserId = req.user.id; // 默认是自己
+
+    // 如果前端传了目标ID，且当前操作者是管理员 -> 允许代打卡
+    if (targetUserId && req.user.role === 'super_admin') {
+      finalUserId = targetUserId;
+    }
+
+    // 2. 找目标用户的上一条记录 (计算周期)
+    const lastRecord = await Period.findOne({ user: finalUserId }).sort({ startDate: -1 });
     
     let cycleLength = 0;
     if (lastRecord) {
@@ -109,8 +124,8 @@ router.post("/", auth, checkPrivate, async (req, res) => {
     }
 
     const newPeriod = new Period({
-      user: req.user.id, // 🔥 核心：数据所有权归当前用户
-      operator: req.user.id, // 操作者也是当前用户
+      user: finalUserId,       // 🔥 记录归属：可能是老婆
+      operator: req.user.id,   // 🔥 操作记录：绝对是你 (审计用)
       startDate,
       endDate,
       duration,
@@ -127,13 +142,19 @@ router.post("/", auth, checkPrivate, async (req, res) => {
       operatorId: req.user.id,
       action: "ADD_PERIOD",
       target: "PeriodTracker",
-      details: { date: startDate, cycleLength },
+      details: { 
+        date: startDate, 
+        cycleLength, 
+        owner: finalUserId, 
+        isProxy: finalUserId !== req.user.id // 标记是否为代打卡
+      },
       ip: req.ip,
       io: req.app.get('socketio')
     });
 
-    // 返回最新数据 (只返回自己的，避免混淆)
-    const allRecords = await Period.find({ user: req.user.id }).sort({ startDate: -1 }).limit(24);
+    // 3. 返回数据：务必返回“目标用户”的最新列表
+    // 这样前端界面刷新后，看到的是老婆的数据更新了，而不是你的
+    const allRecords = await Period.find({ user: finalUserId }).sort({ startDate: -1 }).limit(24);
     const cycleData = calculateCycleDetails(allRecords);
     
     res.json({
@@ -149,14 +170,14 @@ router.post("/", auth, checkPrivate, async (req, res) => {
 
 /**
  * PUT /api/period/:id
- * 修改记录 (管理员可改所有，普通用户只改自己)
+ * 修改记录 (管理员可改任何人)
  */
 router.put("/:id", auth, checkPrivate, async (req, res) => {
   const { startDate, endDate, symptoms, flow, note } = req.body;
   
   try {
-    // 构建查询条件
     let query = { _id: req.params.id };
+    
     // 如果不是管理员，限制只能改自己的
     if (req.user.role !== 'super_admin') {
       query.user = req.user.id;
@@ -178,16 +199,13 @@ router.put("/:id", auth, checkPrivate, async (req, res) => {
        record.duration = dayjs(endDate).diff(dayjs(startDate), 'day') + 1;
     }
 
+    // 记录是谁修改的
+    record.operator = req.user.id;
+
     await record.save();
 
-    // 返回最新数据 (这里为了体验，返回当前用户能看到的数据列表)
-    // 如果是管理员修改了别人的，看到的列表会包含所有人的
-    let listQuery = {};
-    if (req.user.role !== 'super_admin') {
-        listQuery = { user: req.user.id };
-    }
-
-    const allRecords = await Period.find(listQuery)
+    // 返回被修改者的最新列表
+    const allRecords = await Period.find({ user: record.user })
         .sort({ startDate: -1 })
         .limit(24)
         .populate('user', 'displayName');
@@ -205,13 +223,11 @@ router.put("/:id", auth, checkPrivate, async (req, res) => {
 
 /**
  * DELETE /api/period/:id
- * 删除记录 (管理员可删所有，普通用户只删自己)
  */
 router.delete("/:id", auth, checkPrivate, async (req, res) => {
     try {
         let query = { _id: req.params.id };
         
-        // 🔥 权限控制
         if (req.user.role !== 'super_admin') {
             query.user = req.user.id;
         }
@@ -222,18 +238,8 @@ router.delete("/:id", auth, checkPrivate, async (req, res) => {
             return res.status(404).json({ msg: "记录不存在或无权删除" });
         }
 
-        logOperation({
-            operatorId: req.user.id,
-            action: "DELETE_PERIOD",
-            target: "PeriodTracker",
-            details: { id: req.params.id },
-            ip: req.ip,
-            io: req.app.get('socketio')
-        });
-
         res.json({ msg: "Deleted" });
     } catch (e) { 
-        console.error(e);
         res.status(500).send("Error"); 
     }
 });
