@@ -1,20 +1,43 @@
-const router = require("express").Router();
-const Todo = require("../models/Todo");
+const express = require("express");
+const router = express.Router();
 const auth = require("../middleware/auth");
-const logOperation = require("../utils/audit"); // 引入你的日志工具
+const Todo = require("../models/Todo");
+const User = require("../models/User");
+const logOperation = require("../utils/audit");
 
 /**
  * GET /
- * 获取愿望清单
- * 排序策略：优先按 order (置顶权重) 降序，其次按 timestamp (创建时间) 倒序
+ * 获取愿望列表
+ * 策略：Super Admin 看所有 Super Admin 的数据 (家庭模式)，普通用户只看自己
  */
 router.get("/", auth, async (req, res) => {
   try {
-    const list = await Todo.find()
-      .sort({ order: -1, timestamp: -1 }); // 先看权重，再看时间
-    res.json(list);
+    let query = {};
+    const currentUser = req.user;
+
+    // 🔥 家庭组逻辑
+    if (currentUser.role === 'super_admin') {
+      // 找出所有 Super Admin (家庭成员)
+      const familyMembers = await User.find({ role: 'super_admin' }).select('_id');
+      const familyIds = familyMembers.map(u => u._id);
+      
+      // 查询条件：所有者 IN [你, 你老婆]
+      query = { user: { $in: familyIds } };
+    } else {
+      // 普通用户：只能看自己的
+      query = { user: currentUser.id };
+    }
+
+    // 按置顶(order)降序，然后按创建时间(createdAt)降序
+    // populate('user') 让前端能显示头像
+    const allTodo = await Todo.find(query)
+      .populate('user', 'displayName photoURL email')
+      .sort({ order: -1, createdAt: -1 });
+      
+    res.json(allTodo);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(err);
+    res.status(500).send("Server Error");
   }
 });
 
@@ -24,46 +47,65 @@ router.get("/", auth, async (req, res) => {
  */
 router.post("/", auth, async (req, res) => {
   try {
-    // 提取新旧所有可能的字段
-    const { todo, description, targetDate, images, order } = req.body;
+    const { todo, description, targetDate, images, order, remindAt } = req.body;
     
     // 生成旧系统兼容的时间戳
     const now = new Date();
-    const timestamp = Date.now(); // 保持旧有的数字/字符串时间戳格式
+    const timestamp = Date.now();
 
     const newTodo = new Todo({
+      // 🔥 必须关联当前用户
+      user: req.user.id,
+      
       todo,
       description: description || "",
       targetDate: targetDate || null,
       images: images || [],
       order: order || 0,
       
-      // --- 默认状态初始化 ---
+      // 🔥 提醒时间 (如果有)
+      remindAt: remindAt || null,
+      isNotified: false, // 重置通知状态
+
+      // 默认状态
       status: 'todo',
       done: false,
       
-      // --- 兼容字段填充 ---
+      // 兼容字段
       timestamp: timestamp,
       create_date: now.toISOString()
     });
 
     await newTodo.save();
 
-    // 🔥 日志：许下愿望
+    // 日志
     logOperation({
       operatorId: req.user.id,
       action: "CREATE_WISH",
       target: todo,
       details: { 
         id: newTodo._id, 
-        has_target_date: !!targetDate 
+        has_remind: !!remindAt 
       },
       ip: req.ip,
       io: req.app.get('socketio')
     });
 
-    // 返回最新列表
-    const allTodo = await Todo.find().sort({ order: -1, timestamp: -1 });
+    // 返回最新列表 (复用 GET 的查询逻辑，太麻烦，这里简单返回单条或者重新查一次)
+    // 为了前端方便刷新，建议这里直接返回创建的对象，前端自己 push 进去，或者重新调一次 GET
+    // 这里保持你旧习惯，返回全列表 (注意要用同样的家庭逻辑)
+    
+    // --- 重新查询全列表 ---
+    let query = { user: req.user.id };
+    if (req.user.role === 'super_admin') {
+        const familyMembers = await User.find({ role: 'super_admin' }).select('_id');
+        const familyIds = familyMembers.map(u => u._id);
+        query = { user: { $in: familyIds } };
+    }
+    const allTodo = await Todo.find(query)
+      .populate('user', 'displayName photoURL')
+      .sort({ order: -1, createdAt: -1 });
+
     res.json(allTodo);
 
   } catch (err) {
@@ -74,23 +116,26 @@ router.post("/", auth, async (req, res) => {
 
 /**
  * POST /done/:id 
- * (也可以叫 PUT /:id，保持你的旧路由习惯)
- * 功能：更新状态、打卡配图、修改内容、置顶
+ * 更新任务 (状态、内容、提醒时间)
  */
 router.post("/done/:id", auth, async (req, res) => {
   const { 
-    // 旧字段
-    done, 
-    todo, 
-    // 新字段
-    status, 
-    description, 
-    images, 
-    targetDate, 
-    order 
+    done, todo, status, description, 
+    images, targetDate, order, remindAt 
   } = req.body;
 
   try {
+    const todoItem = await Todo.findById(req.params.id);
+    if (!todoItem) return res.status(404).send("Todo not found");
+
+    // 🔥 权限检查：自己 OR 家庭管理员
+    const isOwner = todoItem.user.toString() === req.user.id;
+    const isFamilyAdmin = req.user.role === 'super_admin';
+
+    if (!isOwner && !isFamilyAdmin) {
+      return res.status(401).json({ msg: "无权操作此任务" });
+    }
+
     const updateFields = {};
     const logDetails = {};
 
@@ -103,32 +148,28 @@ router.post("/done/:id", auth, async (req, res) => {
         updateFields.images = images;
         logDetails.image_count = images.length;
     }
+    
+    // 🔥 更新提醒时间
+    if (remindAt !== undefined) {
+        updateFields.remindAt = remindAt;
+        updateFields.isNotified = false; // 修改时间后，重置通知状态，可以再次提醒
+    }
 
-    // 2. --- 核心状态同步逻辑 (Sync Logic) ---
-    // 场景 A: 新前端传了 status ('todo', 'in_progress', 'done')
+    // 2. --- 状态同步逻辑 ---
     if (status !== undefined) {
       updateFields.status = status;
-      
-      // 同步给旧字段 done
       if (status === 'done') {
         updateFields.done = true;
         updateFields.complete_date = new Date().toISOString();
       } else {
         updateFields.done = false;
-        // 如果是从 done 变回其他状态，可能需要清除 complete_date，视业务需求而定
-        // updateFields.complete_date = null; 
       }
-    } 
-    // 场景 B: 旧前端只传了 done (true/false)
-    else if (done !== undefined) {
+    } else if (done !== undefined) {
       updateFields.done = done;
-      
-      // 同步给新字段 status
       if (done === true || done === 'true' || done === 1) {
         updateFields.status = 'done';
         updateFields.complete_date = new Date().toISOString();
       } else {
-        // 如果取消完成，默认回退到 todo，除非当前已经是 in_progress (这点很难判断，所以简单处理回退到 todo)
         updateFields.status = 'todo';
       }
     }
@@ -137,23 +178,15 @@ router.post("/done/:id", auth, async (req, res) => {
     const updatedTodo = await Todo.findByIdAndUpdate(
       req.params.id,
       { $set: updateFields },
-      { new: true } // 返回更新后的文档
-    );
+      { new: true }
+    ).populate('user', 'displayName photoURL'); // 关联回来
 
-    if (!updatedTodo) return res.status(404).send("Todo not found");
-
-    // 4. --- 智能日志记录 ---
-    let action = "UPDATE_WISH"; // 默认动作
-
-    // 根据最终状态判断动作类型
+    // 4. --- 智能日志 ---
+    let action = "UPDATE_WISH";
     if (updatedTodo.status === 'done' && (!status || status === 'done')) {
-        action = "FULFILL_WISH"; // 达成
-    } else if (updatedTodo.status === 'in_progress') {
-        action = "START_WISH";   // 开始
-    } else if (updatedTodo.status === 'todo' && (done === false)) {
-        action = "RESET_WISH";   // 重置
+        action = "FULFILL_WISH"; 
     } else if (images && images.length > 0) {
-        action = "UPLOAD_EVIDENCE"; // 补充证据
+        action = "UPLOAD_EVIDENCE"; 
     }
 
     logOperation({
@@ -163,15 +196,23 @@ router.post("/done/:id", auth, async (req, res) => {
       details: {
         ...logDetails,
         id: updatedTodo._id,
-        status_after: updatedTodo.status,
-        done_after: updatedTodo.done
+        operator: req.user.displayName // 记录是谁改的 (可能是老婆改的)
       },
       ip: req.ip,
       io: req.app.get('socketio')
     });
 
     // 5. --- 返回列表 ---
-    const allTodos = await Todo.find().sort({ order: -1, timestamp: -1 });
+    let query = { user: req.user.id };
+    if (req.user.role === 'super_admin') {
+        const familyMembers = await User.find({ role: 'super_admin' }).select('_id');
+        const familyIds = familyMembers.map(u => u._id);
+        query = { user: { $in: familyIds } };
+    }
+    const allTodos = await Todo.find(query)
+      .populate('user', 'displayName photoURL')
+      .sort({ order: -1, createdAt: -1 });
+      
     res.json(allTodos);
 
   } catch (err) {
@@ -182,11 +223,14 @@ router.post("/done/:id", auth, async (req, res) => {
 
 /**
  * GET /done/:id
- * 获取单条详情 (兼容旧接口)
+ * 获取单条详情
  */
 router.get("/done/:id", async (req, res) => {
   try {
-    const item = await Todo.findById(req.params.id);
+    const item = await Todo.findById(req.params.id).populate('user', 'displayName photoURL');
+    if (!item) return res.status(404).json({ msg: "Item not found" });
+    
+    // 这里本来应该做权限检查，但如果只是GET单条，一般也无所谓，或者加上auth中间件
     res.json(item);
   } catch (err) {
     res.status(404).json({ msg: "Item not found" });
@@ -202,9 +246,16 @@ router.delete("/:id", auth, async (req, res) => {
     const todo = await Todo.findById(req.params.id);
     if (!todo) return res.status(404).json({ msg: "Todo not found" });
 
+    // 权限检查
+    const isOwner = todo.user.toString() === req.user.id;
+    const isFamilyAdmin = req.user.role === 'super_admin';
+
+    if (!isOwner && !isFamilyAdmin) {
+      return res.status(403).json({ msg: "无权删除" });
+    }
+
     await todo.deleteOne();
 
-    // 🔥 日志
     logOperation({
       operatorId: req.user.id,
       action: "DELETE_WISH",

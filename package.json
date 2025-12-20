@@ -26,6 +26,7 @@
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^9.0.0",
     "morgan": "^1.9.1",
+    "node-cron": "^4.2.1",
     "npm": "^11.7.0",
     "passport": "^0.7.0",
     "passport-google-oauth20": "^2.0.0",

@@ -1,20 +1,27 @@
 const express = require("express");
 const router = express.Router();
-const { generateJSON } = require("../utils/aiProvider"); // 引入我们刚才封装好的工具
+const {
+  generateJSON
+} = require("../utils/aiProvider"); // 引入我们刚才封装好的工具
 const auth = require("../middleware/auth"); // 依然建议加上鉴权，防止被路人刷爆
 const checkPermission = require("../middleware/checkPermission");
-const { toolsSchema, functions } = require("../utils/aiTools");
-const { createAgentStream } = require("../utils/aiProvider");
+const {
+  toolsSchema,
+  functions
+} = require("../utils/aiTools");
+const {
+  createAgentStream
+} = require("../utils/aiProvider");
 const K = require('../config/constants');
 // 引入所有数据模型 (根据你实际的文件路径调整)
 const User = require("../models/User");
 const Fitness = require("../models/Fitness");
-const Todo = require("../models/Todo");       
-const Project = require("../models/Project"); 
-const Post = require("../models/Post");       
-const Resume = require("../models/Resume");   
+const Todo = require("../models/Todo");
+const Project = require("../models/Project");
+const Post = require("../models/Post");
+const Resume = require("../models/Resume");
 // 建议加上 auth 中间件
-router.use(auth); 
+router.use(auth);
 
 
 /**
@@ -25,10 +32,15 @@ router.use(auth);
  * @desc    读取用户 Fitness, Todo, Project, Post, Resume 所有数据进行回答
  */
 router.post("/ask-life/stream", auth, checkPermission(K.BRAIN_USE), async (req, res) => {
-  const { prompt, history } = req.body;
+  const {
+    prompt,
+    history
+  } = req.body;
   const userId = req.user.id;
 
-  if (!prompt) return res.status(400).json({ msg: "请说话" });
+  if (!prompt) return res.status(400).json({
+    msg: "请说话"
+  });
 
   // 设置流式响应头
   res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
@@ -42,11 +54,27 @@ router.post("/ask-life/stream", auth, checkPermission(K.BRAIN_USE), async (req, 
     // 这里保留你原有的逻辑，把所有数据查出来
     const [userProfile, fitness, todos, projects, posts, resume] = await Promise.all([
       User.findById(userId).select("-password -googleId -__v").lean(),
-      Fitness.find({ user: userId }).sort({ date: -1 }).limit(30).select("-photos -__v -user").lean(),
-      Todo.find({ user: userId }).sort({ date: -1 }).select("-__v -user").lean(),
-      Project.find({ user: userId }).select("-__v -user").lean(),
-      Post.find({ user: userId }).sort({ date: -1 }).select("title tags date summary content").lean(),
-      Resume.findOne({ user: userId }).lean()
+      Fitness.find({
+        user: userId
+      }).sort({
+        date: -1
+      }).limit(30).select("-photos -__v -user").lean(),
+      Todo.find({
+        user: userId
+      }).sort({
+        date: -1
+      }).select("-__v -user").lean(),
+      Project.find({
+        user: userId
+      }).select("-__v -user").lean(),
+      Post.find({
+        user: userId
+      }).sort({
+        date: -1
+      }).select("title tags date summary content").lean(),
+      Resume.findOne({
+        user: userId
+      }).lean()
     ]);
 
     // 截断过长的博客内容，防止 Token 爆炸
@@ -80,6 +108,21 @@ router.post("/ask-life/stream", auth, checkPermission(K.BRAIN_USE), async (req, 
     3. 如果用户问关于自己的事 (如"我最近练得咋样")，请基于【知识库】回答。
     4. 如果用户问通用知识，忽略个人数据，正常回答。
     5. 回复风格：像个老朋友，幽默、专业、鼓励。
+
+    【核心原则：主动确认与查重】
+1. **被动执行原则**：
+   - 当用户提到一个计划（如“我想看电影”、“下周去旅行”）时，**不要**立即调用 create_todo 工具。
+   - 你应该先回复用户：“听起来不错！需要我把这个行程加入待办清单吗？”
+   - **只有**当用户明确回复“好的”、“存下来”、“记一下”时，才调用 create_todo。
+
+2. **严格查重原则**：
+   - 在调用 create_todo 之前，**必须**检查当前的对话历史 (Conversation History)。
+   - 如果用户只是在针对刚刚创建的任务提问（例如：“你怎么提醒我？”、“那个任务是几点？”），**绝对不要**重复创建任务。
+   - 只有当内容是全新的，与上下文中的上一个任务无关时，才创建新任务。
+
+3. **智能上下文理解**：
+   - 用户说“行，你怎么提醒我呢” -> 这是一个关于“提醒方式”的询问，**不是**让你再创建一个“阿凡达”任务。你应该解释提醒机制，而不是调用工具。
+
     `;
 
     // ==========================================
@@ -90,7 +133,9 @@ router.post("/ask-life/stream", auth, checkPermission(K.BRAIN_USE), async (req, 
       history.slice(-10).forEach(h => {
         geminiHistory.push({
           role: h.role === 'ai' ? 'model' : 'user',
-          parts: [{ text: h.content }]
+          parts: [{
+            text: h.content
+          }]
         });
       });
     }
@@ -127,7 +172,10 @@ router.post("/ask-life/stream", auth, checkPermission(K.BRAIN_USE), async (req, 
   } catch (err) {
     console.error("AI Route Error:", err);
     if (!res.headersSent) {
-      res.status(500).json({ msg: "大脑短路了", error: err.message });
+      res.status(500).json({
+        msg: "大脑短路了",
+        error: err.message
+      });
     } else {
       res.write("\n\n[System Error: 连接中断]");
       res.end();
@@ -144,9 +192,13 @@ router.post("/ask-life/stream", auth, checkPermission(K.BRAIN_USE), async (req, 
  * @body    { "prompt": "如何评价红楼梦？" }
  */
 router.post("/ask", auth, checkPermission(K.BRAIN_USE), async (req, res) => {
-  const { prompt } = req.body;
+  const {
+    prompt
+  } = req.body;
 
-  if (!prompt) return res.status(400).json({ msg: "请提供问题内容" });
+  if (!prompt) return res.status(400).json({
+    msg: "请提供问题内容"
+  });
 
   // 构造 Prompt：强制要求 JSON，防止 AI 废话
   const systemPrompt = `
@@ -163,7 +215,9 @@ router.post("/ask", auth, checkPermission(K.BRAIN_USE), async (req, res) => {
     const data = await generateJSON(systemPrompt);
     res.json(data); // 返回 { answer: "..." }
   } catch (err) {
-    res.status(500).json({ msg: "AI 思考超时，请重试" });
+    res.status(500).json({
+      msg: "AI 思考超时，请重试"
+    });
   }
 });
 
@@ -176,9 +230,13 @@ router.post("/ask", auth, checkPermission(K.BRAIN_USE), async (req, res) => {
  * @body    { "dishName": "红烧肉" }
  */
 router.post("/recipe-recommend", auth, async (req, res) => {
-  const { dishName } = req.body;
+  const {
+    dishName
+  } = req.body;
 
-  if (!dishName) return res.status(400).json({ msg: "请提供菜品名称" });
+  if (!dishName) return res.status(400).json({
+    msg: "请提供菜品名称"
+  });
 
   // 构造 Prompt：核心是让 AI 既给做法，又给配菜
   const systemPrompt = `
@@ -223,7 +281,9 @@ router.post("/recipe-recommend", auth, async (req, res) => {
     res.json(data);
   } catch (err) {
     console.error(err);
-    res.status(500).json({ msg: "大厨正在忙，没顾上回复，请稍后再试" });
+    res.status(500).json({
+      msg: "大厨正在忙，没顾上回复，请稍后再试"
+    });
   }
 });
 
@@ -236,72 +296,92 @@ router.post("/recipe-recommend", auth, async (req, res) => {
  * @body    { "prompt": "我最近健身效果咋样？顺便看看我项目进度和待办还剩多少？" }
  */
 router.post("/ask-life", auth, checkPermission(K.BRAIN_USE), async (req, res) => {
-    const { prompt } = req.body;
-    const userId = req.user.id;
-  
-    if (!prompt) return res.status(400).json({ msg: "请告诉我你想问什么" });
-  
-    try {
-      console.log("🧠 [Second Brain] 开始加载用户全量数据...");
-  
-      // 1. 并行查询所有数据 (使用 Promise.all 极速加载)
-      // 注意：这里做了 limit 限制防止 Token 溢出，Gemini 虽然大，但最好还是防一下
-      // 如果数据量巨大，可以只取最近半年的，或者关键字段
-      const [
-        userProfile,
-        fitnessRecords,
-        todos,
-        projects,
-        posts,
-        resume
-      ] = await Promise.all([
-        User.findById(userId).select("-password -googleId"),
-        Fitness.find({ user: userId }).sort({ date: -1 }).limit(50), // 最近50条健身
-        Todo.find({ user: userId }).sort({ date: -1 }).limit(50),    // 最近50条待办
-        Project.find({ user: userId }).select("title description techStack status"), // 所有项目
-        Post.find({ user: userId }).sort({ date: -1 }).limit(20).select("title content tags"), // 最近20篇博客
-        Resume.findOne({ user: userId }) // 简历通常只有一份
-      ]);
-  
-      // 2. 数据清洗与序列化 (将对象转为精简的文本描述)
-      // 我们把数据转成 JSON 字符串，AI 能读懂结构化数据
-      const knowledgeBase = {
-        UserProfile: {
-          name: userProfile.displayName,
-          goal: userProfile.fitnessGoal,
-          height: userProfile.height
-        },
-        FitnessHistory: fitnessRecords.map(r => ({
-          date: r.dateStr,
-          weight: r.body.weight,
-          workout: r.workout.types.join(","),
-          duration: r.workout.duration,
-          diet_mode: r.diet.goalSnapshot
-        })),
-        PendingTodos: todos.map(t => ({
-          task: t.title,
-          status: t.isCompleted ? "Done" : "Pending",
-          deadline: t.dateStr
-        })),
-        Projects: projects.map(p => ({
-          name: p.title,
-          desc: p.description,
-          tech: p.techStack,
-          status: p.status
-        })),
-        RecentThoughts: posts.map(p => ({
-          date: p.date,
-          title: p.title,
-          summary: p.content ? p.content.substring(0, 100) + "..." : "" // 截取前100字节省token
-        })),
-        ResumeHighlights: resume ? {
-          skills: resume.skills,
-          experience: resume.experience
-        } : "暂无简历"
-      };
-  
-      // 3. 构造超级 Prompt
-      const systemPrompt = `
+  const {
+    prompt
+  } = req.body;
+  const userId = req.user.id;
+
+  if (!prompt) return res.status(400).json({
+    msg: "请告诉我你想问什么"
+  });
+
+  try {
+    console.log("🧠 [Second Brain] 开始加载用户全量数据...");
+
+    // 1. 并行查询所有数据 (使用 Promise.all 极速加载)
+    // 注意：这里做了 limit 限制防止 Token 溢出，Gemini 虽然大，但最好还是防一下
+    // 如果数据量巨大，可以只取最近半年的，或者关键字段
+    const [
+      userProfile,
+      fitnessRecords,
+      todos,
+      projects,
+      posts,
+      resume
+    ] = await Promise.all([
+      User.findById(userId).select("-password -googleId"),
+      Fitness.find({
+        user: userId
+      }).sort({
+        date: -1
+      }).limit(50), // 最近50条健身
+      Todo.find({
+        user: userId
+      }).sort({
+        date: -1
+      }).limit(50), // 最近50条待办
+      Project.find({
+        user: userId
+      }).select("title description techStack status"), // 所有项目
+      Post.find({
+        user: userId
+      }).sort({
+        date: -1
+      }).limit(20).select("title content tags"), // 最近20篇博客
+      Resume.findOne({
+        user: userId
+      }) // 简历通常只有一份
+    ]);
+
+    // 2. 数据清洗与序列化 (将对象转为精简的文本描述)
+    // 我们把数据转成 JSON 字符串，AI 能读懂结构化数据
+    const knowledgeBase = {
+      UserProfile: {
+        name: userProfile.displayName,
+        goal: userProfile.fitnessGoal,
+        height: userProfile.height
+      },
+      FitnessHistory: fitnessRecords.map(r => ({
+        date: r.dateStr,
+        weight: r.body.weight,
+        workout: r.workout.types.join(","),
+        duration: r.workout.duration,
+        diet_mode: r.diet.goalSnapshot
+      })),
+      PendingTodos: todos.map(t => ({
+        task: t.title,
+        status: t.isCompleted ? "Done" : "Pending",
+        deadline: t.dateStr
+      })),
+      Projects: projects.map(p => ({
+        name: p.title,
+        desc: p.description,
+        tech: p.techStack,
+        status: p.status
+      })),
+      RecentThoughts: posts.map(p => ({
+        date: p.date,
+        title: p.title,
+        summary: p.content ? p.content.substring(0, 100) + "..." : "" // 截取前100字节省token
+      })),
+      ResumeHighlights: resume ? {
+        skills: resume.skills,
+        experience: resume.experience
+      } : "暂无简历"
+    };
+
+    // 3. 构造超级 Prompt
+    const systemPrompt = `
         你就是用户的“第二大脑” (Second Brain)。你拥有用户所有的数字生活数据。
         
         【用户当前问题】：
@@ -320,20 +400,22 @@ router.post("/ask-life", auth, checkPermission(K.BRAIN_USE), async (req, res) =>
           "referenced_modules": ["Fitness", "Todo"] // 你在回答中引用了哪些模块的数据
         }
       `;
-  
-      // 4. 调用 AI (gemini-3-flash-preview 这里的长窗口优势就出来了)
-      const data = await generateJSON(systemPrompt);
-  
-      res.json({
-        success: true,
-        data: data
-      });
-  
-    } catch (err) {
-      console.error("Second Brain Error:", err);
-      res.status(500).json({ msg: "大脑过载了，请稍后再试" });
-    }
-  });
+
+    // 4. 调用 AI (gemini-3-flash-preview 这里的长窗口优势就出来了)
+    const data = await generateJSON(systemPrompt);
+
+    res.json({
+      success: true,
+      data: data
+    });
+
+  } catch (err) {
+    console.error("Second Brain Error:", err);
+    res.status(500).json({
+      msg: "大脑过载了，请稍后再试"
+    });
+  }
+});
 
 
 

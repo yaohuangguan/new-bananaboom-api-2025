@@ -55,6 +55,12 @@ const UserSchema = mongoose.Schema({
   extraPermissions: { 
     type: [String], 
     default: [] 
+  },
+  // 🔥🔥🔥 新增：Bark 推送地址 (iOS) 🔥🔥🔥
+  // 格式通常是: https://api.day.app/你的Key/
+  barkUrl: {
+    type: String,
+    select: false // 🔒 关键安全设置：默认查询不返回此字段，保护隐私
   }
 });
 

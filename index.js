@@ -47,13 +47,16 @@ app.use((_req, res, next) => {
 // 🔥 关键一步：把 io 传给 socketHandler
 socketHandler(io);
 
+// 🔥🔥🔥 新增：启动定时任务调度器 🔥🔥🔥
+// 必须放在 socketHandler 之后，server.listen 之前
+const startScheduler = require("./utils/scheduler");
+startScheduler(io);
+
 app.get("/", (_req, res) => {
   res.json("api server");
 });
 
 app.get('/health', (_req, res) => res.status(200).send('OK'));
-
-
 app.use("/api/auth", require("./routes/auth"));
 app.use("/api/posts", require("./routes/posts"));
 app.use("/api/resumes", require("./routes/resume"));
@@ -74,6 +77,11 @@ app.use("/api/menu", require("./routes/menu"));
 app.use("/api/external", require("./routes/external"));
 app.use("/api/ai", require("./routes/ai"));
 app.use("/api/permission-requests", require("./routes/permissionRequest"));
+app.use("/api/cron", require("./routes/scheduler"))
+
+
+
+
 //port
 const PORT = process.env.PORT || 5000;
 
