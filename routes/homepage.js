@@ -41,7 +41,7 @@ const readLimiter = rateLimit({
 // ==========================================
 
 /**
- * @route   GET /api/
+ * @route   GET /api/homepage
  * @desc    获取首页完整数据
  * @access  Public
  */
@@ -57,7 +57,7 @@ router.get("/", readLimiter, async (req, res) => {
 });
 
 /**
- * @route   GET /api/likes
+ * @route   GET /api/homepage/likes
  * @desc    单独获取点赞数据
  * @access  Public
  */
@@ -71,7 +71,7 @@ router.get("/likes", readLimiter, async (req, res) => {
 });
 
 /**
- * @route   POST /api/likes/:id/add
+ * @route   POST /api/homepage/likes/:id/add
  * @desc    点赞 (+1)
  * @access  Public (每个人都能点)
  */
@@ -96,7 +96,7 @@ router.post("/likes/:id/add", likeLimiter, async (req, res) => {
 });
 
 /**
- * @route   POST /api/likes/:id/remove
+ * @route   POST /api/homepage/likes/:id/remove
  * @desc    取消点赞 (-1)
  * @access  Public
  */
@@ -124,7 +124,7 @@ router.post("/likes/:id/remove", likeLimiter, async (req, res) => {
 // ==========================================
 
 /**
- * @route   GET /api/projects
+ * @route   GET /api/homepage/projects
  * @desc    获取项目列表
  * @access  Public
  */
@@ -140,7 +140,7 @@ router.get("/projects", readLimiter, async (_req, res) => {
 });
 
 /**
- * @route   GET /api/logs
+ * @route   GET /api/homepage/logs
  * @desc    获取更新日志
  * @access  Public
  */
