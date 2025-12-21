@@ -8,7 +8,7 @@ const getCreateTime = require("../utils")
 const checkPrivate = require("../middleware/checkPrivate");
 const logOperation = require("../utils/audit");
 const checkPermission = require('../middleware/checkPermission');
-const K = require('../config/constants');
+const K = require('../config/permissionKeys');
 const PERMISSIONS = require('../config/permissions'); // 🔥 引入权限字典
 
 const SECRET = process.env.SECRET_JWT || require("../config/keys").SECRET_JWT;

@@ -12,7 +12,7 @@ const {
 const {
   createAgentStream
 } = require("../utils/aiProvider");
-const K = require('../config/constants');
+const K = require('../config/permissionKeys');
 const {
   PERIOD_COLORS
 } = require('../config/periodConstants')

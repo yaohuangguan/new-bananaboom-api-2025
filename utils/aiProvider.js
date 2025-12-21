@@ -1,5 +1,7 @@
 // utils/aiProvider.js
-const { GoogleGenAI } = require("@google/genai");
+const {
+  GoogleGenAI
+} = require("@google/genai");
 
 // 1. 基础配置
 if (!process.env.GEMINI_API_KEY) {
@@ -7,14 +9,16 @@ if (!process.env.GEMINI_API_KEY) {
 }
 
 // 初始化客户端
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+const ai = new GoogleGenAI({
+  apiKey: process.env.GEMINI_API_KEY
+});
 
 // 生产级配置常量
 const CONFIG = {
   // 首选模型 (Gemini 3 Flash Preview, 适合快速响应)
-  PRIMARY_MODEL: "gemini-3-flash-preview", 
+  PRIMARY_MODEL: "gemini-3-flash-preview",
   // 备胎模型 (Gemini 2.0 Flash Exp, 稳定性高)
-  FALLBACK_MODEL: "gemini-2.0-flash-exp", 
+  FALLBACK_MODEL: "gemini-2.0-flash-exp",
   // 最大重试次数
   MAX_RETRIES: 2,
   // 超时时间 (毫秒)
@@ -65,8 +69,8 @@ async function generateJSON(prompt, modelName = CONFIG.PRIMARY_MODEL) {
         ai.models.generateContent({
           model: currentModel,
           contents: prompt,
-          config: { 
-            responseMimeType: "application/json" 
+          config: {
+            responseMimeType: "application/json"
           },
         }),
         CONFIG.TIMEOUT_MS
@@ -88,10 +92,10 @@ async function generateJSON(prompt, modelName = CONFIG.PRIMARY_MODEL) {
         if (currentModel !== CONFIG.FALLBACK_MODEL) {
           console.warn(`🔄 [AI Fallback] 切换备用模型: ${CONFIG.FALLBACK_MODEL}`);
           currentModel = CONFIG.FALLBACK_MODEL;
-          attempts = 0; 
-          continue; 
+          attempts = 0;
+          continue;
         } else {
-           throw new Error("所有模型均不可用，请检查 API Key 或网络");
+          throw new Error("所有模型均不可用，请检查 API Key 或网络");
         }
       }
 
@@ -104,10 +108,10 @@ async function generateJSON(prompt, modelName = CONFIG.PRIMARY_MODEL) {
         continue;
       }
 
-      return { 
-        error: "AI_GENERATION_FAILED", 
+      return {
+        error: "AI_GENERATION_FAILED",
         message: "大厨正在忙，请稍后再试",
-        debug: err.message 
+        debug: err.message
       };
     }
   }
@@ -121,9 +125,14 @@ async function generateStream(promptInput) {
   let currentModel = CONFIG.PRIMARY_MODEL;
 
   // 格式化输入
-  const formattedContents = typeof promptInput === 'string'
-    ? [{ role: 'user', parts: [{ text: promptInput }] }]
-    : promptInput;
+  const formattedContents = typeof promptInput === 'string' ?
+    [{
+      role: 'user',
+      parts: [{
+        text: promptInput
+      }]
+    }] :
+    promptInput;
 
   try {
     console.log(`🌊 [AI Stream] Attempting model: ${currentModel}`);
@@ -169,7 +178,7 @@ async function* createAgentStream(params) {
 
   } catch (err) {
     console.warn(`⚠️ [Agent Warning] ${currentModel} failed: ${err.message}`);
-    
+
     if (currentModel !== CONFIG.FALLBACK_MODEL) {
       console.log(`🔄 [Agent Fallback] Switching to ${CONFIG.FALLBACK_MODEL}...`);
       try {
@@ -187,23 +196,31 @@ async function* createAgentStream(params) {
 /**
  * 🕵️ 内部核心逻辑：Agent 循环
  */
-async function* _runAgentLoop(modelName, { systemInstruction, history, prompt, toolsSchema, functionsMap }) {
-  
+async function* _runAgentLoop(modelName, {
+  systemInstruction,
+  history,
+  prompt,
+  toolsSchema,
+  functionsMap
+}) {
+
   // 🔥🔥🔥 核心修复：智能处理 tools 格式 (防止双重包装) 🔥🔥🔥
   let finalTools = undefined;
-  
+
   if (toolsSchema) {
     // 检查 1: 是否已经是标准的 [{ functionDeclarations: [...] }] 格式
-    const isAlreadyWrapped = Array.isArray(toolsSchema) && 
-                             toolsSchema.length > 0 && 
-                             toolsSchema[0].functionDeclarations;
+    const isAlreadyWrapped = Array.isArray(toolsSchema) &&
+      toolsSchema.length > 0 &&
+      toolsSchema[0].functionDeclarations;
 
     if (isAlreadyWrapped) {
       // 如果调用方已经包装好了，直接用
       finalTools = toolsSchema;
     } else if (Array.isArray(toolsSchema)) {
       // 如果只是纯函数定义的数组，我们帮它包装
-      finalTools = [{ functionDeclarations: toolsSchema }];
+      finalTools = [{
+        functionDeclarations: toolsSchema
+      }];
     }
   }
 
@@ -219,8 +236,8 @@ async function* _runAgentLoop(modelName, { systemInstruction, history, prompt, t
   });
 
   // 2. 发送用户 Prompt
-  let resultStream = await chat.sendMessageStream({ 
-    message: prompt 
+  let resultStream = await chat.sendMessageStream({
+    message: prompt
   });
 
   let functionCallFound = false;
@@ -231,12 +248,12 @@ async function* _runAgentLoop(modelName, { systemInstruction, history, prompt, t
   // =================================================
   for await (const chunk of resultStream) {
     // A. 检查函数调用
-    const calls = chunk.functionCalls; 
-    
+    const calls = chunk.functionCalls;
+
     if (calls && calls.length > 0) {
       functionCallFound = true;
       functionCallsToExecute.push(...calls);
-      continue; 
+      continue;
     }
 
     // B. 普通文本
@@ -250,14 +267,14 @@ async function* _runAgentLoop(modelName, { systemInstruction, history, prompt, t
   // 第二阶段：执行工具并获取最终回复 (Agent 核心)
   // =================================================
   if (functionCallFound && functionCallsToExecute.length > 0) {
-    
+
     const functionResponsesParts = [];
 
     // 1. 执行所有被请求的函数
     for (const call of functionCallsToExecute) {
       const funcName = call.name;
       const args = call.args;
-      
+
       console.log(`🤖 [Agent Executor] Calling: ${funcName}`, args);
 
       let toolResult;
@@ -266,23 +283,29 @@ async function* _runAgentLoop(modelName, { systemInstruction, history, prompt, t
           toolResult = await functionsMap[funcName](args);
         } catch (e) {
           console.error(`Tool execution error (${funcName}):`, e);
-          toolResult = { error: `Execution failed: ${e.message}` };
+          toolResult = {
+            error: `Execution failed: ${e.message}`
+          };
         }
       } else {
-        toolResult = { error: `Function ${funcName} not found on server` };
+        toolResult = {
+          error: `Function ${funcName} not found on server`
+        };
       }
 
       functionResponsesParts.push({
         functionResponse: {
           name: funcName,
-          response: { content: toolResult } 
+          response: {
+            content: toolResult
+          }
         }
       });
     }
 
     // 2. 将执行结果发回给 AI
     console.log(`📤 [Agent Output] Sending ${functionResponsesParts.length} tool results back...`);
-    
+
     const result2 = await chat.sendMessageStream({
       message: functionResponsesParts
     });
@@ -295,4 +318,37 @@ async function* _runAgentLoop(modelName, { systemInstruction, history, prompt, t
   }
 }
 
-module.exports = { generateJSON, generateStream, createAgentStream };
+
+/**
+ * ⚡️ 专门用于生成简短标题的工具函数
+ * 使用最便宜的 Flash 模型
+ */
+async function generateTitle(historyText) {
+  try {
+    const prompt = `
+      基于以下对话，生成一个超简短的标题（5-15字）。
+      规则：不要引号，不要标点，只要文字。
+      
+      对话内容：
+      ${historyText.substring(0, 1000)}
+    `;
+
+    const result = await ai.models.generateContent(prompt);
+    const rawText = result.text || JSON.stringify(result);
+    const cleanedText = cleanJSONString(rawText);
+
+    // 3. 解析并返回
+    return JSON.parse(cleanedText);
+
+  } catch (e) {
+    console.error("标题生成失败:", e);
+    return null;
+  }
+}
+
+module.exports = {
+  generateJSON,
+  generateStream,
+  createAgentStream,
+  generateTitle
+};

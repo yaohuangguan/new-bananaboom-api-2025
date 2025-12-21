@@ -1,5 +1,5 @@
 // config/permissions.js
-const K = require('./constants'); // 引入常量
+const K = require('./permissionKeys'); // 引入常量
 
 const PERMISSIONS = {
   // User

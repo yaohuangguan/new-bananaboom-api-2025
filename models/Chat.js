@@ -2,14 +2,14 @@ const mongoose = require("mongoose");
 const Schema = mongoose.Schema;
 
 const ChatSchema = new Schema({
-  // 发送消息的人
+  // 发送者
   user: {
-    displayName: { type: String, required: true }, // 以前是 name
-    photoURL: { type: String },                   // 以前是 avatar
-    id: { type: Schema.Types.ObjectId, ref: "users" } 
+    displayName: { type: String, required: true },
+    photoURL: { type: String },
+    id: { type: Schema.Types.ObjectId, ref: "users" }
   },
 
-  // 接收消息的人 (私聊)
+  // 接收者 (私聊用，AI对话时通常为null)
   toUser: { 
     type: Schema.Types.ObjectId, 
     ref: "users", 
@@ -17,6 +17,13 @@ const ChatSchema = new Schema({
   },
 
   content: { type: String, required: true },
+  
+  // 🔥 新增：关联到 Conversation 表的 UUID
+  sessionId: { type: String, index: true }, 
+
+  // 🔥 新增：图片存储 (Base64 字符串数组)
+  images: [{ type: String }],
+
   room: { type: String, default: "public" },
   createdDate: { type: Date, default: Date.now }
 });
