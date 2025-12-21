@@ -43,5 +43,35 @@ module.exports = {
   expire: () => Promise.resolve(1),
   createClient: () => module.exports,
   on: () => {},
-  connect: () => Promise.resolve()
+  connect: () => Promise.resolve(),
+  /**
+   * 🔥 包装方法：静默更新用户所有在线 Session 的信息
+   * @param {String} userId - 目标用户ID
+   * @param {Object} newData - 最新的用户信息快照 (Payload)
+   * @returns {Promise<Number>} - 返回更新的文章数量
+   */
+  updateUserSession: async (userId, newData) => {
+    try {
+      // 1. 确保数据是字符串格式
+      const valueString = JSON.stringify(newData);
+
+      // 2. 核心逻辑：使用 $regex 模糊匹配 value 字段中包含的 userId
+      // 因为我们存的是 JSON 字符串，里面一定包含 "id":"xxxx" 或 "userId":"xxxx"
+      const result = await Session.updateMany(
+        { value: { $regex: userId } }, 
+        { 
+          $set: { 
+            value: valueString,
+            createdAt: new Date() // 可选：更新后顺便重置过期时间
+          } 
+        }
+      );
+
+      console.log(`♻️ [Session Helper] 已同步更新用户 ${userId} 的 ${result.modifiedCount} 个会话`);
+      return result.modifiedCount;
+    } catch (err) {
+      console.error("❌ [Session Helper] 更新用户 Session 失败:", err);
+      return 0;
+    }
+  },
 };

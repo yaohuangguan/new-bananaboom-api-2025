@@ -2,7 +2,7 @@ const request = require('supertest');
 const express = require('express');
 const jwt = require('jsonwebtoken');
 const authMiddleware = require('../middleware/auth');
-const redis = require('../cache/cache');
+const redis = require('../cache/session');
 
 const app = express();
 app.use(express.json());

@@ -28,10 +28,6 @@ router.post("/verify-secret", (req, res) => {
   }
 });
 
-router.get("/logout", (req, res) => {
-  req.logout();
-  res.send(req.user);
-});
 
 router.post("/subscribe", async (req, res) => {
   const { email } = req.body;

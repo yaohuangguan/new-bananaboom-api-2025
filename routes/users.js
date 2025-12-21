@@ -2,10 +2,9 @@ const express = require("express");
 const User = require("../models/User");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-const redis = require("../cache/cache");
+const userSession = require("../cache/session");
 const getCreateTime = require("../utils")
 const logOperation = require("../utils/audit");
-const checkPermission = require('../middleware/checkPermission');
 const K = require('../config/permissionKeys');
 const permissionService = require('../services/permissionService');
 const SECRET = process.env.SECRET_JWT || require("../config/keys").SECRET_JWT;
@@ -336,7 +335,8 @@ router.post(
         email: email.toLowerCase(),
         phone: cleanPhone, // 存入清洗后的手机号
         password, // 暂存明文，下一步加密
-        date: getCreateTime()
+        date: getCreateTime(),
+        vip: false
       });
 
       // 5. 密码加密
@@ -347,21 +347,10 @@ router.post(
       await newUser.save();
 
       // 7. 生成 Token Payload (包含 phone)
-      const payload = {
-        user: {
-          id: newUser.id,
-          displayName: newUser.displayName,
-          name: newUser.displayName,
-          email: newUser.email,
-          phone: newUser.phone,
-          photoURL: newUser.photoURL || "",
-          vip: false,
-          role: newUser.role
-        }
-      };
+      const payload = permissionService.buildUserPayload(newUser);
 
       const token = signToken(payload);
-      await setToken(token, token); // Redis 缓存 (如果有)
+      await setToken(`auth:${token}`, token);
 
       // 8. 审计日志
       logOperation({
@@ -461,21 +450,10 @@ router.post(
       }
 
       // 5. 生成 Token Payload (包含 phone)
-      const payload = {
-        user: {
-          id: user.id,
-          name: user.displayName,
-          displayName: user.displayName,
-          email: user.email,
-          phone: user.phone, // ✅ 修正：把手机号也装进 Payload
-          photoURL: user.photoURL,
-          vip: user.vip,
-          role: user.role
-        }
-      };
+      const payload = permissionService.buildUserPayload(user);
 
       const token = signToken(payload);
-      await setToken(token, token);
+      await setToken(`auth:${token}`, token);
 
       // 6. 记录日志 (区分登录方式)
       const loginMethod = inputAccount.includes('@') ? 'email' : 'phone';
@@ -512,12 +490,26 @@ router.post(
   }
 );
 
-router.post("/logout", async (req, res) => {
-  const {
-    token
-  } = req.user;
-  await deleteToken(token);
-  res.json("OK");
+/**
+ * @route   POST /api/users/logout
+ * @desc    用户主动退出登录
+ */
+router.post("/logout", auth, async (req, res) => {
+  try {
+    // 1. 从 req.user 拿到当前正在使用的 token (由 auth 中间件挂载)
+    const currentToken = req.user.token;
+    await userSession.del(currentToken);
+
+    // 3. (可选) 清理 5 秒缓存，让该用户的状态在服务器内存也干净
+    permissionService.clearUserCache(req.user.id);
+
+    res.json({
+      success: true,
+      msg: "已成功安全退出"
+    });
+  } catch (err) {
+    res.status(500).send("Logout Error");
+  }
 });
 
 // 1. Token 生成逻辑
@@ -527,14 +519,11 @@ function signToken(payload) {
   });
 }
 
-// 2. Redis 存储逻辑
+// 2. userSession 存储逻辑
 function setToken(key, value) {
-  return Promise.resolve(redis.set(key, value, 'EX', 2592000));
+  return Promise.resolve(userSession.set(key, value, 'EX', 2592000));
 }
 
-function deleteToken(token) {
-  return Promise.resolve(redis.del(token));
-}
 
 // @route   PUT /api/users/password
 router.put("/password", async (req, res) => {
@@ -950,6 +939,11 @@ router.put("/:id/role", async (req, res) => {
 
     targetUser.role = newRole;
     await targetUser.save(); // 触发 Hook
+    // ============================================================
+    // 🔥 核心改动 1：清理 5 秒短缓存
+    // 确保该用户下一个请求进来时，auth 中间件必须从数据库读最新角色
+    // ============================================================
+    permissionService.clearUserCache(targetUserId);
 
     console.log(`👮 [Role Change] ${requester.displayName} changed ${targetUser.displayName} to ${newRole}`);
 
@@ -1001,6 +995,11 @@ router.put("/:id/permissions",
 
       user.extraPermissions = cleanPermissions;
       await user.save();
+      // ============================================================
+      // 🔥 核心改动：清理 5 秒短缓存
+      // 这样用户在前端点下“确定”后，下一个操作会立即拥有新权限
+      // ============================================================
+      permissionService.clearUserCache(userId);
 
       console.log(`👮 [Permission Grant] ${req.user.displayName} gave [${cleanPermissions}] to ${user.displayName}`);
 
