@@ -5,7 +5,7 @@
 
 const Role = require('../models/Role');
 const User = require('../models/User'); // 必须引入 User 模型进行实时查询
-const systemCache = require('../utils/cache'); // 引入你现有的 node-cache 实例
+const systemCache = require('../utils/memoryCache'); // 引入你现有的 node-cache 实例
 
 class PermissionService {
     constructor() {

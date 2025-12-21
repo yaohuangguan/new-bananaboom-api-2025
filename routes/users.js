@@ -494,7 +494,7 @@ router.post(
  * @route   POST /api/users/logout
  * @desc    用户主动退出登录
  */
-router.post("/logout", auth, async (req, res) => {
+router.post("/logout", async (req, res) => {
   try {
     // 1. 从 req.user 拿到当前正在使用的 token (由 auth 中间件挂载)
     const currentToken = req.user.token;

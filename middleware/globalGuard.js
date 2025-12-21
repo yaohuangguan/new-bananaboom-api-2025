@@ -1,99 +1,104 @@
 /**
  * @module middleware/globalGuard
- * @description 全局路由权限守卫 - 配合 PermissionService 的 5s 缓存补全逻辑
+ * @description 全局路由权限守卫 - 配合 PermissionService 实现秒级权限拦截
  */
 
 const permissionService = require('../services/permissionService');
 const ROUTE_MAP = require('../config/routeGuardMap');
 
-const globalGuard = (req, res, next) => {
-  // 1. 获取当前请求的元数据
-  // req.baseUrl (挂载点如 /api) + req.path (子路径如 /users/:id/role)
-  const currentPath = (req.baseUrl || '') + req.path; 
-  const currentMethod = req.method.toUpperCase();
+/**
+ * 全局权限守卫中间件
+ * 注意：此中间件必须挂载在 auth 中间件之后
+ */
+const globalGuard = async (req, res, next) => {
+  try {
+    // 1. 提取请求元数据
+    const currentPath = (req.baseUrl || '') + req.path; 
+    const currentMethod = req.method.toUpperCase();
 
-  // 2. 🔍 查找匹配规则 (Array.find 保证了优先级：数组靠前的规则先匹配)
-  const matchedRule = ROUTE_MAP.find(rule => {
-    // A. 校验 HTTP 方法匹配 (未定义或 ALL 则视为匹配)
-    const methodMatch = !rule.method || rule.method === 'ALL' || rule.method === currentMethod;
-    if (!methodMatch) return false;
+    // 2. 🔍 检索路由匹配规则 (从 ROUTE_MAP 中查找)
+    const matchedRule = ROUTE_MAP.find(rule => {
+      // 校验方法 (ALL 代表匹配所有方法)
+      const methodMatch = !rule.method || rule.method === 'ALL' || rule.method === currentMethod;
+      if (!methodMatch) return false;
 
-    // B. 校验路径匹配 (正则优先级最高)
-    if (rule.regex) {
-      return rule.regex.test(currentPath);
-    }
-    
-    // C. 校验路径匹配 (前缀匹配)
-    return currentPath.startsWith(rule.path);
-  });
-
-  // ============================================================
-  // 情况 A: 没有任何匹配规则 -> 默认放行 (宽松模式/黑盒模式)
-  // ============================================================
-  if (!matchedRule) {
-    return next();
-  }
-
-  // ============================================================
-  // 情况 B: 命中 Public 规则 -> 🟢 直接放行
-  // ============================================================
-  // 用于登录、注册、健康检查等不需要 Token 的接口
-  if (matchedRule.public === true) {
-    return next(); 
-  }
-
-  // ============================================================
-  // 情况 C: 命中私有规则但未登录 -> 🔴 401
-  // ============================================================
-  // 此时 req.user 应该由前面的 auth 中间件补全
-  if (!req.user) {
-    return res.status(401).json({ 
-      success: false,
-      message: "Unauthorized: Please login first",
-      message_cn: "请先登录后再进行操作"
+      // 路径匹配优先级：正则 > 前缀
+      if (rule.regex) {
+        return rule.regex.test(currentPath);
+      }
+      return currentPath.startsWith(rule.path);
     });
-  }
 
-  // ============================================================
-  // 情况 D: 仅需登录即可访问 (permission 为 null/undefined)
-  // ============================================================
-  // 适用于个人资料修改、点赞等通用接口
-  if (!matchedRule.permission) {
-    return next();
-  }
+    // ============================================================
+    // 情况 A: 未命中任何规则 -> 默认放行 (宽松模式)
+    // ============================================================
+    if (!matchedRule) return next();
 
-  // ============================================================
-  // 情况 E: 核心权限查验 -> 🔴 403
-  // ============================================================
-  const requiredPerm = matchedRule.permission;
-  
-  // 🔥 实时性保障：这里的 permissions 是 auth 中间件从 5s 缓存或数据库中实时补全的
-  const userPerms = req.user.permissions || [];
+    // ============================================================
+    // 情况 B: 公开接口 (Public) -> 🟢 直接放行
+    // ============================================================
+    if (matchedRule.public === true) return next();
 
-  // 1. 超管判定逻辑 (硬代码角色判定 或 拥有通配符 '*' 权限)
-  const isSuperAdmin = req.user.role === 'super_admin' || userPerms.includes('*');
+    // ============================================================
+    // 情况 C: 私有接口但未登录 (req.user 由 auth 中间件注入)
+    // ============================================================
+    if (!req.user) {
+      return res.status(401).json({ 
+        success: false,
+        message: "Unauthorized: Please login first",
+        message_cn: "请先登录"
+      });
+    }
 
-  // 2. 权限 Key 匹配
-  if (isSuperAdmin || userPerms.includes(requiredPerm)) {
-    // ✅ 匹配成功，放行
-    return next();
-  } else {
-    // ⛔ 匹配失败，拦截并记录审计日志
-    console.warn(`[Guard Intercept] --------------------------
-      Status: 403 Forbidden
+    // ============================================================
+    // 情况 D: 仅需登录，无需特定权限 Key
+    // ============================================================
+    if (!matchedRule.permission) return next();
+
+    // ============================================================
+    // 情况 E: 核心权限查验 (使用 PermissionService 确保数据准确)
+    // ============================================================
+    const requiredPerm = matchedRule.permission;
+    
+    // 🔥 [核心改动] 这里的 permissions 优先从 req.user 拿 (auth 已经补全过)
+    // 如果由于某种原因缺失，则调用 service 现场计算
+    let userPerms = req.user.permissions;
+    if (!userPerms) {
+      console.warn(`⚠️ [Guard] User permissions missing in req.user, recalculating for: ${req.user.email}`);
+      userPerms = permissionService.getUserMergedPermissions(req.user);
+    }
+
+    // 1. 超管/通配符判定
+    const isSuperAdmin = req.user.role === 'super_admin' || userPerms.includes('*');
+
+    // 2. 权限 Key 判定
+    if (isSuperAdmin || userPerms.includes(requiredPerm)) {
+      // ✅ 拥有权限，放行
+      return next();
+    }
+
+    // ============================================================
+    // 情况 F: 权限不足 -> 🔴 403 拦截
+    // ============================================================
+    // 审计日志：记录越权尝试
+    console.warn(`⛔ [Forbidden] Access Denied:
+      Time: ${new Date().toLocaleString()}
       User: ${req.user.email} (Role: ${req.user.role})
-      Target: ${currentMethod} ${currentPath}
-      Required: ${requiredPerm}
-      UserPerms: ${userPerms.length > 5 ? userPerms.slice(0, 5) + '...' : userPerms}
-    --------------------------------------------------`);
+      Path: ${currentMethod} ${currentPath}
+      Required Key: ${requiredPerm}
+    `);
 
     return res.status(403).json({ 
       success: false,
-      message: "Access Denied: Insufficient Permissions",
-      message_cn: "权限不足：您没有执行此操作的权限",
+      message: "Access Denied: You do not have permission for this action",
+      message_cn: "权限不足：您没有操作该功能的权限",
       code: "PERMISSION_DENIED",
-      required: requiredPerm // 方便前端判断该隐藏哪个按钮
+      required: requiredPerm // 传给前端用于动态隐藏 UI 按钮
     });
+
+  } catch (error) {
+    console.error("🔥 [GlobalGuard Critical Error]:", error);
+    res.status(500).json({ message: "Guard Server Error" });
   }
 };
 
