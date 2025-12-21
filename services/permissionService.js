@@ -1,146 +1,107 @@
 /**
  * @module services/permissionService
- * @description RBAC 权限服务 - 处理角色权限缓存、用户最终权限合并及用户快照短缓存
+ * @description 权限与用户信息统一工厂
  */
-
-const Role = require('../models/Role');
-const User = require('../models/User'); // 必须引入 User 模型进行实时查询
-const systemCache = require('../cache/memoryCache'); // 引入你现有的 node-cache 实例
+const User = require('../models/User');
+const Role = require('../models/Role'); // 确保引入了角色模型
+const systemCache = require('../cache/memoryCache');
 
 class PermissionService {
     constructor() {
-        this.roleCache = {}; // 内存缓存: { 'admin': ['FITNESS_USE', ...], 'user': [...] }
+        this.roleCache = {}; // 存储角色与权限的映射: { 'admin': ['POST_EDIT', 'USER_LIST'] }
         this.isLoaded = false;
-        this.USER_CACHE_PREFIX = "USER_LIVE_"; // 缓存键前缀
-        this.USER_CACHE_TTL = 5; // 5秒极短缓存，平衡实时性与数据库压力
     }
 
     /**
-     * 从数据库全量加载角色权限配置到内存
-     * 系统启动或手动 reload 时调用
+     * 系统启动时加载所有角色权限到内存
      */
     async load() {
         try {
-            console.log("🔄 正在加载 RBAC 角色权限配置...");
             const roles = await Role.find({});
-
             const newCache = {};
-            roles.forEach(role => {
-                // 将角色名作为 key，权限数组作为 value 存入内存
-                newCache[role.name] = role.permissions || [];
+            roles.forEach(r => {
+                newCache[r.name] = r.permissions || [];
             });
-
             this.roleCache = newCache;
             this.isLoaded = true;
-            console.log(`✅ RBAC 权限加载完成。当前已缓存角色: [${Object.keys(newCache).join(', ')}]`);
+            console.log("✅ 权限服务初始化成功");
         } catch (err) {
-            console.error("❌ 加载权限配置失败:", err);
+            console.error("❌ 权限加载失败:", err);
         }
     }
 
     /**
-     * 获取指定角色的权限列表 (内部内存查询)
-     * @param {String} roleName 
-     */
-    getPermissions(roleName) {
-        if (!this.isLoaded) {
-            console.warn("⚠️ 警告: 权限服务尚未初始化，返回空权限列表");
-            return [];
-        }
-        return this.roleCache[roleName] || [];
-    }
-
-    /**
-     * 刷新角色权限定义缓存
-     */
-    async reload() {
-        await this.load();
-    }
-
-    /**
-     * 🔥🔥🔥 核心封装：计算用户的最终权限集合
-     * 逻辑：角色权限 + 个人额外特权 = 去重后的全集
-     * @param {Object} user - 用户对象 (必须包含 .role 和 .extraPermissions)
+     * 🔥 核心逻辑：计算用户的最终权限全集
+     * 规则：基础角色权限 + 个人额外分配的特权
      */
     getUserMergedPermissions(user) {
         if (!user) return [];
+        
+        // 1. 获取角色基础权限 (从内存缓存拿，快！)
+        const roleName = user.role || 'user';
+        const rolePerms = this.roleCache[roleName] || [];
 
-        const userRole = user.role || 'user';
-
-        // 1. 从内存拿该角色的基础权限
-        const rolePerms = this.getPermissions(userRole);
-
-        // 2. 从用户对象拿存储在数据库的额外特权 (extraPermissions)
+        // 2. 获取用户文档里的个人特权
         const extraPerms = user.extraPermissions || [];
 
-        // 3. 合并并使用 Set 去重
+        // 3. 合并并去重
         return [...new Set([...rolePerms, ...extraPerms])];
     }
 
     /**
-     * 🛠️ 统一 Payload 构造器
-     * 确保全应用所有地方生成的 User 快照字段完全一致，防止字段缺失
-     * @param {Object} user - 数据库 User 文档对象 (Mongoose Object)
+     * 🛠️ 统一 Payload 构造器 (全应用唯一结构定义)
+     * 这一步确保了：返回给前端的数据 = 签入 JWT 的数据 = auth 补全的数据
      */
     buildUserPayload(user) {
         if (!user) return null;
 
+        // 预先计算合并后的权限
+        const finalPermissions = this.getUserMergedPermissions(user);
+
         return {
             id: user.id || user._id.toString(),
+            _id: user.id || user._id.toString(), // 兼容性：双 ID
             displayName: user.displayName,
-            name: user.displayName, // 兼容前端旧逻辑中的 name 字段
+            name: user.displayName, 
             email: user.email,
             phone: user.phone || "",
             photoURL: user.photoURL || "",
             vip: user.vip || false,
             role: user.role || "user",
-            extraPermissions: user.extraPermissions || [], // 保留原数组供后续可能的逻辑使用
-            // 🔥 注入实时合并计算后的最终权限数组
-            permissions: this.getUserMergedPermissions(user)
+            extraPermissions: user.extraPermissions || [], 
+            // 🔥 注入最新的合并权限数组
+            // 解决你担心的“前端拿不到最新权限”或“字段重复”问题
+            permissions: finalPermissions 
         };
     }
 
     /**
-     * 🚀 增强方法：获取实时且字段完整的用户 Payload (带 5 秒内存缓存)
-     * 解决了“Session 只存 Token”时查库慢的问题，同时保证了“字段不炸”和“权限准实时”
-     * @param {String} userId 
+     * 🚀 异步补全方法：供 auth 中间件使用 (带 5s 缓存)
      */
     async getLiveUserPayload(userId) {
-        if (!userId) return null;
+        const cacheKey = `USER_LIVE_${userId}`;
+        const cached = systemCache.get(cacheKey);
+        if (cached) return cached;
 
-        const cacheKey = this.USER_CACHE_PREFIX + userId;
-
-        // 1. 尝试从 node-cache 获取
-        const cachedPayload = systemCache.get(cacheKey);
-        if (cachedPayload) {
-            return cachedPayload;
-        }
-
-        // 2. 缓存失效，实时查询数据库
-        // 使用 select 排除密码等敏感信息，确保获取到最新最全的字段
-        const user = await User.findById(userId).select("-password -__v -googleId");
+        // 查库补全
+        const user = await User.findById(userId).select("-password -__v");
         if (!user) return null;
 
-        // 3. 使用统一构造器生成 Payload
+        // 🔥 统一调用上面的构造器
         const payload = this.buildUserPayload(user);
-
-        // 4. 存入 node-cache，设置 5 秒 TTL
-        // 这意味着 5 秒内的连续请求将不再击穿数据库
-        systemCache.set(cacheKey, payload, this.USER_CACHE_TTL);
-
+        
+        // 存入 5 秒缓存，防止高频点击炸掉数据库
+        systemCache.set(cacheKey, payload, 5); 
         return payload;
     }
 
     /**
-     * 🧹 手动清理指定用户的 Payload 缓存
-     * 当管理员修改了该用户的角色或权限时，应立即调用此方法
-     * @param {String} userId 
+     * 🧹 清理指定用户的权限缓存
+     * 管理员改权限后必须调这个，实现“秒级生效”
      */
     clearUserCache(userId) {
-        systemCache.del(this.USER_CACHE_PREFIX + userId);
-        console.log(`🧹 已清理用户 ${userId} 的实时权限缓存`);
+        systemCache.del(`USER_LIVE_${userId}`);
     }
 }
 
-// 导出单例，确保全应用共享同一份角色权限缓存和用户短缓存
 module.exports = new PermissionService();

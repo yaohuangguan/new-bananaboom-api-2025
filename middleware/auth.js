@@ -5,11 +5,11 @@
 
 const jwt = require("jsonwebtoken");
 const cache = require("../cache/session"); // 这里的 cache 是操作 MongoDB Session 表的助手
-const permissionService = require("../services/permissionService"); // 刚才重构好的服务
+const permissionService = require("../services/permissionService"); // 权限服务
 const SECRET = process.env.SECRET_JWT || "secret";
 
 module.exports = async function(req, res, next) {
-  // 1. 提取 Token (支持自定义 Header 或 标准 Bearer 格式)
+  // 1. 提取 Token (支持自定义 Header x-auth-token 或标准 Authorization Bearer 格式)
   let token = req.header("x-auth-token");
   const authHeader = req.header("Authorization");
 
@@ -34,46 +34,48 @@ module.exports = async function(req, res, next) {
     // ============================================================
     // C. 状态校验：Session 白名单 (防止黑名单/已登出 Token 逃逸)
     // ============================================================
-    // 既然你现在的逻辑是 cache.set(token, token)，我们直接查这个 Key 存不存在
-    const sessionToken = await cache.get(token);
+    // 🔥 关键修正：必须带上 "auth:" 前缀去查询，因为 setToken 时加了前缀
+    const userIdInSession = await cache.get(`auth:${token}`);
     
-    // 如果 Session 不存在，说明用户已主动登出或被管理员强制失效
-    if (!sessionToken) {
+    // 如果 Session 不存在，说明用户已主动登出、被管理员强制失效或 Session 已过期
+    if (!userIdInSession) {
       return res.status(401).json({ 
+        success: false,
         message: "Session expired or logged out",
         message_cn: "登录已失效，请重新登录"
       });
     }
 
     // ============================================================
-    // D. 核心补丁：实时获取“满配”用户信息 (解决字段缺失 & 权限滞后)
+    // D. 核心补足：实时获取“满配”用户信息 (通过 buildUserPayload 保证字段不炸)
     // ============================================================
-    // 我们不使用 decoded.user 里的旧数据，而是通过 userId 实时获取最新快照
-    // 该方法内部自带 5 秒 node-cache 缓存，不会对数据库造成高频压力
-    const liveUser = await permissionService.getLiveUserPayload(decoded.user.id);
+    // 我们不直接信任 JWT 里可能过时的数据，而是通过 userId 实时获取最新快照
+    // 该方法内部调用了 buildUserPayload，并自带 5 秒短缓存，性能与实时性兼顾
+    const liveUser = await permissionService.getLiveUserPayload(userIdInSession);
     
     if (!liveUser) {
       return res.status(401).json({ 
-        message: "User account no longer exists",
-        message_cn: "该账号已被注销或无法找到"
+        success: false,
+        message: "Session expired",
+        message_cn: "登录已失效"
       });
     }
 
     // ============================================================
     // E. 挂载数据与兼容性处理
     // ============================================================
-    // 挂载由 PermissionService 统一构造的 Payload 对象
+    // 挂载由 PermissionService 统一构造的 Payload 对象（包含 phone, permissions 等所有字段）
     req.user = liveUser; 
     
-    // 统一 ID 格式 (确保 id 和 _id 同时存在)
+    // 统一 ID 格式兼容 (确保 id 和 _id 同时存在，防止后续业务代码崩溃)
     if (req.user._id && !req.user.id) req.user.id = req.user._id;
     if (req.user.id && !req.user._id) req.user._id = req.user.id;
 
-    // 附带原始 Token，方便后续业务逻辑（如登出、级联调用）使用
+    // 附带原始 token，方便后续业务逻辑（如登出、级联调用）使用
     req.user.token = token;
     req.userId = req.user.id;
 
-    next(); // ✅ 认证成功，放行
+    next(); // ✅ 认证成功，进入下一个中间件（通常是 GlobalGuard）
 
   } catch (error) {
     // ============================================================
@@ -81,13 +83,15 @@ module.exports = async function(req, res, next) {
     // ============================================================
     if (error.name === 'TokenExpiredError') {
       return res.status(401).json({ 
+        success: false,
         message: "Token Expired",
         message_cn: "登录已超时，请重新登录" 
       });
     }
     
-    console.error("[Auth Error]:", error.message);
+    console.error("[Auth Middleware Error]:", error.message);
     res.status(401).json({ 
+      success: false,
       message: "Token Invalid",
       message_cn: "身份验证失败，请重新登录"
     });

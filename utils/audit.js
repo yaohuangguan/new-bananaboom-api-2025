@@ -1,29 +1,19 @@
+/**
+ * @module utils/audit
+ * @description 审计日志记录器 - 负责操作落库、控制台打印、Socket实时推送及第三方推送
+ */
 const AuditLog = require("../models/AuditLog");
 const axios = require("axios");
 
-// 这里需要引入 io 实例。
-// 由于 io 是在 index.js 初始化并传给 socket.js 的，
-// 最简单的办法是把这个工具函数做成一个类，或者在 index.js 里把 io 挂载到 global (虽然不优雅但实用)
-// 或者，我们在这个文件里不直接引用 io，而是让调用者传进来，或者使用事件总线。
-
-// 为了简单且解耦，我们建议：在 index.js 里把 io 挂载到 app 上： app.set('io', io)
-// 然后在路由里通过 req.app.get('io') 获取。
-
-// 但为了在任意地方都能用，我们这里先只负责【存库】和【外部推送】，Socket 推送在路由层做。
-
 /**
- * 记录操作日志
- * @param {Object} params
- * @param {String} params.operatorId - 操作人ID
- * @param {String} params.action - 动作
- * @param {String} params.target - 目标
- * @param {Object} params.details - 详情
- * @param {String} params.ip - IP地址
- * @param {Object} io - Socket.io 实例 (可选，用于实时通知)
+ * 记录操作日志并执行多端推送
+ * @param {Object} params - 包含 operatorId, action, target, details, ip
+ * @param {Object} io - Socket.io 实例 (从 req.app.get('socketio') 传入)
  */
 const logOperation = async ({ operatorId, action, target, details, ip, io }) => {
   try {
-    // 1. 存入数据库
+    // 1. 数据入库
+    // operatorId 对应 User Model 的 ObjectId
     const newLog = new AuditLog({
       operator: operatorId,
       action,
@@ -33,33 +23,50 @@ const logOperation = async ({ operatorId, action, target, details, ip, io }) => 
     });
     const savedLog = await newLog.save();
 
-    // 2. 填充用户信息 (为了推送时能显示是谁)
-    await savedLog.populate("operator", "displayName");
+    // 2. ⚡ 核心修复：填充用户信息
+    // 必须同时填充 displayName 和 name，确保后面拼接不为 undefined
+    await savedLog.populate("operator", "displayName name");
 
-    const message = `[${savedLog.operator.displayName}] 执行了 [${action}] - ${target}`;
+    // 3. 🛡️ 兼容性字段提取
+    // 这里的逻辑与 permissionService.buildUserPayload 保持一致的“双保险”
+    const op = savedLog.operator;
+    let operatorName = "System/Unknown";
+    
+    if (op) {
+      // 这里的优先级逻辑：优先取展示名，没有就取用户名，最后兜底 ID
+      operatorName = op.displayName || op.name || op._id.toString();
+    }
+
+    // 4. 构造统一消息文本
+    const message = `[${operatorName}] 执行了 [${action}] - ${target}`;
     console.log("📝 Audit:", message);
 
-    // 3. Socket.io 实时推送 (如果你在后台，网页会立马弹窗)
+    // 5. Socket.io 实时推送
+    // 用于管理员后台页面的实时滚动日志
     if (io) {
-      // 发送给所有连接的管理员 (或者所有人)
       io.emit("NEW_OPERATION_LOG", {
         message,
-        log: savedLog
+        log: savedLog,
+        timestamp: new Date()
       });
     }
 
-    // 4. 手机推送 (可选：使用 Bark / Server酱 / 钉钉机器人)
-    // 这是一个发 HTTP 请求给 Bark (iOS) 的例子
-    // 你的 Bark 链接: https://api.day.app/你的Key/推送内容
+    // 6. 外部推送 (例如 iOS Bark)
+    // 异步执行，使用 catch 捕获错误，不干扰主线程响应速度
     const BARK_URL = process.env.BARK_URL; 
     if (BARK_URL) {
-       // 异步发送，不阻塞主流程
-       axios.get(`${BARK_URL}/${encodeURIComponent("操作提醒")}/${encodeURIComponent(message)}`)
-         .catch(e => console.error("Push failed", e.message));
+      const pushTitle = encodeURIComponent("BananaBoom 安全提醒");
+      const pushBody = encodeURIComponent(message);
+      
+      axios.get(`${BARK_URL}/${pushTitle}/${pushBody}`)
+        .catch(e => console.error("⚠️ [Push] Bark 推送失败:", e.message));
     }
 
+    return savedLog; // 返回存好的日志文档供后续可能的使用
+    
   } catch (error) {
-    console.error("Log operation failed:", error);
+    // 审计日志报错不能中断业务流程，所以仅记录错误日志
+    console.error("🔥 [Audit Error] 审计系统故障:", error);
   }
 };
 

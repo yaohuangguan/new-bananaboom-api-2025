@@ -7,7 +7,7 @@ const getCreateTime = require("../utils")
 const logOperation = require("../utils/audit");
 const K = require('../config/permissionKeys');
 const permissionService = require('../services/permissionService');
-const SECRET = process.env.SECRET_JWT || require("../config/keys").SECRET_JWT;
+const { signAndSyncToken } = require('../utils/authUtils')
 const router = express.Router();
 const {
   check,
@@ -346,11 +346,7 @@ router.post(
       // 6. 落库保存
       await newUser.save();
 
-      // 7. 生成 Token Payload (包含 phone)
-      const payload = permissionService.buildUserPayload(newUser);
-
-      const token = signToken(payload);
-      await setToken(`auth:${token}`, token);
+      const token = await signAndSyncToken(newUser);
 
       // 8. 审计日志
       logOperation({
@@ -364,17 +360,10 @@ router.post(
         io: req.app.get('socketio')
       });
 
-      // 9. 返回响应 (数据脱敏 + 动态权限)
-      const userObj = newUser.toObject();
-      delete userObj.password;
-      delete userObj.__v;
-
-      // 🔥 计算权限 (DB Role + Extra Permissions)
-      userObj.permissions = permissionService.getUserMergedPermissions(newUser);
 
       res.status(201).json({
         token,
-        user: userObj
+        user: permissionService.buildUserPayload(newUser)
       });
 
     } catch (error) {
@@ -449,11 +438,7 @@ router.post(
         });
       }
 
-      // 5. 生成 Token Payload (包含 phone)
-      const payload = permissionService.buildUserPayload(user);
-
-      const token = signToken(payload);
-      await setToken(`auth:${token}`, token);
+      const token = await signAndSyncToken(user);
 
       // 6. 记录日志 (区分登录方式)
       const loginMethod = inputAccount.includes('@') ? 'email' : 'phone';
@@ -468,17 +453,12 @@ router.post(
         io: req.app.get('socketio')
       });
 
-      // 7. 返回响应
-      let userObj = user.toObject();
-      delete userObj.password;
-      delete userObj.__v;
-
-      // 🔥 计算最终权限
-      userObj.permissions = permissionService.getUserMergedPermissions(user);
+     // 3. 构造返回给前端的 User 对象 (带完整权限和去敏感字段)
+    const userPayload = permissionService.buildUserPayload(user);
 
       res.json({
         token,
-        user: userObj
+        user: userPayload
       });
 
     } catch (error) {
@@ -511,18 +491,6 @@ router.post("/logout", async (req, res) => {
     res.status(500).send("Logout Error");
   }
 });
-
-// 1. Token 生成逻辑
-function signToken(payload) {
-  return jwt.sign(payload, SECRET, {
-    expiresIn: "30d"
-  });
-}
-
-// 2. userSession 存储逻辑
-function setToken(key, value) {
-  return Promise.resolve(userSession.set(key, value, 'EX', 2592000));
-}
 
 
 // @route   PUT /api/users/password
