@@ -7,9 +7,7 @@ const mongoose = require('mongoose');
 const {
   generateTitle
 } = require("../utils/aiProvider");
-const {
-  checkPermissions
-} = require("../middleware/checkPermission")
+const checkPermissions = require("../middleware/checkPermission")
 const K = require("../config/permissionKeys")
 
 // =========================================================================
