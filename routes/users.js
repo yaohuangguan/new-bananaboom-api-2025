@@ -15,6 +15,18 @@ const router = express.Router();
 const { check, validationResult } = require("express-validator");
 
 // ==========================================
+// 🔧 常量定义 (Regex Patterns)
+// ==========================================
+// 强密码：至少8位，包含字母和数字
+const PASSWORD_REGEX = /^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d]{8,}$/;
+
+// 国际电话 (E.164 宽松版)：
+// - 可选 '+' 开头
+// - 后面跟 7 到 15 位数字
+const PHONE_REGEX = /^\+?[0-9]{7,15}$/;
+
+
+// ==========================================
 // 👤 获取当前用户信息 (Load User)
 // ==========================================
 router.get("/profile", auth, async (req, res) => {
@@ -161,154 +173,243 @@ router.get("/", auth, async (req, res) => {
   }
 });
 
-// @route   POST api/users (注册)
+// =================================================================
+// 1. 用户注册 (Register)
+// =================================================================
+/**
+ * @route   POST api/users
+ * @desc    注册新用户
+ * @access  Public
+ * @body    { displayName, email(required), password, phone(optional) }
+ */
 router.post(
   "/",
   [
-    check("displayName", "Please provide a name").not().isEmpty(),
-    check("email", "Please provide a valid email").isEmail(),
-    check("password", "Please enter a password and not less than 8 characters")
+    // --- A. 基础字段校验 ---
+    check("displayName", "Please provide a name")
+      .not().isEmpty()
+      .trim()
+      .escape(), // 防 XSS
+
+    check("email", "Please provide a valid email")
+      .isEmail()
+      .normalizeEmail(), // 标准化 (转小写等)
+
+    check("password", "Password is required")
       .isLength({ min: 8 })
       .custom((value, { req }) => {
-        let re = /^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d]{8,}$/;
         if (value !== req.body.passwordConf) {
-          throw new Error("Passwords don't match");
-        } else if (!re.test(value)) {
-          throw new Error("Password should have letters and numbers and more than 8 characters.");
+          throw new Error("Passwords do not match");
         }
-        return value;
+        if (!PASSWORD_REGEX.test(value)) {
+          throw new Error("Password must contain letters and numbers, min 8 chars");
+        }
+        return true;
+      }),
+
+    // --- B. 手机号校验 (严谨逻辑) ---
+    // optional({ checkFalsy: true }): 允许 null, undefined, "" 通过校验
+    // 如果有值，则必须通过 custom 正则校验
+    check("phone", "Invalid phone format. (e.g., +8613800000000)")
+      .optional({ nullable: true, checkFalsy: true }) 
+      .trim()
+      .custom((value) => {
+        if (!PHONE_REGEX.test(value)) {
+          throw new Error("Phone number format is invalid");
+        }
+        return true;
       })
   ],
   async (req, res) => {
+    // 1. 校验结果处理
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(400).json({ errors: errors.array() });
     }
-    const { displayName, email, password } = req.body;
+
+    const { displayName, email, password, phone } = req.body;
+
     try {
-      let user = await User.findOne({ email });
-      if (user) {
+      // 2. 检查邮箱唯一性 (转小写查)
+      let userByEmail = await User.findOne({ email: email.toLowerCase() });
+      if (userByEmail) {
         return res.status(400).json({
           message: "User already exists",
           message_cn: "此邮箱已被占用"
         });
       }
 
-      const date = getCreateTime()
-      user = new User({
-        email,
-        password,
+      // 3. 检查手机号唯一性 & 数据清洗
+      // 🔥 核心：如果 phone 是空字符串 ""，必须转为 undefined
+      // 这样 MongoDB 的 sparse 索引才不会报错，允许别人也不填手机号
+      const cleanPhone = (phone && phone.trim() !== '') ? phone.trim() : undefined;
+
+      if (cleanPhone) {
+        const userByPhone = await User.findOne({ phone: cleanPhone });
+        if (userByPhone) {
+          return res.status(400).json({
+            message: "Phone number already in use",
+            message_cn: "此手机号已被其他账号绑定"
+          });
+        }
+      }
+
+      // 4. 创建用户实例
+      const newUser = new User({
         displayName,
-        date
+        email: email.toLowerCase(), 
+        phone: cleanPhone,          // 存入清洗后的手机号
+        password,                   // 暂存明文，下一步加密
+        date: getCreateTime()
       });
+
+      // 5. 密码加密
       const salt = await bcrypt.genSalt(10);
-      user.password = await bcrypt.hash(password, salt);
-      await user.save();
+      newUser.password = await bcrypt.hash(password, salt);
       
+      // 6. 落库保存
+      await newUser.save();
+      
+      // 7. 生成 Token Payload (包含 phone)
       const payload = {
         user: {
-          id: user.id,
-          displayName: user.displayName,
-          name: user.displayName,
-          email: user.email,
-          photoURL: user.photoURL || "",
+          id: newUser.id,
+          displayName: newUser.displayName,
+          name: newUser.displayName,
+          email: newUser.email,
+          phone: newUser.phone,
+          photoURL: newUser.photoURL || "",
           vip: false,
-          role: 'user'
+          role: newUser.role
         }
       };
 
       const token = signToken(payload);
-      await setToken(token, token);
+      await setToken(token, token); // Redis 缓存 (如果有)
       
+      // 8. 审计日志
       logOperation({
-        operatorId: user.id,
+        operatorId: newUser.id,
         action: "SIGN_UP",
-        target: `SIGN UP [${user.displayName}]`,
-        details: { user },
+        target: `User Registered: ${newUser.email}`,
+        details: { phone: cleanPhone },
         ip: req.ip,
         io: req.app.get('socketio')
       });
       
-      // 注册成功也返回用户信息和权限
-      const userObj = user.toObject();
+      // 9. 返回响应 (数据脱敏 + 动态权限)
+      const userObj = newUser.toObject();
       delete userObj.password;
-      userObj.permissions = permissionService.getUserMergedPermissions(user);
+      delete userObj.__v;
+      
+      // 🔥 计算权限 (DB Role + Extra Permissions)
+      userObj.permissions = permissionService.getUserMergedPermissions(newUser);
 
-      res.json({ token, user: userObj });
+      res.status(201).json({ token, user: userObj });
 
     } catch (error) {
-      console.log(error);
-      res.status(500).json({ message: "Error out" });
+      console.error("[Register Error]:", error);
+      res.status(500).json({ message: "Server internal error" });
     }
   }
 );
 
-// @route   POST api/users/signin (登录)
+// =================================================================
+// 2. 用户登录 (Sign In)
+// =================================================================
+/**
+ * @route   POST api/users/signin
+ * @desc    用户登录 (支持 邮箱 或 手机号)
+ * @access  Public
+ * @body    { email: "输入账号(邮箱/手机)", password: "..." } 
+ * ⚠️ 注意：为了兼容前端旧代码，接收参数名仍为 'email'，但后端作为 'inputAccount' 处理
+ */
 router.post(
   "/signin",
   [
-    check("email", "Please enter the email you signed up").isEmail(),
+    // 校验放宽：只要有值就行，不要用 isEmail 限制死了
+    check("email", "Please enter your email or phone number").exists().not().isEmpty(),
     check("password", "Password is required").exists()
   ],
   async (req, res) => {
+    // 1. 校验输入
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(400).json({ errors: errors.array() });
     }
-    const { email, password } = req.body;
+
+    // 🔥🔥🔥 核心：变量重命名 (Aliasing) 🔥🔥🔥
+    // 彻底消除歧义：inputAccount 代表用户输入的任何账号字符串
+    const { email: inputAccount, password } = req.body;
+
     try {
-      let user = await User.findOne({ email });
+      // 2. 智能查询 (Dual Strategy)
+      // 使用 $or 并行查找：要么匹配 email，要么匹配 phone
+      const user = await User.findOne({
+        $or: [
+            { email: inputAccount.toLowerCase() }, // 尝试匹配邮箱 (转小写)
+            { phone: inputAccount }                // 尝试匹配手机号
+        ]
+      });
+
+      // 3. 账号不存在
       if (!user) {
         return res.status(401).json({
-          message: "Invalid credentials! Try again",
-          message_cn: "你输入的密码和账户名不匹配"
-        });
-      }
-      const isMatch = await bcrypt.compare(password, user.password);
-      if (!isMatch) {
-        return res.status(401).json({
-          message: "Invalid credentials! Try again",
-          message_cn: "你输入的密码和账户名不匹配"
+          message: "Invalid credentials",
+          message_cn: "账号不存在或密码错误" // 模糊报错，防止枚举
         });
       }
 
-      // Payload 用于生成 Token
+      // 4. 密码校验
+      const isMatch = await bcrypt.compare(password, user.password);
+      if (!isMatch) {
+        return res.status(401).json({
+          message: "Invalid credentials",
+          message_cn: "账号不存在或密码错误"
+        });
+      }
+
+      // 5. 生成 Token Payload (包含 phone)
       const payload = {
         user: {
           id: user.id,
-          displayName: user.displayName,
           name: user.displayName,
+          displayName: user.displayName,
           email: user.email,
+          phone: user.phone, // ✅ 修正：把手机号也装进 Payload
           photoURL: user.photoURL,
           vip: user.vip,
-          role: user.role // 🔥🔥🔥 必须加上这一行！🔥🔥🔥
+          role: user.role
         }
       };
 
       const token = signToken(payload);
       await setToken(token, token);
 
+      // 6. 记录日志 (区分登录方式)
+      const loginMethod = inputAccount.includes('@') ? 'email' : 'phone';
       logOperation({
         operatorId: user.id,
         action: "SIGN_IN",
-        target: `SIGN IN [${email}]`,
-        details: { user },
+        target: `Login via ${loginMethod}`,
+        details: { inputAccount }, 
         ip: req.ip,
         io: req.app.get('socketio')
       });
 
-      // 🔥🔥🔥 改动：登录直接返回 User 信息和 Permissions
-      // 这样前端登录完不需要再请求一次 /profile 就能渲染菜单
+      // 7. 返回响应
       let userObj = user.toObject();
       delete userObj.password;
       delete userObj.__v;
+      
+      // 🔥 计算最终权限
       userObj.permissions = permissionService.getUserMergedPermissions(user);
 
       res.json({ token, user: userObj });
 
     } catch (error) {
-      console.log(error.message);
-      res.status(500).json({ message: "Server error" });
+      console.error("[Login Error]:", error.message);
+      res.status(500).json({ message: "Server internal error" });
     }
   }
 );
