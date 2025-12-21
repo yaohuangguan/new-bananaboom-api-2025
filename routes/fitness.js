@@ -198,24 +198,41 @@ router.get('/stats', auth, checkPermission(K.FITNESS_USE), async (req, res) => {
     const currentUser = req.user;
     let targetUserId = currentUser.id; 
 
-    // --- 🛡️ 权限控制 ---
-    if (req.query.email && req.query.email !== currentUser.email) {
-        // 只有 Admin/Super Admin 能看别人的趋势
-        const myPerms = PERMISSIONS[currentUser.role] || [];
-        const canReadAll = myPerms.includes('*') || myPerms.includes(K.FITNESS_READ_ALL);
+    // ============================================================
+    // 🔥 1. 权限计算 (改为动态获取)
+    // ============================================================
+    // 获取当前用户的所有权限 (角色权限 + 个人特权)
+    const allPerms = permissionService.getUserMergedPermissions(currentUser);
 
-        if (!canReadAll) {
-            return res.status(403).json({ msg: "权限不足" });
-        }
+    // 判断是否有查看所有人数据的权限
+    const canReadAll = allPerms.includes('*') || allPerms.includes(K.FITNESS_READ_ALL);
 
-        const user = await User.findOne({ email: req.query.email });
-        if (user) {
-            targetUserId = user._id;
-        } else {
-            return res.status(404).json({ msg: "User not found" });
-        }
+    // ============================================================
+    // 🔥 2. 目标用户判定
+    // ============================================================
+    if (req.query.email) {
+        // 如果查询的邮箱不是自己
+        if (req.query.email !== currentUser.email) {
+            
+            // 鉴权：如果没有上帝视角，直接拒绝
+            if (!canReadAll) {
+                return res.status(403).json({ msg: "权限不足：你无权查看他人的统计数据" });
+            }
+
+            // 查找目标用户 ID
+            const user = await User.findOne({ email: req.query.email });
+            if (user) {
+                targetUserId = user._id;
+            } else {
+                return res.status(404).json({ msg: "User not found" });
+            }
+        } 
+        // else: 如果 email 是自己，targetUserId 默认就是自己，不用动
     }
 
+    // ============================================================
+    // 3. 执行查询与数据处理 (保持原有逻辑)
+    // ============================================================
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
 
