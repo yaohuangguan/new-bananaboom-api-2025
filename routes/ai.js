@@ -24,8 +24,7 @@ const Post = require("../models/Post");
 const Resume = require("../models/Resume");
 const Period = require("../models/Period");
 const systemCache = require("../cache/memoryCache");
-// 建议加上 auth 中间件
-router.use(auth);
+
 
 
 // 引入 Day.js 处理时区
@@ -363,7 +362,7 @@ router.post("/ask", async (req, res) => {
  * @desc    前端传菜名，AI 返回：详细做法 + 3道推荐配菜
  * @body    { "dishName": "红烧肉" }
  */
-router.post("/recipe-recommend", auth, async (req, res) => {
+router.post("/recipe-recommend", async (req, res) => {
   const {
     dishName
   } = req.body;
