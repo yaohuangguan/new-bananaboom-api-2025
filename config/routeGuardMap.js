@@ -121,17 +121,19 @@ const ROUTE_MAP = [
     { path: '/api/backup', method: 'ALL', permission: K.SYSTEM_LOGS_USE },
 ];
 
-/**
- * 🛠️ 预排序：
- * 1. 路径越长的排在越前面 (确保 /api/posts/private 优先于 /api/posts)
- * 2. 正则匹配排在前面 (因为正则通常更具体)
- */
 const sortedMap = ROUTE_MAP.sort((a, b) => {
-    // 如果有正则，提升优先级
+    // 1. 🛡️ 防御性检查：确保 a 和 b 至少有一个匹配依据
+    const pathA = a.path || "";
+    const pathB = b.path || "";
+
+    // 2. 正则规则优先级提升
+    // 如果 a 有正则而 b 没有，a 排前面
     if (a.regex && !b.regex) return -1;
     if (!a.regex && b.regex) return 1;
-    // 路径长度降序
-    return b.path.length - a.path.length;
+
+    // 3. 路径长度降序排列
+    // 这样 /api/posts/private (length 18) 会排在 /api/posts (length 10) 前面
+    return pathB.length - pathA.length;
 });
 
 module.exports = sortedMap;
