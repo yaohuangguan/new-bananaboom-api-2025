@@ -195,74 +195,67 @@ const toolsSchema = [{
 // 2. 后端执行逻辑 (Executor)
 // ==========================================
 const functions = {
-    /**
+/**
      * 修改健身目标
+     * 优化：直接使用透传的 user 对象，省去一次查询
      */
-    async update_fitness_goal({
-        goal
-    }, userId) {
-        try {
-            // ✅ 新代码: Find -> Modify -> Save
-            const user = await User.findById(userId);
-            if (user) {
-                user.fitnessGoal = goal;
-                await user.save(); // 触发 Schema 验证和 Hooks
-            }
-            const map = {
-                cut: "减脂模式",
-                bulk: "增肌模式",
-                maintain: "保持模式"
-            };
-            return {
-                success: true,
-                message: `已将你的计划调整为：${map[goal] || goal}`
-            };
-        } catch (e) {
-            return {
-                success: false,
-                message: "修改失败: " + e.message
-            };
-        }
-    },
+async update_fitness_goal({ goal }, { user }) {
+    try {
+        if (!user) throw new Error("用户信息缺失");
 
-    /**
-     * 记录体重
-     * 优化：增加 markModified 和 userId 异常处理
-     */
-    async log_weight({
-        weight,
-        dateStr
-    }, userId) {
-        try {
-            if (!userId) throw new Error("缺少用户 ID");
+        // 直接操作透传进来的 user 对象（它是一个 Mongoose Document）
+        user.fitnessGoal = goal;
+        await user.save(); // 触发 Schema 验证
 
+        const map = {
+            cut: "减脂模式",
+            bulk: "增肌模式",
+            maintain: "保持模式"
+        };
+
+        return {
+            success: true,
+            message: `已将你的计划调整为：${map[goal] || goal}`
+        };
+    } catch (e) {
+        return {
+            success: false,
+            message: "修改失败: " + e.message
+        };
+    }
+},
+
+    async log_weight({ weight, dateStr }, context) { // 第二个参数是 context
+        try {
+            // 从 context 中解构出 user
+            const { user } = context; 
+            if (!user || !user._id) throw new Error("缺少用户信息");
+            
+            const userId = user._id; // 统一拿 ID
+    
             let record = await Fitness.findOne({
                 user: userId,
                 dateStr
             });
-
+    
             if (record) {
-                // 🔥 必须确保 body 对象存在，并标记修改
                 if (!record.body) record.body = {};
                 record.body.weight = weight;
-
-                // 显式标记嵌套对象已更改
                 record.markModified('body');
-
                 await record.save();
                 return {
                     success: true,
                     message: `更新成功！${dateStr} 的体重已更新为 ${weight}kg`
                 };
             } else {
-                const user = await User.findById(userId);
+                // 这里直接用传入的 user 对象即可，甚至不需要重新查库
                 const newRecord = new Fitness({
                     user: userId,
                     date: new Date(dateStr),
                     dateStr: dateStr,
                     body: {
                         weight: weight,
-                        height: user?.height || 175 // 增加安全调用符
+                        height: user?.height || 175 
                     }
                 });
                 await newRecord.save();
@@ -272,10 +265,7 @@ const functions = {
                 };
             }
         } catch (e) {
-            return {
-                success: false,
-                message: "记录失败: " + e.message
-            };
+            return { success: false, message: "记录失败: " + e.message };
         }
     },
 
@@ -365,113 +355,96 @@ const functions = {
     },
 
 
-    /**
+   /**
      * 记录运动
-     * 优化：处理数组推入和时长累加的持久化问题
+     * 优化：参数对齐，使用 user._id 查询
      */
-    async log_workout({
-        type,
-        duration = 30,
-        dateStr
-    }, userId) {
-        try {
-            if (!userId) throw new Error("缺少用户 ID");
+   async log_workout({ type, duration = 30, dateStr }, { user }) {
+    try {
+        if (!user?._id) throw new Error("缺少用户 ID");
+        const userId = user._id;
 
-            let record = await Fitness.findOne({
+        let record = await Fitness.findOne({ user: userId, dateStr });
+        if (!record) {
+            record = new Fitness({
                 user: userId,
+                date: new Date(dateStr),
                 dateStr
             });
-            if (!record) {
-                record = new Fitness({
-                    user: userId,
-                    date: new Date(dateStr),
-                    dateStr
-                });
-            }
-
-            // 确保子对象存在
-            if (!record.workout) record.workout = {
-                types: [],
-                duration: 0,
-                isDone: true
-            };
-
-            record.workout.isDone = true;
-            // 累加时长
-            record.workout.duration = (record.workout.duration || 0) + Number(duration);
-
-            // 处理数组：Mongoose 的数组方法 push 通常能触发更新，但显式标记更稳
-            if (!record.workout.types) record.workout.types = [];
-            if (!record.workout.types.includes(type)) {
-                record.workout.types.push(type);
-            }
-
-            // 🔥 核心：标记 workout 整个对象已修改
-            record.markModified('workout');
-
-            await record.save();
-            return {
-                success: true,
-                message: `打卡成功！${type} ${duration}分钟。`
-            };
-        } catch (e) {
-            return {
-                success: false,
-                message: "运动打卡失败: " + e.message
-            };
         }
-    },
 
-    /**
-     * 记录心情
-     * 优化：修复 workout.note 不更新的问题
-     */
-    async log_mood({
-        mood,
-        note,
-        dateStr
-    }, userId) {
-        try {
-            if (!userId) throw new Error("缺少用户 ID");
+        // 初始化 workout 对象
+        if (!record.workout) record.workout = { types: [], duration: 0, isDone: true };
 
-            let record = await Fitness.findOne({
+        record.workout.isDone = true;
+        // 确保 duration 是数字相加
+        record.workout.duration = (record.workout.duration || 0) + Number(duration);
+
+        // 数组去重推入
+        if (!record.workout.types) record.workout.types = [];
+        if (!record.workout.types.includes(type)) {
+            record.workout.types.push(type);
+        }
+
+        // 显式标记，确保嵌套更新成功
+        record.markModified('workout');
+
+        await record.save();
+        return {
+            success: true,
+            message: `打卡成功！${type} ${duration}分钟。`
+        };
+    } catch (e) {
+        return {
+            success: false,
+            message: "运动打卡失败: " + e.message
+        };
+    }
+},
+
+/**
+ * 记录心情
+ * 优化：参数对齐，利用透传对象
+ */
+async log_mood({ mood, note, dateStr }, { user }) {
+    try {
+        if (!user?._id) throw new Error("缺少用户 ID");
+        const userId = user._id;
+
+        let record = await Fitness.findOne({ user: userId, dateStr });
+        if (!record) {
+            record = new Fitness({
                 user: userId,
+                date: new Date(dateStr),
                 dateStr
             });
-            if (!record) {
-                record = new Fitness({
-                    user: userId,
-                    date: new Date(dateStr),
-                    dateStr
-                });
-            }
-
-            // 1. 处理状态 (mood)
-            if (!record.status) record.status = {};
-            record.status.mood = mood;
-            record.markModified('status');
-
-            // 2. 处理笔记 (workout.note)
-            if (!record.workout) record.workout = {};
-            const oldNote = record.workout.note || "";
-            // 智能拼接
-            record.workout.note = oldNote ? `${oldNote} | ${note}` : note;
-
-            // 🔥 核心：必须标记 workout 修改，否则 note 不会存入库
-            record.markModified('workout');
-
-            await record.save();
-            return {
-                success: true,
-                message: `心情已记录 (${mood})。`
-            };
-        } catch (e) {
-            return {
-                success: false,
-                message: "记录心情失败: " + e.message
-            };
         }
-    },
+
+        // 1. 处理心情
+        if (!record.status) record.status = {};
+        record.status.mood = mood;
+        record.markModified('status');
+
+        // 2. 拼接笔记到 workout.note
+        if (!record.workout) record.workout = {};
+        const oldNote = record.workout.note || "";
+        record.workout.note = oldNote ? `${oldNote} | ${note}` : note;
+
+        // 必须标记 workout 修改
+        record.markModified('workout');
+
+        await record.save();
+        return {
+            success: true,
+            message: `心情已记录 (${mood})。`
+        };
+    } catch (e) {
+        return {
+            success: false,
+            message: "记录心情失败: " + e.message
+        };
+    }
+},
     // 在 functionsMap 中添加：
     update_user_settings: async ({
         timezone,
