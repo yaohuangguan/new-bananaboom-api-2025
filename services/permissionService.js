@@ -12,23 +12,42 @@ class PermissionService {
         this.isLoaded = false;
     }
 
-    /**
-     * 系统启动时加载所有角色权限到内存
+   /**
+     * 🚀 系统启动初始化调用
+     * 确保只会在启动时完整运行一次，之后全靠 reload
      */
-    async load() {
-        try {
-            const roles = await Role.find({});
-            const newCache = {};
-            roles.forEach(r => {
-                newCache[r.name] = r.permissions || [];
-            });
-            this.roleCache = newCache;
-            this.isLoaded = true;
-            console.log("✅ 权限服务初始化成功");
-        } catch (err) {
-            console.error("❌ 权限加载失败:", err);
-        }
+   async load() {
+    if (this.isLoaded) return; // 防止重复初始化
+    await this.reload();
+    this.isLoaded = true;
+    console.log("✅ 权限服务初始化成功");
+}
+
+/**
+ * 🔄 权限热重载 (核心方法)
+ * 无论是 load 还是后台修改权限，最终都调这个
+ */
+async reload() {
+    try {
+        // 1. 从数据库拉取最新的角色权限表
+        const roles = await Role.find({});
+        const newCache = {};
+        
+        // 2. 构造缓存对象
+        roles.forEach(r => {
+            newCache[r.name] = r.permissions || [];
+        });
+
+        // 3. 原子替换内存引用
+        this.roleCache = newCache;
+        
+        console.log(`♻️  权限数据已刷新: 共计 ${Object.keys(this.roleCache).length} 个角色`);
+        return true;
+    } catch (err) {
+        console.error("❌ 权限重载失败:", err);
+        return false;
     }
+}
 
     /**
      * 🔥 核心逻辑：计算用户的最终权限全集
