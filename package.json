@@ -24,7 +24,6 @@
     "express-validator": "^6.3.1",
     "helmet": "^3.21.2",
     "isomorphic-unfetch": "^3.0.0",
-    "jest": "^30.2.0",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^9.0.0",
     "morgan": "^1.9.1",
@@ -40,15 +39,19 @@
     "spdy": "^4.0.1"
   },
   "devDependencies": {
+    "cross-env": "^10.1.0",
     "eslint": "^8.57.0",
     "eslint-plugin-import": "^2.32.0",
     "husky": "^8.0.0",
-    "nodemon": "^2.0.1"
+    "jest": "^30.2.0",
+    "mongodb-memory-server": "^11.0.0",
+    "nodemon": "^2.0.1",
+    "supertest": "^7.1.4"
   },
   "scripts": {
     "start": "node --experimental-specifier-resolution=node index.js",
     "dev": "nodemon index.js --use-strict",
-    "test": "jest",
+    "test": "cross-env NODE_ENV=test jest --detectOpenHandles",
     "bark": "node ./utils/updateBark.js",
     "prepare": "husky install"
   },

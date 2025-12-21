@@ -1,0 +1,177 @@
+const request = require('supertest');
+const app = require('../index');
+const User = require('../models/User');
+
+let userToken, userId, userEmail;
+let otherToken, otherEmail;
+
+describe('🏋️‍♀️ Fitness Module Tests', () => {
+
+  beforeEach(async () => {
+    // 1. 注册主角 (Fit Guy)
+    const res = await request(app).post('/api/users').send({
+      displayName: "Fit Guy",
+      email: "fit@gym.com",
+      password: "Password123",
+      passwordConf: "Password123"
+    });
+    
+    userToken = res.body.token;
+    // 🔥🔥🔥 核心修复：使用 ._id 而不是 .id
+    userId = res.body.user._id; 
+    userEmail = res.body.user.email;
+
+    // 2. 注册配角 (Other Guy)
+    const resOther = await request(app).post('/api/users').send({
+      displayName: "Other Guy",
+      email: "other@gym.com",
+      password: "Password123",
+      passwordConf: "Password123"
+    });
+    
+    otherToken = resOther.body.token;
+    // 🔥🔥🔥 核心修复：使用 ._id 而不是 .id
+    otherEmail = resOther.body.user.email;
+  });
+
+  // ==========================================
+  // 1. 创建记录 (Height Auto-fill)
+  // ==========================================
+  it('POST /api/fitness - Should auto-fill height from user profile', async () => {
+    // 1. 确保 userId 存在再操作
+    if (!userId) throw new Error("User ID setup failed!");
+
+    // 2. 给主角设定身高
+    await User.findByIdAndUpdate(userId, { height: 180 });
+
+    // 3. 发请求 (不传 height)
+    const res = await request(app)
+      .post('/api/fitness')
+      .set('x-auth-token', userToken)
+      .send({
+        date: new Date().toISOString(),
+        body: { weight: 75 }
+      });
+
+    expect(res.statusCode).toEqual(200);
+    expect(res.body.body.weight).toBe(75);
+    expect(res.body.body.height).toBe(180); // 应该自动补全
+  });
+
+  // ==========================================
+  // 2. 查看列表 (Permissions)
+  // ==========================================
+  it('GET /api/fitness - Should see own records', async () => {
+    // 先创建一条
+    await request(app).post('/api/fitness').set('x-auth-token', userToken).send({
+        date: new Date().toISOString()
+    });
+
+    const res = await request(app)
+      .get('/api/fitness')
+      .set('x-auth-token', userToken);
+
+    expect(res.statusCode).toEqual(200);
+    expect(res.body.length).toBeGreaterThan(0);
+    // 验证返回的 User ID 是否匹配
+    expect(res.body[0].user._id).toEqual(userId);
+  });
+
+  it('GET /api/fitness - Should NOT see others records (Normal User)', async () => {
+    const res = await request(app)
+      .get(`/api/fitness?email=${otherEmail}`)
+      .set('x-auth-token', userToken);
+
+    expect(res.statusCode).toEqual(403);
+    expect(res.body.msg).toMatch(/权限不足/);
+  });
+
+  it('GET /api/fitness - Super Admin CAN see others records', async () => {
+    // 1. 动态提权 (修改数据库)
+    await User.findByIdAndUpdate(userId, { role: 'super_admin' });
+
+    // 2. 🔥🔥🔥 核心修复：重新登录以刷新 Token
+    // 旧的 userToken 里写死了 role: 'user'，必须重新签发
+    const loginRes = await request(app).post('/api/users/signin').send({
+        email: userEmail,      // 使用 beforeEach 里保存的邮箱
+        password: "Password123" // 注册时用的密码
+    });
+    
+    // 拿到印着 "super_admin" 的新身份证
+    const superAdminToken = loginRes.body.token;
+
+    // 3. 使用新 Token 发请求
+    const res = await request(app)
+      .get(`/api/fitness?email=${otherEmail}`)
+      .set('x-auth-token', superAdminToken); // 👈 关键：用新 Token
+
+    expect(res.statusCode).toEqual(200);
+  });
+
+  // ==========================================
+  // 3. 删除记录
+  // ==========================================
+  it('DELETE /api/fitness/:id - Should delete own record', async () => {
+    // 1. 创建记录
+    const createRes = await request(app).post('/api/fitness').set('x-auth-token', userToken).send({
+        date: new Date().toISOString()
+    });
+    const recordId = createRes.body._id;
+
+    // 2. 删除
+    const delRes = await request(app)
+      .delete(`/api/fitness/${recordId}`)
+      .set('x-auth-token', userToken);
+
+    expect(delRes.statusCode).toEqual(200);
+    expect(delRes.body.msg).toBe('Record removed');
+  });
+
+  // ==========================================
+  // 4. 🔥 专门测试 Global Guard (门卫拦截)
+  // ==========================================
+  it('Guard Test: User WITHOUT "FITNESS:USE" permission should be blocked globally', async () => {
+    // 1. 在数据库造一个 "废柴角色" (No Permissions)
+    const Role = require('../models/Role'); // 引入 Role 模型
+    await Role.create({ 
+      name: 'banned_role', 
+      permissions: [] // 🔥 空权限
+    });
+
+    // 2. 注册一个倒霉蛋，并分配这个废柴角色
+    // (注意：这里我们直接操作数据库改角色，因为注册接口默认给 'user' 角色)
+    const res = await request(app).post('/api/users').send({
+      displayName: "No Perm Guy",
+      email: "noperm@test.com",
+      password: "Password123",
+      passwordConf: "Password123"
+    });
+    const token = res.body.token;
+    const userId = res.body.user._id;
+
+    // 修改角色为无权限角色
+    await User.findByIdAndUpdate(userId, { role: 'banned_role' });
+
+    // 3. 重新登录刷新 Token (让 Token 里的 role 变成 banned_role)
+    const loginRes = await request(app).post('/api/users/signin').send({
+        email: "noperm@test.com",
+        password: "Password123"
+    });
+    const newToken = loginRes.body.token;
+
+    // 4. 尝试访问 /api/fitness
+    // (RouteMap 里配置了 /api/fitness 需要 FITNESS:USE)
+    const accessRes = await request(app)
+      .get('/api/fitness')
+      .set('x-auth-token', newToken);
+
+    // 5. 期望被 Guard 拦截
+    expect(accessRes.statusCode).toEqual(403);
+    
+    // 🔥 关键：验证报错信息来自 Guard (Permission Denied) 而不是 Controller
+    // Guard 的报错通常是: { msg: "Permission Denied", required: "FITNESS:USE" }
+    expect(accessRes.body.msg).toMatch(/Permission Denied/i);
+    expect(accessRes.body.required).toMatch(/FITNESS:USE/i);
+  });
+
+});

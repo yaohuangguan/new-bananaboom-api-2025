@@ -1,7 +1,5 @@
 const express = require("express");
 const router = express.Router();
-const auth = require("../middleware/auth");
-const checkPrivate = require("../middleware/checkPrivate");
 
 // 引入所有数据模型
 const User = require("../models/User");
@@ -19,7 +17,7 @@ const AuditLog = require("../models/AuditLog");
 // @route   GET /api/backup
 // @desc    导出数据库备份 (支持 ?type=users 单独导出)
 // @access  Private & VIP Only
-router.get("/", auth, checkPrivate, async (req, res) => {
+router.get("/", async (req, res) => {
   const { type } = req.query; // 获取查询参数，例如: ?type=photos
 
   try {

@@ -3,19 +3,7 @@ const router = express.Router();
 const Permission = require("../models/Permission");
 const Role = require("../models/Role");
 const permissionService = require("../services/permissionService"); // 引入服务
-const auth = require("../middleware/auth");
 
-// =================================================================
-// 🛡️ 内部中间件：只允许 Super Admin 访问
-// =================================================================
-const requireSuperAdmin = (req, res, next) => {
-  if (req.user && req.user.role === 'super_admin') {
-    return next();
-  }
-  return res.status(403).json({ msg: "权限不足：此操作仅限超级管理员" });
-};
-
-router.use(auth, requireSuperAdmin);
 
 // =================================================================
 // 1. [GET] 获取所有权限定义

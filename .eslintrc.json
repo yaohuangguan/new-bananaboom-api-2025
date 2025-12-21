@@ -1,7 +1,8 @@
 {
     "env": {
         "node": true,
-        "es2021": true
+        "es2021": true,
+        "jest": true // 🔥🔥🔥 加上这一行！告诉 ESLint 识别 Jest 全局变量
     },
     "extends": [
         "eslint:recommended"

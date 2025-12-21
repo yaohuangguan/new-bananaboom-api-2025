@@ -1,7 +1,5 @@
 const router = require("express").Router();
 const Period = require("../models/Period");
-const auth = require("../middleware/auth");
-const checkPrivate = require("../middleware/checkPrivate"); 
 const logOperation = require("../utils/audit");
 const dayjs = require("dayjs");
 
@@ -81,7 +79,7 @@ const calculateCycleDetails = (records) => {
  * @access  Private
  * 权限：super_admin 可查看指定 targetUserId 或全量数据；普通用户仅限查看自己。
  */
-router.get("/", auth, checkPrivate, async (req, res) => {
+router.get("/", async (req, res) => {
   try {
     let query = {};
     const { targetUserId } = req.query;
@@ -112,7 +110,7 @@ router.get("/", auth, checkPrivate, async (req, res) => {
  * @route   POST /api/period
  * @desc    新增经期记录 (支持管理员代打卡)
  */
-router.post("/", auth, checkPrivate, async (req, res) => {
+router.post("/", async (req, res) => {
   const { startDate, endDate, symptoms, flow, note, targetUserId, color } = req.body;
 
   try {
@@ -178,7 +176,7 @@ router.post("/", auth, checkPrivate, async (req, res) => {
  * @route   PUT /api/period/:id
  * @desc    修改经期记录
  */
-router.put("/:id", auth, checkPrivate, async (req, res) => {
+router.put("/:id", async (req, res) => {
   const { startDate, endDate, symptoms, flow, note, color } = req.body;
   
   try {
@@ -217,7 +215,7 @@ router.put("/:id", auth, checkPrivate, async (req, res) => {
 /**
  * @route   DELETE /api/period/:id
  */
-router.delete("/:id", auth, checkPrivate, async (req, res) => {
+router.delete("/:id", async (req, res) => {
     try {
         let query = { _id: req.params.id };
         // 越权校验

@@ -3,13 +3,9 @@ const router = express.Router();
 const Menu = require("../models/Menu");
 const Fitness = require("../models/Fitness");
 const User = require("../models/User"); 
-const auth = require("../middleware/auth");
-const checkPrivate = require("../middleware/checkPrivate"); // 私域权限检查
 const dayjs = require("dayjs");
 const { generateJSON } = require("../utils/aiProvider"); // 刚才封装好的 AI 工具
 const mongoose = require("mongoose");
-// 🔥 全局路由守卫：只有登录且是 VIP (家人) 才能访问
-router.use(auth, checkPrivate);
 
 /**
  * =================================================================
@@ -47,7 +43,7 @@ router.get("/", async (req, res) => {
  * @desc    根据用户最新体重、BMI、健身目标，推荐 3 道适合的菜品
  * @access  Private
  */
-router.post("/recommend", auth, async (req, res) => {
+router.post("/recommend", async (req, res) => {
   try {
     const userId = req.user.id;
 
@@ -100,7 +96,7 @@ router.post("/recommend", auth, async (req, res) => {
     console.log(`🥗 [AI Menu] Generating for: ${userContext}`);
 
     const systemPrompt = `
-      你是一位拥有 20 年经验的运动营养专家。请根据用户的身体数据(BMI)和健身目标，推荐 3 道适合的正餐（午餐或晚餐）。
+      你是一位拥有 20 年经验的运动营养专家。请根据用户的身体数据(BMI)和健身目标，推荐 3 道适合的正餐（午餐或晚餐）。要偏中式一些，2道中式1道西式。
       
       【用户信息】：
       ${userContext}
@@ -311,7 +307,7 @@ router.delete("/:id", async (req, res) => {
  * 2. Fitness表：在当前用户的今日记录中，追加饮食内容。
  * 3. Auto-Water: 如果菜名含“汤”，自动 +300ml 水。
  */
-router.post("/confirm/:id", auth, async (req, res) => {
+router.post("/confirm/:id", async (req, res) => {
     // 1. 获取并解码参数 (防止中文乱码)
     // 这里的 id 可能是 "65a..." (数据库ID) 也可能是 "红烧牛肉" (AI生成的菜名)
     const paramId = decodeURIComponent(req.params.id);

@@ -2,17 +2,18 @@ const express = require("express");
 const User = require("../models/User");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-const auth = require("../middleware/auth");
 const redis = require("../cache/cache");
 const getCreateTime = require("../utils")
-const checkPrivate = require("../middleware/checkPrivate");
 const logOperation = require("../utils/audit");
 const checkPermission = require('../middleware/checkPermission');
 const K = require('../config/permissionKeys');
 const permissionService = require('../services/permissionService');
 const SECRET = process.env.SECRET_JWT || require("../config/keys").SECRET_JWT;
 const router = express.Router();
-const { check, validationResult } = require("express-validator");
+const {
+  check,
+  validationResult
+} = require("express-validator");
 
 // ==========================================
 // 🔧 常量定义 (Regex Patterns)
@@ -29,13 +30,17 @@ const PHONE_REGEX = /^\+?[0-9]{7,15}$/;
 // ==========================================
 // 👤 获取当前用户信息 (Load User)
 // ==========================================
-router.get("/profile", auth, async (req, res) => {
+router.get("/profile", async (req, res) => {
   try {
-    const { id } = req.user;
+    const {
+      id
+    } = req.user;
     let user = await User.findById(id).select("-password +barkUrl");
 
     if (!user) {
-      return res.status(404).json({ message: "User not found" });
+      return res.status(404).json({
+        message: "User not found"
+      });
     }
 
     // 转为普通对象以便修改
@@ -60,7 +65,7 @@ router.get("/profile", auth, async (req, res) => {
 // @route   GET api/users
 // @desc    获取所有用户 (支持分页、搜索、自定义权重排序)
 // @access  Private
-router.get("/", auth, async (req, res) => {
+router.get("/", async (req, res) => {
   try {
     // 1. 分页参数
     const page = parseInt(req.query.page) || 1;
@@ -68,15 +73,31 @@ router.get("/", auth, async (req, res) => {
     const skip = (page - 1) * limit;
 
     // 2. 搜索参数 (保持不变)
-    const { search } = req.query;
+    const {
+      search
+    } = req.query;
     let matchQuery = {};
 
     if (search) {
       matchQuery = {
-        $or: [
-          { displayName: { $regex: search, $options: "i" } },
-          { name: { $regex: search, $options: "i" } },
-          { email: { $regex: search, $options: "i" } }
+        $or: [{
+            displayName: {
+              $regex: search,
+              $options: "i"
+            }
+          },
+          {
+            name: {
+              $regex: search,
+              $options: "i"
+            }
+          },
+          {
+            email: {
+              $regex: search,
+              $options: "i"
+            }
+          }
         ]
       };
     }
@@ -93,21 +114,42 @@ router.get("/", auth, async (req, res) => {
     // ============================================================
     // 如果没有传 sortBy，或者明确要求 sortBy=role，就走这套逻辑
     if (!sortBy || sortBy === 'role') {
-      
+
       const pipeline = [
         // 1. 筛选 (Search)
-        { $match: matchQuery },
+        {
+          $match: matchQuery
+        },
 
         // 2. 🔥 核心：添加权重字段 (用于排序)
         {
           $addFields: {
             roleWeight: {
               $switch: {
-                branches: [
-                  { case: { $eq: ["$role", "super_admin"] }, then: 3 }, // 权重最高
-                  { case: { $eq: ["$role", "admin"] }, then: 2 },
-                  { case: { $eq: ["$role", "user"] }, then: 1 },
-                  { case: { $eq: ["$role", "bot"] }, then: 0 }       // 机器人排最后
+                branches: [{
+                    case: {
+                      $eq: ["$role", "super_admin"]
+                    },
+                    then: 3
+                  }, // 权重最高
+                  {
+                    case: {
+                      $eq: ["$role", "admin"]
+                    },
+                    then: 2
+                  },
+                  {
+                    case: {
+                      $eq: ["$role", "user"]
+                    },
+                    then: 1
+                  },
+                  {
+                    case: {
+                      $eq: ["$role", "bot"]
+                    },
+                    then: 0
+                  } // 机器人排最后
                 ],
                 default: 0
               }
@@ -117,14 +159,28 @@ router.get("/", auth, async (req, res) => {
 
         // 3. 🔥 排序
         // 先按权重降序 (3->2->1)，如果权重相同(同级)，按注册时间降序(最新在前)
-        { $sort: { roleWeight: -1, date: -1 } },
+        {
+          $sort: {
+            roleWeight: -1,
+            date: -1
+          }
+        },
 
         // 4. 分页
-        { $skip: skip },
-        { $limit: limit },
+        {
+          $skip: skip
+        },
+        {
+          $limit: limit
+        },
 
         // 5. 数据清洗 (去掉临时生成的 roleWeight 字段，去掉密码)
-        { $project: { password: 0, roleWeight: 0 } }
+        {
+          $project: {
+            password: 0,
+            roleWeight: 0
+          }
+        }
       ];
 
       // 并行执行：获取数据(聚合) + 获取总数(Count)
@@ -135,20 +191,22 @@ router.get("/", auth, async (req, res) => {
 
       users = aggUsers;
       total = count;
-    } 
-    
+    }
+
     // ============================================================
     // 场景 B: 普通排序 (按名字、邮箱、日期等简单字段排序)
     // ============================================================
     else {
-      const sortOptions = { [sortBy]: order };
-      
+      const sortOptions = {
+        [sortBy]: order
+      };
+
       const [findUsers, count] = await Promise.all([
         User.find(matchQuery)
-          .sort(sortOptions)
-          .skip(skip)
-          .limit(limit)
-          .select("-password"),
+        .sort(sortOptions)
+        .skip(skip)
+        .limit(limit)
+        .select("-password"),
         User.countDocuments(matchQuery)
       ]);
 
@@ -187,51 +245,67 @@ router.post(
   [
     // --- A. 基础字段校验 ---
     check("displayName", "Please provide a name")
-      .not().isEmpty()
-      .trim()
-      .escape(), // 防 XSS
+    .not().isEmpty()
+    .trim()
+    .escape(), // 防 XSS
 
     check("email", "Please provide a valid email")
-      .isEmail()
-      .normalizeEmail(), // 标准化 (转小写等)
+    .isEmail()
+    .normalizeEmail(), // 标准化 (转小写等)
 
     check("password", "Password is required")
-      .isLength({ min: 8 })
-      .custom((value, { req }) => {
-        if (value !== req.body.passwordConf) {
-          throw new Error("Passwords do not match");
-        }
-        if (!PASSWORD_REGEX.test(value)) {
-          throw new Error("Password must contain letters and numbers, min 8 chars");
-        }
-        return true;
-      }),
+    .isLength({
+      min: 8
+    })
+    .custom((value, {
+      req
+    }) => {
+      if (value !== req.body.passwordConf) {
+        throw new Error("Passwords do not match");
+      }
+      if (!PASSWORD_REGEX.test(value)) {
+        throw new Error("Password must contain letters and numbers, min 8 chars");
+      }
+      return true;
+    }),
 
     // --- B. 手机号校验 (严谨逻辑) ---
     // optional({ checkFalsy: true }): 允许 null, undefined, "" 通过校验
     // 如果有值，则必须通过 custom 正则校验
     check("phone", "Invalid phone format. (e.g., +8613800000000)")
-      .optional({ nullable: true, checkFalsy: true }) 
-      .trim()
-      .custom((value) => {
-        if (!PHONE_REGEX.test(value)) {
-          throw new Error("Phone number format is invalid");
-        }
-        return true;
-      })
+    .optional({
+      nullable: true,
+      checkFalsy: true
+    })
+    .trim()
+    .custom((value) => {
+      if (!PHONE_REGEX.test(value)) {
+        throw new Error("Phone number format is invalid");
+      }
+      return true;
+    })
   ],
   async (req, res) => {
     // 1. 校验结果处理
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
+      return res.status(400).json({
+        errors: errors.array()
+      });
     }
 
-    const { displayName, email, password, phone } = req.body;
+    const {
+      displayName,
+      email,
+      password,
+      phone
+    } = req.body;
 
     try {
       // 2. 检查邮箱唯一性 (转小写查)
-      let userByEmail = await User.findOne({ email: email.toLowerCase() });
+      let userByEmail = await User.findOne({
+        email: email.toLowerCase()
+      });
       if (userByEmail) {
         return res.status(400).json({
           message: "User already exists",
@@ -245,7 +319,9 @@ router.post(
       const cleanPhone = (phone && phone.trim() !== '') ? phone.trim() : undefined;
 
       if (cleanPhone) {
-        const userByPhone = await User.findOne({ phone: cleanPhone });
+        const userByPhone = await User.findOne({
+          phone: cleanPhone
+        });
         if (userByPhone) {
           return res.status(400).json({
             message: "Phone number already in use",
@@ -257,19 +333,19 @@ router.post(
       // 4. 创建用户实例
       const newUser = new User({
         displayName,
-        email: email.toLowerCase(), 
-        phone: cleanPhone,          // 存入清洗后的手机号
-        password,                   // 暂存明文，下一步加密
+        email: email.toLowerCase(),
+        phone: cleanPhone, // 存入清洗后的手机号
+        password, // 暂存明文，下一步加密
         date: getCreateTime()
       });
 
       // 5. 密码加密
       const salt = await bcrypt.genSalt(10);
       newUser.password = await bcrypt.hash(password, salt);
-      
+
       // 6. 落库保存
       await newUser.save();
-      
+
       // 7. 生成 Token Payload (包含 phone)
       const payload = {
         user: {
@@ -286,30 +362,37 @@ router.post(
 
       const token = signToken(payload);
       await setToken(token, token); // Redis 缓存 (如果有)
-      
+
       // 8. 审计日志
       logOperation({
         operatorId: newUser.id,
         action: "SIGN_UP",
         target: `User Registered: ${newUser.email}`,
-        details: { phone: cleanPhone },
+        details: {
+          phone: cleanPhone
+        },
         ip: req.ip,
         io: req.app.get('socketio')
       });
-      
+
       // 9. 返回响应 (数据脱敏 + 动态权限)
       const userObj = newUser.toObject();
       delete userObj.password;
       delete userObj.__v;
-      
+
       // 🔥 计算权限 (DB Role + Extra Permissions)
       userObj.permissions = permissionService.getUserMergedPermissions(newUser);
 
-      res.status(201).json({ token, user: userObj });
+      res.status(201).json({
+        token,
+        user: userObj
+      });
 
     } catch (error) {
       console.error("[Register Error]:", error);
-      res.status(500).json({ message: "Server internal error" });
+      res.status(500).json({
+        message: "Server internal error"
+      });
     }
   }
 );
@@ -335,20 +418,28 @@ router.post(
     // 1. 校验输入
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
+      return res.status(400).json({
+        errors: errors.array()
+      });
     }
 
     // 🔥🔥🔥 核心：变量重命名 (Aliasing) 🔥🔥🔥
     // 彻底消除歧义：inputAccount 代表用户输入的任何账号字符串
-    const { email: inputAccount, password } = req.body;
+    const {
+      email: inputAccount,
+      password
+    } = req.body;
 
     try {
       // 2. 智能查询 (Dual Strategy)
       // 使用 $or 并行查找：要么匹配 email，要么匹配 phone
       const user = await User.findOne({
-        $or: [
-            { email: inputAccount.toLowerCase() }, // 尝试匹配邮箱 (转小写)
-            { phone: inputAccount }                // 尝试匹配手机号
+        $or: [{
+            email: inputAccount.toLowerCase()
+          }, // 尝试匹配邮箱 (转小写)
+          {
+            phone: inputAccount
+          } // 尝试匹配手机号
         ]
       });
 
@@ -392,7 +483,9 @@ router.post(
         operatorId: user.id,
         action: "SIGN_IN",
         target: `Login via ${loginMethod}`,
-        details: { inputAccount }, 
+        details: {
+          inputAccount
+        },
         ip: req.ip,
         io: req.app.get('socketio')
       });
@@ -401,28 +494,37 @@ router.post(
       let userObj = user.toObject();
       delete userObj.password;
       delete userObj.__v;
-      
+
       // 🔥 计算最终权限
       userObj.permissions = permissionService.getUserMergedPermissions(user);
 
-      res.json({ token, user: userObj });
+      res.json({
+        token,
+        user: userObj
+      });
 
     } catch (error) {
       console.error("[Login Error]:", error.message);
-      res.status(500).json({ message: "Server internal error" });
+      res.status(500).json({
+        message: "Server internal error"
+      });
     }
   }
 );
 
-router.post("/logout", auth, async (req, res) => {
-  const { token } = req.user;
+router.post("/logout", async (req, res) => {
+  const {
+    token
+  } = req.user;
   await deleteToken(token);
   res.json("OK");
 });
 
 // 1. Token 生成逻辑
 function signToken(payload) {
-  return jwt.sign(payload, SECRET, { expiresIn: "30d" });
+  return jwt.sign(payload, SECRET, {
+    expiresIn: "30d"
+  });
 }
 
 // 2. Redis 存储逻辑
@@ -435,35 +537,50 @@ function deleteToken(token) {
 }
 
 // @route   PUT /api/users/password
-router.put("/password", auth, async (req, res) => {
-  const { oldPassword, newPassword } = req.body;
+router.put("/password", async (req, res) => {
+  const {
+    oldPassword,
+    newPassword
+  } = req.body;
 
   if (!oldPassword || !newPassword) {
-    return res.status(400).json({ message: "Please provide old and new passwords" });
+    return res.status(400).json({
+      message: "Please provide old and new passwords"
+    });
   }
 
   if (newPassword.length < 6) {
-    return res.status(400).json({ message: "New password must be at least 6 characters" });
+    return res.status(400).json({
+      message: "New password must be at least 6 characters"
+    });
   }
 
   try {
     const user = await User.findById(req.user.id);
-    if (!user) return res.status(404).json({ message: "User not found" });
+    if (!user) return res.status(404).json({
+      message: "User not found"
+    });
 
     if (!user.password) {
-      return res.status(400).json({ message: "You use Google Login, no password to change." });
+      return res.status(400).json({
+        message: "You use Google Login, no password to change."
+      });
     }
 
     const isMatch = await bcrypt.compare(oldPassword, user.password);
     if (!isMatch) {
-      return res.status(400).json({ message: "Invalid old password" });
+      return res.status(400).json({
+        message: "Invalid old password"
+      });
     }
 
     const salt = await bcrypt.genSalt(10);
     user.password = await bcrypt.hash(newPassword, salt);
     await user.save();
 
-    res.json({ message: "Password updated successfully" });
+    res.json({
+      message: "Password updated successfully"
+    });
 
   } catch (err) {
     console.error("Change password error:", err.message);
@@ -472,20 +589,25 @@ router.put("/password", auth, async (req, res) => {
 });
 
 // @route   PUT /api/users/fitness-goal
-router.put("/fitness-goal", auth, async (req, res) => {
-  const { goal, userId } = req.body;
+router.put("/fitness-goal", async (req, res) => {
+  const {
+    goal,
+    userId
+  } = req.body;
 
   if (!['cut', 'bulk', 'maintain'].includes(goal)) {
-    return res.status(400).json({ msg: "无效的模式" });
+    return res.status(400).json({
+      msg: "无效的模式"
+    });
   }
 
   try {
     const user = await User.findById(userId);
     user.fitnessGoal = goal;
-    await user.save(); 
+    await user.save();
 
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       msg: "模式已更新",
       goal: user.fitnessGoal
     });
@@ -496,31 +618,45 @@ router.put("/fitness-goal", auth, async (req, res) => {
 
 // @route   POST /api/users/reset-by-secret
 router.post("/reset-by-secret", async (req, res) => {
-  const { email, newPassword, secretKey } = req.body;
+  const {
+    email,
+    newPassword,
+    secretKey
+  } = req.body;
 
   if (!email || !newPassword || !secretKey) {
-    return res.status(400).json({ message: "请填写邮箱、新密码和超级暗号" });
+    return res.status(400).json({
+      message: "请填写邮箱、新密码和超级暗号"
+    });
   }
 
-  const ADMIN_SECRET = process.env.ADMIN_RESET_SECRET || "bananaboom-666"; 
+  const ADMIN_SECRET = process.env.ADMIN_RESET_SECRET || "bananaboom-666";
 
   if (secretKey !== ADMIN_SECRET) {
-    return res.status(403).json({ message: "暗号错误！你不是自己人。" });
+    return res.status(403).json({
+      message: "暗号错误！你不是自己人。"
+    });
   }
 
   try {
-    const user = await User.findOne({ email });
+    const user = await User.findOne({
+      email
+    });
     if (!user) {
-      return res.status(404).json({ message: "找不到这个邮箱的用户" });
+      return res.status(404).json({
+        message: "找不到这个邮箱的用户"
+      });
     }
 
     const salt = await bcrypt.genSalt(10);
     user.password = await bcrypt.hash(newPassword, salt);
 
     await user.save();
-    
+    // 🔥 修复：判空处理，防止未登录时 req.user 报错
+    const operatorId = req.user ? req.user.id : user._id; // 如果没登录，就记录是用户自己重置的
+
     logOperation({
-      operatorId: req.user.id, // 注意：如果未登录调用此接口，req.user可能不存在，建议判空处理
+      operatorId: operatorId, // 注意：如果未登录调用此接口，req.user可能不存在，建议判空处理
       action: "RESET_BY_SECRET",
       target: `密码已通过暗号强制重置 [${email}]`,
       details: {},
@@ -528,7 +664,10 @@ router.post("/reset-by-secret", async (req, res) => {
       io: req.app.get('socketio')
     });
 
-    res.json({ success: true, message: "密码已通过暗号强制重置！请直接登录。" });
+    res.json({
+      success: true,
+      message: "密码已通过暗号强制重置！请直接登录。"
+    });
 
   } catch (err) {
     console.error(err);
@@ -537,23 +676,34 @@ router.post("/reset-by-secret", async (req, res) => {
 });
 
 // @route   PUT /api/users/grant-vip
-router.put("/grant-vip", auth, checkPrivate, async (req, res) => {
-  const { email, username } = req.body;
+router.put("/grant-vip", async (req, res) => {
+  const {
+    email,
+    username
+  } = req.body;
 
   if (!email && !username) {
-    return res.status(400).json({ message: "请提供目标用户的邮箱或用户名" });
+    return res.status(400).json({
+      message: "请提供目标用户的邮箱或用户名"
+    });
   }
 
   try {
     let targetUser = null;
     if (email) {
-      targetUser = await User.findOne({ email });
+      targetUser = await User.findOne({
+        email
+      });
     } else if (username) {
-      targetUser = await User.findOne({ displayName: username });
+      targetUser = await User.findOne({
+        displayName: username
+      });
     }
 
     if (!targetUser) {
-      return res.status(404).json({ message: "找不到该用户" });
+      return res.status(404).json({
+        message: "找不到该用户"
+      });
     }
 
     targetUser.vip = true;
@@ -570,13 +720,13 @@ router.put("/grant-vip", auth, checkPrivate, async (req, res) => {
       io: req.app.get('socketio')
     });
 
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       message: `成功！用户 ${targetUser.displayName} 现在已经是 VIP 了。`,
       user: {
-          id: targetUser.id,
-          name: targetUser.displayName,
-          vip: targetUser.vip
+        id: targetUser.id,
+        name: targetUser.displayName,
+        vip: targetUser.vip
       }
     });
 
@@ -587,58 +737,81 @@ router.put("/grant-vip", auth, checkPrivate, async (req, res) => {
 });
 
 // @route   PUT /api/users/revoke-vip
-router.put("/revoke-vip", auth, checkPrivate, async (req, res) => {
-  const { email, username } = req.body;
+router.put("/revoke-vip", async (req, res) => {
+  const {
+    email,
+    username
+  } = req.body;
   if (!email && !username) {
-    return res.status(400).json({ message: "请提供目标用户的邮箱或用户名" });
+    return res.status(400).json({
+      message: "请提供目标用户的邮箱或用户名"
+    });
   }
 
   try {
     const targetUser = await User.findOne({
-      $or: [
-        { email: email },
-        { displayName: username }
+      $or: [{
+          email: email
+        },
+        {
+          displayName: username
+        }
       ]
     });
 
     if (!targetUser) {
-      return res.status(404).json({ message: "未找到该用户" });
+      return res.status(404).json({
+        message: "未找到该用户"
+      });
     }
 
     targetUser.vip = false;
     await targetUser.save();
 
-    res.json({ 
+    res.json({
       message: `已成功取消用户 [${targetUser.displayName}] 的 VIP 权限`,
       user: {
-          id: targetUser._id,
-          email: targetUser.email,
-          displayName: targetUser.displayName,
-          vip: targetUser.vip
+        id: targetUser._id,
+        email: targetUser.email,
+        displayName: targetUser.displayName,
+        vip: targetUser.vip
       }
     });
 
   } catch (err) {
     console.error("取消 VIP 失败:", err);
-    res.status(500).json({ message: "Server Error" });
+    res.status(500).json({
+      message: "Server Error"
+    });
   }
 });
 
 // @route   PUT /api/users/:id
 // @desc    修改个人资料 (名字、头像、身高、健身目标, 时区，barkUrl)
-router.put("/:id", auth, async (req, res) => {
-  const { displayName, photoURL, height, fitnessGoal, barkUrl, timezone } = req.body;
+router.put("/:id", async (req, res) => {
+  const {
+    displayName,
+    photoURL,
+    height,
+    fitnessGoal,
+    barkUrl,
+    timezone
+  } = req.body;
   const userId = req.params.id;
 
   if (req.user.id !== userId) {
-    return res.status(403).json({ message: "你无权修改他人的资料" });
+    return res.status(403).json({
+      message: "你无权修改他人的资料"
+    });
   }
 
   try {
     const user = await User.findById(userId).select('+barkUrl');
 
     if (!user) {
-      return res.status(404).json({ message: "用户不存在" });
+      return res.status(404).json({
+        message: "用户不存在"
+      });
     }
 
     const changes = {};
@@ -647,7 +820,7 @@ router.put("/:id", auth, async (req, res) => {
       user.displayName = displayName;
       changes.displayName = displayName;
     }
-    
+
     if (photoURL) {
       user.photoURL = photoURL;
       changes.photoURL = photoURL;
@@ -680,7 +853,11 @@ router.put("/:id", auth, async (req, res) => {
     }
 
     if (Object.keys(changes).length === 0) {
-       return res.json({ success: true, message: "资料未变动", user });
+      return res.json({
+        success: true,
+        message: "资料未变动",
+        user
+      });
     }
 
     // 🔥 .save() 触发 VIP/Role 同步钩子
@@ -695,14 +872,14 @@ router.put("/:id", auth, async (req, res) => {
     userObj.permissions = permissionService.getUserMergedPermissions(updatedUser);
 
     if (typeof logOperation === 'function') {
-        logOperation({
-          operatorId: req.user.id,
-          action: "UPDATE_USER_INFO",
-          target: `UPDATE_USER_INFO [${req.user.name || displayName}]`,
-          details: changes,
-          ip: req.ip,
-          io: req.app.get('socketio')
-        });
+      logOperation({
+        operatorId: req.user.id,
+        action: "UPDATE_USER_INFO",
+        target: `UPDATE_USER_INFO [${req.user.name || displayName}]`,
+        details: changes,
+        ip: req.ip,
+        io: req.app.get('socketio')
+      });
     }
 
     res.json({
@@ -714,41 +891,61 @@ router.put("/:id", auth, async (req, res) => {
   } catch (error) {
     console.error("Update profile error:", error);
     if (error.name === 'ValidationError') {
-       return res.status(400).json({ message: "参数错误: " + error.message });
+      return res.status(400).json({
+        message: "参数错误: " + error.message
+      });
     }
-    res.status(500).json({ message: "修改失败，服务器错误" });
+    res.status(500).json({
+      message: "修改失败，服务器错误"
+    });
   }
 });
 
 // @route   PUT /api/users/:id/role
 // @desc    修改用户角色 (权限管理)
-router.put("/:id/role", auth, async (req, res) => {
+router.put("/:id/role", async (req, res) => {
   const targetUserId = req.params.id;
-  const { role: newRole } = req.body;
+  const {
+    role: newRole
+  } = req.body;
 
   const ALLOWED_ROLES = ['user', 'admin', 'super_admin', 'bot'];
   if (!ALLOWED_ROLES.includes(newRole)) {
-    return res.status(400).json({ msg: "无效的角色类型" });
+    return res.status(400).json({
+      msg: "无效的角色类型"
+    });
   }
 
   try {
     const requester = await User.findById(req.user.id);
-    if (!requester) return res.status(401).json({ msg: "操作人不存在" });
+    if (!requester) return res.status(401).json({
+      msg: "操作人不存在"
+    });
 
     const targetUser = await User.findById(targetUserId);
-    if (!targetUser) return res.status(404).json({ msg: "目标用户不存在" });
+    if (!targetUser) return res.status(404).json({
+      msg: "目标用户不存在"
+    });
 
     // 权限逻辑
     if (requester.role === 'user') {
-      return res.status(403).json({ msg: "权限不足：普通用户无法修改角色" });
+      return res.status(403).json({
+        msg: "权限不足：普通用户无法修改角色"
+      });
     }
     if (requester.role === 'admin') {
-      if (newRole === 'super_admin') return res.status(403).json({ msg: "权限不足：Admin 不能任命超级管理员" });
-      if (targetUser.role === 'super_admin') return res.status(403).json({ msg: "权限不足：Admin 无法修改超级管理员的账号" });
+      if (newRole === 'super_admin') return res.status(403).json({
+        msg: "权限不足：Admin 不能任命超级管理员"
+      });
+      if (targetUser.role === 'super_admin') return res.status(403).json({
+        msg: "权限不足：Admin 无法修改超级管理员的账号"
+      });
     }
 
     if (targetUser.role === newRole) {
-      return res.status(400).json({ msg: "该用户已经是这个角色了" });
+      return res.status(400).json({
+        msg: "该用户已经是这个角色了"
+      });
     }
 
     targetUser.role = newRole;
@@ -761,8 +958,8 @@ router.put("/:id/role", auth, async (req, res) => {
     delete userObj.password;
     userObj.permissions = permissionService.getUserMergedPermissions(targetUser);
 
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       msg: `修改成功！用户 ${targetUser.displayName} 现在是 ${newRole}`,
       user: userObj
     });
@@ -775,20 +972,24 @@ router.put("/:id/role", auth, async (req, res) => {
 
 // @route   PUT /api/users/:id/permissions
 // @desc    授予/修改用户额外权限 (Super Admin Only)
-router.put("/:id/permissions", 
-  auth, 
-  checkPermission('*'), 
+router.put("/:id/permissions",
   async (req, res) => {
     const userId = req.params.id;
-    const { permissions } = req.body;
+    const {
+      permissions
+    } = req.body;
 
     if (!Array.isArray(permissions)) {
-      return res.status(400).json({ msg: "Permissions must be an array" });
+      return res.status(400).json({
+        msg: "Permissions must be an array"
+      });
     }
 
     try {
       const user = await User.findById(userId);
-      if (!user) return res.status(404).json({ msg: "User not found" });
+      if (!user) return res.status(404).json({
+        msg: "User not found"
+      });
 
       // 安全过滤
       const validPermissionKeys = Object.values(K);

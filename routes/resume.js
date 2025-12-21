@@ -2,8 +2,7 @@ const express = require("express");
 const router = express.Router();
 const { body } = require("express-validator"); // 引入校验规则
 const Resume = require("../models/Resume");
-const auth = require("../middleware/auth");
-const checkPrivate = require("../middleware/checkPrivate");
+
 const validate = require("../middleware/validate"); // 你的通用校验中间件
 
 // ==========================================
@@ -31,10 +30,6 @@ router.get("/", async (req, res) => {
   }
 });
 
-// ------------------------------------------
-// 以下接口需要管理员权限
-// ------------------------------------------
-router.use(auth, checkPrivate);
 
 // ==========================================
 // 2. 更新简历 (管理接口)

@@ -1,7 +1,5 @@
 const express = require("express");
 const router = express.Router();
-const auth = require("../middleware/auth");
-const checkPermission = require("../middleware/checkPermission");
 const K = require("../config/permissionKeys");
 
 // 引入模型
@@ -13,7 +11,7 @@ const User = require("../models/User");
 // =================================================================
 // @route   POST /api/permission-requests
 // @body    { permission: 'fitness:read_all', reason: '...' }
-router.post("/", auth, async (req, res) => {
+router.post("/", async (req, res) => {
   const { permission, reason } = req.body;
 
   // 1. 校验权限 Key 是否合法 (防止瞎填)
@@ -64,7 +62,7 @@ router.post("/", auth, async (req, res) => {
 // =================================================================
 // @route   POST /api/permission-requests/role
 // @body    { role: 'admin', reason: '我想协助管理社区' }
-router.post("/role", auth, async (req, res) => {
+router.post("/role", async (req, res) => {
     const { role, reason } = req.body;
   
     // 1. 允许申请的角色列表
@@ -122,7 +120,7 @@ router.post("/role", auth, async (req, res) => {
 // 2. 获取申请列表 (Super Admin Only)
 // =================================================================
 // @route   GET /api/permission-requests?status=pending
-router.get("/", auth, checkPermission('*'), async (req, res) => {
+router.get("/", async (req, res) => {
   try {
     const { status } = req.query;
     let query = {};
@@ -146,7 +144,7 @@ router.get("/", auth, checkPermission('*'), async (req, res) => {
 // =================================================================
 // 3. 审批通过 (Super Admin Only) - 🔥 智能处理 Role 和 Permission
 // =================================================================
-router.put("/:id/approve", auth, checkPermission('*'), async (req, res) => {
+router.put("/:id/approve", async (req, res) => {
     try {
       const request = await PermissionRequest.findById(req.params.id);
       if (!request) return res.status(404).json({ msg: "申请单不存在" });
@@ -209,7 +207,7 @@ router.put("/:id/approve", auth, checkPermission('*'), async (req, res) => {
 // 4. 审批拒绝 (Super Admin Only)
 // =================================================================
 // @route   PUT /api/permission-requests/:id/reject
-router.put("/:id/reject", auth, checkPermission('*'), async (req, res) => {
+router.put("/:id/reject", async (req, res) => {
   try {
     const request = await PermissionRequest.findById(req.params.id);
     

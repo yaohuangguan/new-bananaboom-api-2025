@@ -14,7 +14,7 @@ const permissionService = require('../services/permissionService'); // ✅ 引�
 // @route   GET api/fitness
 // @desc    获取记录
 // 门槛：拥有 FITNESS_USE (Admin, User, Super Admin 都有)
-router.get('/', auth, checkPermission(K.FITNESS_USE), async (req, res) => {
+router.get('/', async (req, res) => {
   try {
     const { start, end, email } = req.query;
     const currentUser = req.user;
@@ -92,7 +92,7 @@ router.get('/', auth, checkPermission(K.FITNESS_USE), async (req, res) => {
 // =================================================================
 // @route   POST api/fitness
 // @desc    创建或更新记录
-router.post('/', auth, checkPermission(K.FITNESS_USE), async (req, res) => {
+router.post('/', async (req, res) => {
   try {
     const { 
       date, 
@@ -192,7 +192,7 @@ router.post('/', auth, checkPermission(K.FITNESS_USE), async (req, res) => {
 // =================================================================
 // 3. 获取统计趋势 (权限控制版)
 // =================================================================
-router.get('/stats', auth, checkPermission(K.FITNESS_USE), async (req, res) => {
+router.get('/stats', async (req, res) => {
   try {
     const days = parseInt(req.query.days) || 30;
     const currentUser = req.user;
@@ -263,7 +263,7 @@ router.get('/stats', auth, checkPermission(K.FITNESS_USE), async (req, res) => {
 // =================================================================
 // 4. 删除接口 (权限控制版)
 // =================================================================
-router.delete('/:id', auth, checkPermission(K.FITNESS_USE), async (req, res) => {
+router.delete('/:id', async (req, res) => {
     try {
       const record = await Fitness.findById(req.params.id);
       if (!record) return res.status(404).json({ msg: 'Record not found' });

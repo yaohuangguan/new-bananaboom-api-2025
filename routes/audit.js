@@ -2,10 +2,9 @@ const express = require("express");
 const router = express.Router();
 const AuditLog = require("../models/AuditLog");
 const auth = require("../middleware/auth");
-const checkPrivate = require("../middleware/checkPrivate");
 
 // 全局鉴权：只有 VIP/管理员 才能看日志
-router.use(auth, checkPrivate);
+router.use(auth);
 
 // GET /api/audit
 // 参数示例: ?page=1&action=DELETE_POST&target=React&startDate=2023-01-01

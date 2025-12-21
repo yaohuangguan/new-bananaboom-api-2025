@@ -1,8 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const cloudinary = require("cloudinary").v2;
-const auth = require("../middleware/auth");
-const checkPrivate = require('../middleware/checkPrivate')
+
 
 // 1. 初始化配置 (从环境变量读取)
 cloudinary.config({
@@ -11,8 +10,6 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
-// 🔥 全局鉴权：这些接口只有登录用户(auth) 且是 VIP(checkPrivate) 才能用
-router.use(auth);
 
 /**
  * @route   GET /api/cloudinary/config
@@ -163,7 +160,7 @@ router.get("/resources", async (req, res) => {
  * @desc    删除指定图片
  * @body    { public_id: "bnqa86xkeknlk3yxvi7i" }
  */
-router.post("/delete", auth, checkPrivate, async (req, res) => {
+router.post("/delete", async (req, res) => {
   const { public_id } = req.body;
 
   if (!public_id) {

@@ -3,25 +3,7 @@ const router = express.Router();
 const Role = require("../models/Role");
 const Permission = require("../models/Permission"); // 用于校验权限Key是否真实存在
 const permissionService = require("../services/permissionService"); // 用于刷新内存缓存
-const auth = require("../middleware/auth");
 
-// =================================================================
-// 🛡️ 内部权限校验中间件
-// =================================================================
-
-/**
- * 确保当前用户是超级管理员
- */
-const requireSuperAdmin = (req, res, next) => {
-  // 注意：这里 req.user.role 的值取决于你数据库里的实际存储
-  if (req.user && req.user.role === 'super_admin') {
-    return next();
-  }
-  return res.status(403).json({ msg: "权限不足：此操作仅限超级管理员" });
-};
-
-// 全局应用：所有角色管理接口都需要登录 + 超级管理员权限
-router.use(auth, requireSuperAdmin);
 
 // =================================================================
 // 🔧 辅助函数

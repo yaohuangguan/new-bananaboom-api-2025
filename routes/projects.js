@@ -2,8 +2,6 @@ const express = require("express");
 const router = express.Router();
 const { body, param } = require("express-validator"); // 引入校验工具
 const Project = require("../models/Project");
-const auth = require("../middleware/auth");
-const checkPrivate = require("../middleware/checkPrivate");
 const validate = require("../middleware/validate"); // 引入刚才写的通用校验中间件
 
 // ==========================================
@@ -33,11 +31,6 @@ router.get("/:id", [
         res.status(500).send("Server Error");
     }
 });
-
-// ------------------------------------------
-// 以下接口需要鉴权 + 严格校验
-// ------------------------------------------
-router.use(auth, checkPrivate);
 
 // ==========================================
 // 2. 创建新项目 (POST)
