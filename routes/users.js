@@ -535,9 +535,9 @@ router.put("/revoke-vip", auth, checkPrivate, async (req, res) => {
 });
 
 // @route   PUT /api/users/:id
-// @desc    修改个人资料 (名字、头像、身高、健身目标)
+// @desc    修改个人资料 (名字、头像、身高、健身目标, 时区，barkUrl)
 router.put("/:id", auth, async (req, res) => {
-  const { displayName, photoURL, height, fitnessGoal } = req.body;
+  const { displayName, photoURL, height, fitnessGoal, barkUrl, timezone } = req.body;
   const userId = req.params.id;
 
   if (req.user.id !== userId) {
@@ -561,6 +561,16 @@ router.put("/:id", auth, async (req, res) => {
     if (photoURL) {
       user.photoURL = photoURL;
       changes.photoURL = photoURL;
+    }
+
+    if (barkUrl) {
+      user.barkUrl = barkUrl;
+      changes.barkUrl = barkUrl;
+    }
+
+    if (timezone) {
+      user.timezone = timezone;
+      changes.timezone = timezone;
     }
 
     if (height) {
