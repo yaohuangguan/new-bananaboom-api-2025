@@ -23,7 +23,7 @@ module.exports = function (requiredPerm) {
         // 🔥 改动2: 从 Service (内存缓存) 获取角色权限
         // ============================================================
         // 以前是: const rolePerms = PERMISSIONS[userRole] || [];
-        const rolePerms = permissionService.getPermissions(userRole);
+        const rolePerms = permissionService.getUserMergedPermissions(user);
         
         console.log(`4. [Role] 角色权限 (${rolePerms.length}):`, rolePerms);
 
