@@ -247,18 +247,45 @@ router.post("/ask-life/stream", auth, checkPermission(K.BRAIN_USE), async (req, 
       });
     });
 
-    // 构建 Gemini 接受的内容数组
-    const contentParts = [{
-      text: prompt
-    }];
-    if (image) {
+   // 构建 Gemini 接受的内容数组
+   const contentParts = [{
+    text: prompt
+  }];
+
+  // 🔥 修复后的图片处理逻辑
+  if (image) {
+    let imageData = "";
+    let mimeType = "image/jpeg"; // 默认格式
+
+    // 情况 1: 前端传的是 Data URI 字符串 ("data:image/jpeg;base64,/9j/...")
+    if (typeof image === "string" && image.startsWith("data:")) {
+      // 使用正则提取 mimeType 和 base64 数据
+      const matches = image.match(/^data:(.+);base64,(.+)$/);
+      if (matches && matches.length === 3) {
+        mimeType = matches[1]; // 例如 "image/png"
+        imageData = matches[2]; // 纯 Base64 字符串
+      }
+    } 
+    // 情况 2: 前端传的是纯 Base64 字符串 (没有前缀)
+    else if (typeof image === "string") {
+      imageData = image;
+    }
+    // 情况 3: 前端传的是对象结构 (兼容之前的写法)
+    else if (image.inlineData && image.inlineData.data) {
+      imageData = image.inlineData.data;
+      mimeType = image.inlineData.mimeType || mimeType;
+    }
+
+    // 只有解析出数据才推入数组
+    if (imageData) {
       contentParts.push({
         inlineData: {
-          data: image.inlineData.data,
-          mimeType: image.inlineData.mimeType
+          data: imageData,
+          mimeType: mimeType
         }
       });
     }
+  }
 
     // ==========================================
     // 7. 启动 Agent 流
