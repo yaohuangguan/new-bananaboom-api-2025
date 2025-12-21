@@ -112,8 +112,9 @@ const ROUTE_MAP = [
     { path: '/api/permission-requests', method: 'GET', permission: K.SUPER_ADMIN },
     { regex: /^\/api\/permission-requests\/[a-f\d]{24}\/.*$/, method: 'PUT', permission: K.SUPER_ADMIN },
     { path: '/api/permission-requests', method: 'POST', permission: null },
-
+    { path: '/api/permissions', method: 'GET', permission: null },
     { path: '/api/permissions', method: 'ALL', permission: K.SUPER_ADMIN },
+    { path: '/api/roles', method: 'GET', permission: null },
     { path: '/api/roles', method: 'ALL', permission: K.SUPER_ADMIN },
     { path: '/api/audit', method: 'ALL', permission: K.SYSTEM_LOGS_USE },
     { path: '/api/backup', method: 'ALL', permission: K.SYSTEM_LOGS_USE },

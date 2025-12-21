@@ -3,8 +3,7 @@ const router = express.Router();
 const {
   generateJSON
 } = require("../utils/aiProvider"); // 引入我们刚才封装好的工具
-const auth = require("../middleware/auth"); // 依然建议加上鉴权，防止被路人刷爆
-const checkPermission = require("../middleware/checkPermission");
+
 const {
   toolsSchema,
   functions
@@ -12,7 +11,7 @@ const {
 const {
   createAgentStream
 } = require("../utils/aiProvider");
-const K = require('../config/permissionKeys');
+
 const {
   PERIOD_COLORS
 } = require('../config/periodConstants')
@@ -43,7 +42,7 @@ dayjs.extend(timezone);
  * =================================================================
  * @route   POST /api/ai/ask-life/stream
  */
-router.post("/ask-life/stream", auth, checkPermission(K.BRAIN_USE), async (req, res) => {
+router.post("/ask-life/stream", async (req, res) => {
   const {
     prompt,
     history,
@@ -326,7 +325,7 @@ router.post("/ask-life/stream", auth, checkPermission(K.BRAIN_USE), async (req, 
  * @desc    前端传什么就问什么，AI 返回 JSON 格式的答案
  * @body    { "prompt": "如何评价红楼梦？" }
  */
-router.post("/ask", auth, checkPermission(K.BRAIN_USE), async (req, res) => {
+router.post("/ask", async (req, res) => {
   const {
     prompt
   } = req.body;
@@ -430,7 +429,7 @@ router.post("/recipe-recommend", auth, async (req, res) => {
  * @desc    读取用户 Fitness, Todo, Project, Post, Resume 所有数据进行回答
  * @body    { "prompt": "我最近健身效果咋样？顺便看看我项目进度和待办还剩多少？" }
  */
-router.post("/ask-life", auth, checkPermission(K.BRAIN_USE), async (req, res) => {
+router.post("/ask-life", async (req, res) => {
   const {
     prompt
   } = req.body;
