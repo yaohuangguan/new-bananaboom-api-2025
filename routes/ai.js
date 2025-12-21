@@ -46,7 +46,8 @@ dayjs.extend(timezone);
 router.post("/ask-life/stream", auth, checkPermission(K.BRAIN_USE), async (req, res) => {
   const {
     prompt,
-    history
+    history,
+    image
   } = req.body;
 
   // 1. 获取当前用户对象
@@ -153,6 +154,12 @@ router.post("/ask-life/stream", auth, checkPermission(K.BRAIN_USE), async (req, 
     4. 如果用户问通用知识，忽略个人数据，正常回答。
     5. 回复风格：直接、自然、高效，但也像个老朋友，幽默、专业、鼓励。严禁使用“嘿，勇士”、“正式写入大脑”等过度拟人或中二的词汇。
 
+        【图像识别指令】
+
+    如果用户上传了图片（如体重秤照片、体检单、饮食照片,股票K线图），请优先分析图片内容。
+
+    场景示例：用户发了一张体重秤照片并说“记一下”，你应该识别出照片里的数字，然后自动调用 log_weight 工具。
+
     ## 核心原则 (Critical Constraints):
     1. **去油腻化 (No Flattery)**：禁止过度调侃或在非相关场景下进行煽情。
     3. **拒绝强行关联 (Avoid Forced Links)**：
@@ -240,13 +247,26 @@ router.post("/ask-life/stream", auth, checkPermission(K.BRAIN_USE), async (req, 
       });
     });
 
+    // 构建 Gemini 接受的内容数组
+    const contentParts = [{
+      text: prompt
+    }];
+    if (image) {
+      contentParts.push({
+        inlineData: {
+          data: image.inlineData.data,
+          mimeType: image.inlineData.mimeType
+        }
+      });
+    }
+
     // ==========================================
     // 7. 启动 Agent 流
     // ==========================================
     const stream = createAgentStream({
       systemInstruction,
       history: geminiHistory,
-      prompt,
+      prompt: contentParts,
       toolsSchema,
       functionsMap: boundFunctions
     });
