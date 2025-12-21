@@ -2,13 +2,11 @@ const express = require("express");
 const router = express.Router();
 const Chat = require("../models/Chat");
 const Conversation = require("../models/Conversation"); // 🔥 引用新模型
-const auth = require("../middleware/auth");
 const mongoose = require('mongoose');
 const {
   generateTitle
 } = require("../utils/aiProvider");
-const checkPermissions = require("../middleware/checkPermission")
-const K = require("../config/permissionKeys")
+
 
 // =========================================================================
 // 🤖 系统配置区域
@@ -38,7 +36,7 @@ router.use((req, res, next) => {
  * @desc    获取公共聊天室/群聊的历史记录
  * @access  Private
  */
-router.get("/public/:roomName", auth, async (req, res) => {
+router.get("/public/:roomName", async (req, res) => {
   try {
     const {
       roomName
@@ -73,7 +71,7 @@ router.get("/public/:roomName", auth, async (req, res) => {
  * @desc    获取私聊历史记录
  * @access  Private
  */
-router.get("/private/:targetUserId", auth, async (req, res) => {
+router.get("/private/:targetUserId", async (req, res) => {
   try {
     const targetUserId = req.params.targetUserId;
     const currentUserId = (req.user && req.user.id) || req.userId;
@@ -141,7 +139,7 @@ router.get("/private/:targetUserId", auth, async (req, res) => {
  * @access  Private
  * @return  [ { sessionId, title, lastActiveAt }, ... ]
  */
-router.get("/ai/conversations", auth, checkPermissions(K.BRAIN_USE), async (req, res) => {
+router.get("/ai/conversations",  async (req, res) => {
   try {
     const conversations = await Conversation.find({
         user: req.user.id
@@ -168,7 +166,7 @@ router.get("/ai/conversations", auth, checkPermissions(K.BRAIN_USE), async (req,
  * @query   page, limit - 分页参数
  * @access  Private
  */
-router.get("/ai", auth, checkPermissions(K.BRAIN_USE), async (req, res) => {
+router.get("/ai",  async (req, res) => {
   try {
     const userId = req.user.id;
     const {
@@ -229,7 +227,7 @@ router.get("/ai", auth, checkPermissions(K.BRAIN_USE), async (req, res) => {
  * @body    { text, role, sessionId, image }
  * @access  Private
  */
-router.post("/ai/save", auth, checkPermissions(K.BRAIN_USE), async (req, res) => {
+router.post("/ai/save", async (req, res) => {
   try {
     const userId = req.user.id;
     // 参数解构
@@ -395,7 +393,7 @@ router.post("/ai/save", auth, checkPermissions(K.BRAIN_USE), async (req, res) =>
  * @desc    删除整个会话（包括目录和所有聊天记录）
  * @access  Private
  */
-router.delete("/ai/conversation/:sessionId", auth, checkPermissions(K.BRAIN_USE), async (req, res) => {
+router.delete("/ai/conversation/:sessionId", async (req, res) => {
   try {
     const {
       sessionId
@@ -430,7 +428,7 @@ router.delete("/ai/conversation/:sessionId", auth, checkPermissions(K.BRAIN_USE)
  * ------------------------------------------------------------------
  * @route   DELETE /api/chat/ai
  */
-router.delete("/ai", auth, checkPermissions(K.BRAIN_USE), async (req, res) => {
+router.delete("/ai", async (req, res) => {
   try {
     const userId = req.user.id;
     const aiRoomName = `ai_session_${userId}`;
