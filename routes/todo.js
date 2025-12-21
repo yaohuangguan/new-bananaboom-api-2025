@@ -196,7 +196,7 @@ router.post("/done/:id", auth, async (req, res) => {
       details: {
         ...logDetails,
         id: updatedTodo._id,
-        operator: req.user.displayName // 记录是谁改的 (可能是老婆改的)
+        operator: req.user.name // 记录是谁改的 (可能是老婆改的)
       },
       ip: req.ip,
       io: req.app.get('socketio')

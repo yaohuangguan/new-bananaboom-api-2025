@@ -85,7 +85,7 @@ router.get("/", auth, checkPrivate, async (req, res) => {
       meta: {
         version: "2.0",
         exportDate: new Date().toISOString(),
-        exporter: req.user.name,
+        exporter: req.user.displayName,
         type: type || "full_backup"
       },
       data: data

@@ -81,7 +81,7 @@ router.post("/ask-life/stream", auth, checkPermission(K.BRAIN_USE), async (req, 
     let contextData = systemCache.get(cacheKey);
 
     if (contextData) {
-      console.log(`📦 [Cache Hit] 命中缓存 (User: ${currentUser.displayName})`);
+      console.log(`📦 [Cache Hit] 命中缓存 (User: ${currentUser.name})`);
     } else {
       console.log(`🐢 [Cache Miss] 正在全量加载第二大脑数据...`);
 
