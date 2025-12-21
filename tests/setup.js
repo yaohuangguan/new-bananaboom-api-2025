@@ -14,7 +14,7 @@ const Role = require('../models/Role');
 // ==========================================
 // 1. Redis Mock (修复：移除 _clear 逻辑，让 Token 持久化)
 // ==========================================
-jest.mock('../cache/cache', () => {
+jest.mock('../cache/session', () => {
   const store = new Map();
   return {
     get: jest.fn((key) => Promise.resolve(store.get(key) || null)),
