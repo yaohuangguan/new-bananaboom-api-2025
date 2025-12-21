@@ -3,7 +3,7 @@ const router = express.Router();
 const axios = require("axios");
 const ExternalResource = require("../models/ExternalResource");
 const auth = require("../middleware/auth");
-const K = require('../config/constants')
+const K = require('../config/permissionKeys')
 const checkPermission = require("../middleware/checkPermission");
 
 // 从环境变量获取天行 API Key

@@ -2,7 +2,7 @@ const express = require("express");
 const router = express.Router();
 const auth = require("../middleware/auth");
 const checkPermission = require("../middleware/checkPermission");
-const K = require("../config/constants");
+const K = require("../config/permissionKeys");
 
 // 引入模型
 const PermissionRequest = require("../models/PermissionRequest");

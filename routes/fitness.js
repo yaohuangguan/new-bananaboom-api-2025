@@ -5,7 +5,7 @@ const User = require('../models/User');
 const auth = require('../middleware/auth');
 // 🔥 1. 引入权限控制模块
 const checkPermission = require('../middleware/checkPermission');
-const K = require('../config/constants');
+const K = require('../config/permissionKeys');
 const PERMISSIONS = require('../config/permissions');
 
 // =================================================================
