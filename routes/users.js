@@ -31,7 +31,7 @@ const getMergedPermissions = (user) => {
 router.get("/profile", auth, async (req, res) => {
   try {
     const { id } = req.user;
-    let user = await User.findById(id).select("-password");
+    let user = await User.findById(id).select("-password +barkUrl");
 
     if (!user) {
       return res.status(404).json({ message: "User not found" });
@@ -545,7 +545,7 @@ router.put("/:id", auth, async (req, res) => {
   }
 
   try {
-    const user = await User.findById(userId);
+    const user = await User.findById(userId).select('+barkUrl');
 
     if (!user) {
       return res.status(404).json({ message: "用户不存在" });
