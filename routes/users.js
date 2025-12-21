@@ -9,21 +9,10 @@ const checkPrivate = require("../middleware/checkPrivate");
 const logOperation = require("../utils/audit");
 const checkPermission = require('../middleware/checkPermission');
 const K = require('../config/permissionKeys');
-const PERMISSIONS = require('../config/permissions'); // 🔥 引入权限字典
-
+const permissionService = require('../services/permissionService');
 const SECRET = process.env.SECRET_JWT || require("../config/keys").SECRET_JWT;
 const router = express.Router();
 const { check, validationResult } = require("express-validator");
-
-// ==========================================
-// 🛠️ 辅助函数：计算合并权限 (Role + Extra)
-// ==========================================
-const getMergedPermissions = (user) => {
-  const rolePerms = PERMISSIONS[user.role] || [];
-  const extraPerms = user.extraPermissions || [];
-  // 合并并去重
-  return [...new Set([...rolePerms, ...extraPerms])];
-};
 
 // ==========================================
 // 👤 获取当前用户信息 (Load User)
@@ -41,7 +30,7 @@ router.get("/profile", auth, async (req, res) => {
     let userObj = user.toObject();
 
     // 🔥 1. 注入权限列表
-    userObj.permissions = getMergedPermissions(user);
+    userObj.permissions = permissionService.getUserMergedPermissions(user);
 
     // 🔥 2. VIP 彩蛋逻辑 (保持原样)
     if (user.vip) {
@@ -243,7 +232,7 @@ router.post(
       // 注册成功也返回用户信息和权限
       const userObj = user.toObject();
       delete userObj.password;
-      userObj.permissions = getMergedPermissions(user);
+      userObj.permissions = permissionService.getUserMergedPermissions(user);
 
       res.json({ token, user: userObj });
 
@@ -313,7 +302,7 @@ router.post(
       let userObj = user.toObject();
       delete userObj.password;
       delete userObj.__v;
-      userObj.permissions = getMergedPermissions(user);
+      userObj.permissions = permissionService.getUserMergedPermissions(user);
 
       res.json({ token, user: userObj });
 
@@ -602,7 +591,7 @@ router.put("/:id", auth, async (req, res) => {
     delete userObj.googleId;
     delete userObj.__v;
     // 🔥 重新计算权限 (因为角色可能变了)
-    userObj.permissions = getMergedPermissions(updatedUser);
+    userObj.permissions = permissionService.getUserMergedPermissions(updatedUser);
 
     if (typeof logOperation === 'function') {
         logOperation({
@@ -669,7 +658,7 @@ router.put("/:id/role", auth, async (req, res) => {
     // 🔥 返回带权限的用户对象
     const userObj = targetUser.toObject();
     delete userObj.password;
-    userObj.permissions = getMergedPermissions(targetUser);
+    userObj.permissions = permissionService.getUserMergedPermissions(targetUser);
 
     res.json({ 
       success: true, 
@@ -719,7 +708,7 @@ router.put("/:id/permissions",
       delete userObj.googleId;
       delete userObj.__v;
       // 🔥 别忘了注入合并后的最终权限
-      userObj.permissions = getMergedPermissions(user);
+      userObj.permissions = permissionService.getUserMergedPermissions(user);
 
       res.json({
         success: true,

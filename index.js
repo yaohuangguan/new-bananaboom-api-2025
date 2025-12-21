@@ -87,6 +87,8 @@ app.use("/api/external", require("./routes/external"));
 app.use("/api/ai", require("./routes/ai"));
 app.use("/api/permission-requests", require("./routes/permissionRequest"));
 app.use("/api/cron", require("./routes/scheduler"))
+app.use("/api/permissions", require("./routes/permissions"))
+app.use("/api/roles", require("./routes/roles"))
 
 
 

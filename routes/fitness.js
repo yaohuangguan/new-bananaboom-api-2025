@@ -6,7 +6,7 @@ const auth = require('../middleware/auth');
 // 🔥 1. 引入权限控制模块
 const checkPermission = require('../middleware/checkPermission');
 const K = require('../config/permissionKeys');
-const PERMISSIONS = require('../config/permissions');
+const permissionService = require('../services/permissionService'); // ✅ 引入服务
 
 // =================================================================
 // 1. 获取健身记录 (支持多人 & 筛选) - 智能权限控制
@@ -19,10 +19,11 @@ router.get('/', auth, checkPermission(K.FITNESS_USE), async (req, res) => {
     const { start, end, email } = req.query;
     const currentUser = req.user;
     
-    // --- 1. 权限计算 ---
-    const rolePerms = PERMISSIONS[currentUser.role] || [];
-    const extraPerms = currentUser.extraPermissions || [];
-    const allPerms = [...rolePerms, ...extraPerms];
+   // ============================================================
+    // 🔥 2. 权限计算 (使用 Service 封装方法)
+    // ============================================================
+    // 这里不再读取静态文件，而是从 Service 计算最终权限集合
+    const allPerms = permissionService.getUserMergedPermissions(currentUser);
 
     // 是否有“上帝视角” (Super Admin 或 拥有 FITNESS_READ_ALL 特权)
     const canReadAll = allPerms.includes('*') || allPerms.includes(K.FITNESS_READ_ALL);
