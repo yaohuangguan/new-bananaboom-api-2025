@@ -35,7 +35,7 @@ const ROUTE_MAP = [
 
     { path: '/api/menu', method: 'GET', public: true },
     { path: '/api/menu', method: 'ALL', permission: K.MENU_USE },
-    
+
     { path: '/api/posts/private/posts', method: 'GET', permission: K.PRIVATE_POST_READ },
     { path: '/api/posts', method: 'GET', public: true },
    
@@ -121,4 +121,17 @@ const ROUTE_MAP = [
     { path: '/api/backup', method: 'ALL', permission: K.SYSTEM_LOGS_USE },
 ];
 
-module.exports = ROUTE_MAP;
+/**
+ * 🛠️ 预排序：
+ * 1. 路径越长的排在越前面 (确保 /api/posts/private 优先于 /api/posts)
+ * 2. 正则匹配排在前面 (因为正则通常更具体)
+ */
+const sortedMap = ROUTE_MAP.sort((a, b) => {
+    // 如果有正则，提升优先级
+    if (a.regex && !b.regex) return -1;
+    if (!a.regex && b.regex) return 1;
+    // 路径长度降序
+    return b.path.length - a.path.length;
+});
+
+module.exports = sortedMap;
