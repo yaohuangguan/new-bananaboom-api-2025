@@ -135,7 +135,13 @@ router.post("/", async (req, res) => {
 router.put("/:name", async (req, res) => {
   try {
     const { name } = req.params;
-    const { permissions, description } = req.body;
+    let { permissions, description } = req.body;
+
+    // 🔥🔥🔥 新增：数据清洗 (转大写 + 去重) 🔥🔥🔥
+    if (permissions && Array.isArray(permissions)) {
+        permissions = [...new Set(permissions.map(p => p.toUpperCase()))];
+     }
+
 
     // 🛡️ 保护机制：防止把自己锁死
     // 如果修改的是 super_admin，必须确保它依然拥有 '*' 权限
