@@ -19,58 +19,64 @@ router.get('/', auth, checkPermission(K.FITNESS_USE), async (req, res) => {
     const { start, end, email } = req.query;
     const currentUser = req.user;
     
-    // --- 1. 权限计算 (角色权限 + 个人特权) ---
+    // --- 1. 权限计算 ---
     const rolePerms = PERMISSIONS[currentUser.role] || [];
     const extraPerms = currentUser.extraPermissions || [];
     const allPerms = [...rolePerms, ...extraPerms];
 
-    // 是否有“上帝视角” (能看所有人的数据)
+    // 是否有“上帝视角” (Super Admin 或 拥有 FITNESS_READ_ALL 特权)
     const canReadAll = allPerms.includes('*') || allPerms.includes(K.FITNESS_READ_ALL);
 
-    // --- 2. 构建查询条件 query ---
+    // --- 2. 构建查询条件 ---
     let query = {};
 
-    // 👉 情况 A: 前端指定了要查某人的邮箱 (email 参数存在)
+    // 👉 情况 A: 前端指定查某人
     if (email) {
-      // 鉴权：如果你查的不是你自己，且你没有上帝视角 -> 滚蛋
+      // 鉴权：查别人必须有上帝视角
       if (email !== currentUser.email && !canReadAll) {
         return res.status(403).json({ msg: "权限不足：你无权查看他人记录" });
       }
 
-      // 查找目标用户 ID
       const targetUser = await User.findOne({ email: email });
-      if (!targetUser) {
-        return res.json([]); // 查无此人，返回空
-      }
+      if (!targetUser) return res.json([]); // 查无此人
       
-      // 锁定查询目标
       query.user = targetUser._id;
     } 
-    
-    // 👉 情况 B: 前端没传邮箱 (默认行为)
+    // 👉 情况 B: 默认行为
     else {
-      if (canReadAll) {
-        // B1. 如果你是管理员/特权用户 -> 没传邮箱意味着 "看大盘 (所有人)"
-        // query.user 保持 undefined，即不筛选用户
-      } else {
-        // B2. 如果你是普通用户 -> 没传邮箱意味着 "看自己"
+      if (!canReadAll) {
+        // 普通人强制看自己
         query.user = currentUser.id;
       }
+      // 上帝视角且没传 email -> query.user = undefined (查所有人)
     }
 
-    // --- 3. 日期筛选 (通用) ---
+    // --- 3. 日期筛选 (修复结束时间包含当天的问题) ---
     if (start && end) {
+      const startDate = new Date(start);
+      const endDate = new Date(end);
+      // 🔥 核心修正：确保 endDate 包含当天的 23:59:59
+      endDate.setHours(23, 59, 59, 999); 
+
       query.date = { 
-        $gte: new Date(start), 
-        $lte: new Date(end) 
+        $gte: startDate, 
+        $lte: endDate 
       };
     }
 
-    // --- 4. 执行查询 ---
-    const records = await Fitness.find(query)
+    // --- 4. 构建 Query 链 ---
+    let dbQuery = Fitness.find(query)
       .sort({ date: -1 })
-      .populate('user', 'name displayName email avatar photoURL role') // 关联用户信息
-      .limit(canReadAll ? 100 : 0); // 如果是看大盘，限制一下条数防卡顿；看个人的话不限
+      .populate('user', 'name displayName email avatar photoURL role');
+
+    // 🔥 智能 Limit：
+    // 只有在“管理员看全员大盘”时限制 100 条，防止数据爆炸。
+    // 如果管理员是指定看某个人(query.user有值)，或者普通人看自己，则不限制，展示所有历史。
+    if (canReadAll && !query.user) {
+        dbQuery = dbQuery.limit(100);
+    }
+
+    const records = await dbQuery;
 
     res.json(records);
 

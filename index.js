@@ -8,6 +8,9 @@ const cors = require("cors");
 const helmet = require("helmet");
 const morgan = require("morgan");
 const compression = require("compression");
+
+const permissionService = require('./services/permissionService');
+
 const app = express();
 
 
@@ -96,6 +99,8 @@ const startServer = async () => {
   try {
     // 1. 先等待数据库连接成功
     await connectDB();
+    // 🔥🔥🔥 核心步骤：启动前先加载权限 🔥🔥🔥
+    await permissionService.load();
     
     // 2. 数据库连接成功后，再启动服务器
     server.listen(PORT, () => console.log(`Server listening on ${PORT}`));
