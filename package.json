@@ -20,6 +20,7 @@
     "delete": "^1.1.0",
     "dotenv": "^17.2.3",
     "express": "^4.17.1",
+    "express-rate-limit": "^8.2.1",
     "express-validator": "^6.3.1",
     "helmet": "^3.21.2",
     "isomorphic-unfetch": "^3.0.0",

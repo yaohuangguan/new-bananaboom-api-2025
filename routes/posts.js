@@ -82,7 +82,7 @@ router.get("/:id", async (req, res) => {
 
 router.get("/private/posts", auth, checkPrivate, async (req, res) => await getPost(req, res, true));
 
-router.post("/", auth, async (req, res) => {
+router.post("/", auth, checkPrivate, async (req, res) => {
   let { name, info, author, content, code, code2, isPrivate, codeGroup, tags } = req.body;
   try {
     const createdDate = getCreateTime();
@@ -111,7 +111,7 @@ router.post("/", auth, async (req, res) => {
   }
 });
 
-router.put("/:id", auth, async (req, res) => {
+router.put("/:id", auth, checkPrivate, async (req, res) => {
   let { name, info, author, content, code, code2, isPrivate, codeGroup, tags } = req.body;
   try {
     if (tags && typeof tags === 'string') tags = tags.trim().split(" ");
@@ -136,12 +136,14 @@ router.put("/:id", auth, async (req, res) => {
 });
 
 router.get("/likes/:id", async (req, res) => await getLikes(req, res));
+
 router.post("/likes/:id/add", async (req, res) => {
   try {
     await Post.updateOne({ _id: req.params.id }, { $inc: { likes: 1 } });
     await getLikes(req, res);
   } catch (error) { console.log(error); }
 });
+
 router.post("/likes/:id/remove", async (req, res) => {
   try {
     await Post.updateOne({ _id: req.params.id }, { $inc: { likes: -1 } });

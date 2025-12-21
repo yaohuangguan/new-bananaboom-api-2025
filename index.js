@@ -9,6 +9,8 @@ const helmet = require("helmet");
 const morgan = require("morgan");
 const compression = require("compression");
 const app = express();
+
+
 const corsConfig = require("./corsConfig");
 const server = http.createServer(app);
 // 引入刚刚改好的 socket 模块
@@ -23,8 +25,12 @@ const io = new Server(server, {
     methods: ["GET", "POST"]
   }
 });
+
 // 🔥 把 io 挂载到 app 上，这样所有路由都能用 req.app.get('io') 拿到它
 app.set('socketio', io);
+// 🔥 告诉 Express 相信反向代理传过来的 X-Forwarded-For 头
+// 如果你在 Heroku/Vercel/AWS LB 上，这行是必须的！
+app.set('trust proxy', 1);
 
 app.use(compression());
 app.use(morgan("tiny"));
@@ -32,7 +38,7 @@ app.use(helmet());
 app.use(helmet.hidePoweredBy());
 app.options("*", cors());
 app.use(cors(corsConfig));
-// 🔥 请改成这样：
+
 app.use(express.json({ limit: '50mb' })); 
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use((_req, res, next) => {
