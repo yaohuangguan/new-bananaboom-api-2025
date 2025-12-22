@@ -1,27 +1,74 @@
-const mongoose = require("mongoose");
+const mongoose = require('mongoose');
 
 const PostSchema = mongoose.Schema({
-  // ... 原有的字段保持不变 (name, info, author 等) ...
-  name: { type: String, required: true },
-  info: { type: String, required: true },
-  author: { type: String, required: true }, // 旧的作者名字字段，保留用于兼容
-  createdDate: { type: String, required: true },
-  likes: { type: Number, default: 0 },
-  tags: { type: Array },
-  content: { type: String },
-  code: { type: String },
-  codeGroup: { type: Array },
-  code2: { type: String },
-  url: { type: String },
-  isPrivate: { type: Boolean, default: false },
-  button: { type: String },
-  comments: { type: Array, default: [] }, // 之前加的
+  // --- 基础信息 ---
+  name: {
+    type: String,
+    required: true,
+    trim: true
+  },
+  info: {
+    type: String,
+    required: true
+  },
+  author: {
+    type: String,
+    required: true
+  }, // 兼容旧数据
 
-  // 🔥🔥🔥 新增：关联用户字段 🔥🔥🔥
+  // --- 内容 ---
+  content: {
+    type: String
+  }, // 只保留这个核心内容字段
+  url: {
+    type: String
+  }, // 原有的链接字段
+  button: {
+    type: String
+  }, // 原有的按钮文字字段
+
+  // --- 统计与状态 ---
+  likes: {
+    type: Number,
+    default: 0
+  },
+  tags: {
+    type: Array,
+    default: []
+  },
+  isPrivate: {
+    type: Boolean,
+    default: false
+  },
+
+  // --- 时间字段 ---
+  // 这里不写 default，我们在 Controller 里统一生成，或者使用 Mongoose 的 default 函数
+  createdDate: {
+    type: String,
+    required: true
+  },
+  updatedDate: {
+    type: String,
+    required: true
+  },
+
+  // --- 交互 ---
+  comments: {
+    type: Array,
+    default: []
+  },
+
+  // --- 关联 ---
   user: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: "users" // 这里的名字必须和你 User.js 里导出时的名字一致 ('users')
+    ref: "users"
   }
 });
 
-module.exports = mongoose.model("posts", PostSchema);
+// 索引优化
+PostSchema.index({
+  isPrivate: 1,
+  createdDate: -1
+});
+
+module.exports = mongoose.model('post', PostSchema);

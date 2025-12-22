@@ -9,7 +9,7 @@ const router = express.Router();
 
 // 引入依赖
 const Post = require("../models/Post");
-const getCreateTime = require("../utils");
+const { getCurrentTime } = require('../utils/dayjs');
 const logOperation = require("../utils/audit"); // 审计日志工具
 
 
@@ -30,6 +30,23 @@ const getLikes = async (req, res) => {
     console.error("Get Likes Error:", error);
     // 保持原有逻辑，出错时不中断响应，但建议加上 res.status(500)
   }
+};
+
+/**
+ * 🛠️ 数据清洗工具
+ * 只保留 Model 中定义的有效字段
+ */
+const formatPostData = (body) => {
+  let { name, info, author, content, isPrivate, tags, url, button } = body;
+
+  // 1. 标签处理：字符串转数组 & 去空
+  if (tags && typeof tags === 'string') {
+    tags = tags.trim().split(" ").filter(t => t);
+  }
+
+  // 2. 这里的 code/code2/codeGroup 逻辑已删除
+  
+  return { name, info, author, content, isPrivate, tags, url, button };
 };
 
 /**
@@ -142,24 +159,26 @@ router.get("/:id", async (req, res) => {
 /**
  * @route   POST /api/posts
  * @desc    发布新文章
- * @access  Private (Auth + CheckPrivate)
+ * @access  Private
  */
 router.post("/", async (req, res) => {
-  let { name, info, author, content, code, code2, isPrivate, codeGroup, tags } = req.body;
-  
   try {
-    // 数据预处理
-    const createdDate = getCreateTime();
-    if (tags && typeof tags === 'string') tags = tags.trim().split(" ");
-    if (Array.isArray(code)) code = code.join('\n'); 
-    if (Array.isArray(code2)) code2 = code2.join('\n');
+    const postData = formatPostData(req.body);
+
+    // ✅ 使用 dayjs 生成统一格式时间 (YYYY-MM-DD HH:mm)
+    const now = getCurrentTime();
 
     const newPost = new Post({
-      name, info, author, createdDate, likes: 0, tags, content, code, code2, codeGroup, isPrivate,
+      ...postData,
+      createdDate: now, // 创建时间
+      updatedDate: now, // 初始更新时间 = 创建时间
+      likes: 0,
       user: req.user.id
     });
 
-    // 🔥 审计日志 & Socket 推送
+    await newPost.save();
+
+    // 审计日志
     logOperation({
       operatorId: req.user.id,
       action: "CREATE_POST",
@@ -168,51 +187,60 @@ router.post("/", async (req, res) => {
       io: req.app.get('socketio')
     });
 
-    await newPost.save();
-    
-    // 创建成功后，返回最新的私有列表 (保持原有逻辑)
-    await getPost(req, res, true);
+    res.status(201).json({
+      success: true,
+      data: newPost
+    });
 
   } catch (error) {
     console.error("Create Post Error:", error.message);
-    res.status(500).send("Server Error");
+    res.status(500).json({ msg: "发布文章失败" });
   }
 });
 
 /**
  * @route   PUT /api/posts/:id
  * @desc    更新文章
- * @access  Private (Auth + CheckPrivate)
+ * @access  Private
  */
 router.put("/:id", async (req, res) => {
-  let { name, info, author, content, code, code2, isPrivate, codeGroup, tags } = req.body;
-  
   try {
-    // 数据预处理
-    if (tags && typeof tags === 'string') tags = tags.trim().split(" ");
-    if (Array.isArray(code)) code = code.join('\n');
-    if (Array.isArray(code2)) code2 = code2.join('\n');
+    const updateData = formatPostData(req.body);
 
-    const updateFields = { name, info, author, content, code, code2, codeGroup, isPrivate, tags };
-    
+    // ✅ 更新操作：刷新 updatedDate 为当前分钟
+    updateData.updatedDate = getCurrentTime();
+
     // 执行更新
-    const updatedPost = await Post.updateOne({ _id: req.params.id }, { $set: updateFields });
-    
-    // 🔥 审计日志
+    const updatedPost = await Post.findByIdAndUpdate(
+      req.params.id,
+      { $set: updateData },
+      { new: true, runValidators: true }
+    );
+
+    if (!updatedPost) {
+      return res.status(404).json({ msg: "文章不存在" });
+    }
+
+    // 审计日志
     logOperation({
       operatorId: req.user.id,
       action: "UPDATE_POST",
-      target: updatedPost.name || req.params.id, // 防止 name 为空
+      target: updatedPost.name,
       ip: req.ip,
       io: req.app.get('socketio')
     });
 
-    // 更新完成后，返回最新的私有列表
-    await getPost(req, res, true);
+    res.json({
+      success: true,
+      data: updatedPost
+    });
 
   } catch (error) {
     console.error("Update Post Error:", error.message);
-    res.status(500).send("Server Error when updating post");
+    if (error.kind === 'ObjectId') {
+      return res.status(404).json({ msg: "文章不存在" });
+    }
+    res.status(500).json({ msg: "更新文章失败" });
   }
 });
 
