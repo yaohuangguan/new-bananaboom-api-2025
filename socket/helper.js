@@ -1,13 +1,13 @@
-const mongoose = require("mongoose");
-const id = () => new mongoose.Types.ObjectId();
+import { Types } from 'mongoose';
+const id = () => new Types.ObjectId();
 
-const getTime = date => {
-  return `${date.getHours()}:${("0" + date.getMinutes()).slice(-2)}`;
+const getTime = (date) => {
+  return `${date.getHours()}:${('0' + date.getMinutes()).slice(-2)}`;
 };
 
-const createUser = ({ name = "" } = {}) => ({ id: id(), name });
+const createUser = ({ name = '' } = {}) => ({ id: id(), name });
 
-const createMessage = ({ message = "", sender = "" } = {}) => {
+const createMessage = ({ message = '', sender = '' } = {}) => {
   return {
     id: id(),
     time: getTime(new Date(Date.now())),
@@ -16,7 +16,7 @@ const createMessage = ({ message = "", sender = "" } = {}) => {
   };
 };
 
-const createChat = ({ messages = [], name = "聊天室", users = [] } = {}) => {
+const createChat = ({ messages = [], name = '聊天室', users = [] } = {}) => {
   return {
     id: id(),
     name,
@@ -26,7 +26,7 @@ const createChat = ({ messages = [], name = "聊天室", users = [] } = {}) => {
   };
 };
 
-module.exports = {
+export default {
   createChat,
   createMessage,
   createUser

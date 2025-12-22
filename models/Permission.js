@@ -1,14 +1,13 @@
-const mongoose = require("mongoose");
-const Schema = mongoose.Schema;
+import { Schema, model } from 'mongoose';
 
 const PermissionSchema = new Schema({
   // 🔥 核心标识：代码里用的 Key，如 'FITNESS_USE'
-  key: { 
-    type: String, 
-    required: true, 
-    unique: true, 
+  key: {
+    type: String,
+    required: true,
+    unique: true,
     uppercase: true, // 强制大写
-    trim: true 
+    trim: true
   },
 
   // 显示名称，如 '使用健身功能'
@@ -23,4 +22,4 @@ const PermissionSchema = new Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
-module.exports = mongoose.model("permissions", PermissionSchema);
+export default model('permissions', PermissionSchema);

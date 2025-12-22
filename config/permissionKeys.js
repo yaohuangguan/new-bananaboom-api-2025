@@ -6,7 +6,7 @@ const PERM_KEYS = {
   BLOG_INTERACT: 'BLOG:INTERACT', // 博客点赞/评论
   // 📝 博客权限粒度
   BLOG_MANAGE: 'BLOG:MANAGE',
-  
+
   // ==========================================
   // 2. 私域/门票 (Private Domain)
   // ==========================================
@@ -29,7 +29,6 @@ const PERM_KEYS = {
   // --- 休闲空间 (留言板等) ---
   LEISURE_USE: 'LEISURE:USE',
 
-
   // --- 外部资源 ---
   EXTERNAL_RESOURCES_USE: 'EXTERNAL:USE',
 
@@ -44,7 +43,7 @@ const PERM_KEYS = {
   FITNESS_EDIT_ALL: 'FITNESS:EDIT_ALL', // 帮别人修改数据
 
   PERIOD_USE: 'PERIOD:USE', // 生理期记录 (新加的)
-  MENU_USE:'MENU:USE',
+  MENU_USE: 'MENU:USE',
 
   // ==========================================
   // 5. 系统管理 (System Admin)
@@ -56,4 +55,4 @@ const PERM_KEYS = {
   SUPER_ADMIN: '*'
 };
 
-module.exports = PERM_KEYS;
+export default PERM_KEYS;

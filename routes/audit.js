@@ -1,14 +1,10 @@
-const express = require("express");
-const router = express.Router();
-const AuditLog = require("../models/AuditLog");
-const auth = require("../middleware/auth");
-
-// 全局鉴权：只有 VIP/管理员 才能看日志
-router.use(auth);
+import { Router } from 'express';
+const router = Router();
+import AuditLog from '../models/AuditLog.js';
 
 // GET /api/audit
 // 参数示例: ?page=1&action=DELETE_POST&target=React&startDate=2023-01-01
-router.get("/", async (req, res) => {
+router.get('/', async (req, res) => {
   try {
     // 1. 分页参数
     const page = parseInt(req.query.page) || 1;
@@ -16,13 +12,13 @@ router.get("/", async (req, res) => {
     const skip = (page - 1) * limit;
 
     // 2. 筛选参数 (从 URL query 中解构出来)
-    const { 
-      action,       // 精确匹配
-      target,       // 模糊搜索
-      ip,           // 模糊搜索
-      operator,     // 精确匹配 User ID
-      startDate,    // 开始时间
-      endDate       // 结束时间
+    const {
+      action, // 精确匹配
+      target, // 模糊搜索
+      ip, // 模糊搜索
+      operator, // 精确匹配 User ID
+      startDate, // 开始时间
+      endDate // 结束时间
     } = req.query;
 
     // 3. 构建 MongoDB 查询对象
@@ -37,13 +33,13 @@ router.get("/", async (req, res) => {
     // B. 操作对象描述 (模糊搜索 - Regex)
     // 比如搜 "删除"，能查到 "删除评论" 和 "删除文章"
     if (target) {
-      query.target = { $regex: target, $options: "i" }; // 'i' 表示忽略大小写
+      query.target = { $regex: target, $options: 'i' }; // 'i' 表示忽略大小写
     }
 
     // C. IP 地址 (模糊搜索)
     // 比如搜 "192.168"，能查到该网段所有操作
     if (ip) {
-      query.ip = { $regex: ip, $options: "i" };
+      query.ip = { $regex: ip, $options: 'i' };
     }
 
     // D. 操作人 (精确匹配 UserID)
@@ -61,7 +57,7 @@ router.get("/", async (req, res) => {
       }
       if (endDate) {
         //以此日期的 23:59:59 结束，或者直接传入下一天的 00:00
-        query.createdDate.$lte = new Date(endDate);   // 小于等于
+        query.createdDate.$lte = new Date(endDate); // 小于等于
       }
     }
 
@@ -72,8 +68,8 @@ router.get("/", async (req, res) => {
         .skip(skip)
         .limit(limit)
         // 关联查出操作人的信息 (带上 email 方便管理员确认身份)
-        .populate("operator", "displayName photoURL email"), 
-      
+        .populate('operator', 'displayName photoURL email'),
+
       AuditLog.countDocuments(query) // 🔥 统计总数时也要带上 query，否则分页会错
     ]);
 
@@ -87,11 +83,10 @@ router.get("/", async (req, res) => {
         totalPosts: total
       }
     });
-
   } catch (error) {
-    console.error("Audit Log Error:", error);
-    res.status(500).json({ message: "Server Error" });
+    console.error('Audit Log Error:', error);
+    res.status(500).json({ message: 'Server Error' });
   }
 });
 
-module.exports = router;
+export default router;

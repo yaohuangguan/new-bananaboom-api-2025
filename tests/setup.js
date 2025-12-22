@@ -1,22 +1,23 @@
 // tests/setup.js
-const dotenv = require('dotenv');
-dotenv.config({ path: '.env.test' });
+
+// 🔥 1. 核心修复：显式引入 Jest 全局变量 (ESM 必须)
+import { jest, beforeAll, afterEach, afterAll } from '@jest/globals';
+
+// 设置环境变量
 process.env.NODE_ENV = 'test';
 
-const mongoose = require('mongoose');
-const { MongoMemoryServer } = require('mongodb-memory-server');
-const permissionService = require('../services/permissionService');
-
-// 引入模型以便播种数据
-const Permission = require('../models/Permission');
-const Role = require('../models/Role');
+import mongoose from 'mongoose';
+import { MongoMemoryServer } from 'mongodb-memory-server';
 
 // ==========================================
-// 1. Redis Mock (修复：移除 _clear 逻辑，让 Token 持久化)
+// 2. Redis Mock
 // ==========================================
-jest.mock('../cache/session', () => {
+// 注意：在 import 业务代码之前定义 Mock
+jest.mock('../cache/session.js', () => {
   const store = new Map();
-  return {
+  
+  // 模拟的方法集合
+  const mockClient = {
     get: jest.fn((key) => Promise.resolve(store.get(key) || null)),
     set: jest.fn((key, val) => {
       store.set(key, val);
@@ -28,69 +29,97 @@ jest.mock('../cache/session', () => {
     }),
     connect: jest.fn(),
     disconnect: jest.fn(),
-    // 我们不再需要手动 clear，让它随进程结束消亡即可，或者只在 beforeAll 清理
+    // 兼容可能存在的 clear 调用
+    clear: jest.fn(() => {
+      store.clear();
+      return Promise.resolve();
+    })
+  };
+
+  return {
+    // 🔥 关键：告诉 Jest 这是一个 ESM 模块，且有一个 default 导出
+    __esModule: true,
+    default: mockClient
   };
 });
+
+// 🔥 Mock 定义完之后，再引入依赖 Mock 的服务
+import permissionService from '../services/permissionService.js';
+import Permission from '../models/Permission.js';
+import Role from '../models/Role.js';
 
 let mongoServer;
 
 // ==========================================
-// 2. 数据播种函数 (Seed)
+// 3. 数据播种函数 (Seed)
 // ==========================================
 const seedRBAC = async () => {
   // 1. 创建基础权限
   const perms = ['FITNESS:USE', 'FITNESS:READ_ALL', 'BLOG:INTERACT', 'MENU:USE', '*'];
   for (const key of perms) {
-    await Permission.create({ key, name: key, description: 'Test Perm' });
+    // 使用 updateOne + upsert 防止重复创建报错
+    await Permission.updateOne(
+      { key },
+      { key, name: key, description: 'Test Perm' },
+      { upsert: true }
+    );
   }
 
   // 2. 创建基础角色
-  // 普通用户
-  await Role.create({ 
-    name: 'user', 
-    permissions: ['FITNESS:USE', 'BLOG:INTERACT'] 
-  });
-  
-  // 管理员
-  await Role.create({ 
-    name: 'admin', 
-    permissions: ['FITNESS:USE', 'BLOG:INTERACT', 'MENU:USE'] 
-  });
+  const roles = [
+    { name: 'user', permissions: ['FITNESS:USE', 'BLOG:INTERACT'] },
+    { name: 'admin', permissions: ['FITNESS:USE', 'BLOG:INTERACT', 'MENU:USE'] },
+    { name: 'super_admin', permissions: ['*'] }
+  ];
 
-  // 超级管理员
-  await Role.create({ 
-    name: 'super_admin', 
-    permissions: ['*'] 
-  });
-  
+  for (const role of roles) {
+    await Role.updateOne(
+        { name: role.name }, 
+        role, 
+        { upsert: true }
+    );
+  }
+
   // 3. 刷新服务缓存
-  await permissionService.load();
+  // 确保 permissionService 内部逻辑能处理还没连上真实 Redis 的情况(虽然我们 Mock 了)
+  if (permissionService.load) {
+      await permissionService.load();
+  }
 };
 
 // ==========================================
-// 3. 生命周期钩子
+// 4. 生命周期钩子
 // ==========================================
 beforeAll(async () => {
+  // 防止残留连接
+  if (mongoose.connection.readyState !== 0) {
+    await mongoose.disconnect();
+  }
+
   mongoServer = await MongoMemoryServer.create();
   const uri = mongoServer.getUri();
-  await mongoose.connect(uri);
   
+  await mongoose.connect(uri);
+
   // 🔥 核心修复：先播种角色和权限，再跑测试
   await seedRBAC();
 });
 
 afterEach(async () => {
-  // 🔥 核心修复：只清空业务数据 (Users, Fitness)，保留系统数据 (Roles, Permissions)
-  // 否则下一个测试用例一跑，角色定义没了，权限又会挂
+  // 🔥 核心修复：只清空业务数据，保留系统数据 (Roles, Permissions)
   const collections = mongoose.connection.collections;
   for (const key in collections) {
     if (key !== 'roles' && key !== 'permissions') {
-       await collections[key].deleteMany();
+      await collections[key].deleteMany({});
     }
   }
 });
 
 afterAll(async () => {
-  await mongoose.disconnect();
-  await mongoServer.stop();
+  if (mongoose.connection.readyState !== 0) {
+    await mongoose.disconnect();
+  }
+  if (mongoServer) {
+    await mongoServer.stop();
+  }
 });

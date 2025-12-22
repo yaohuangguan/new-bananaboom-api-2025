@@ -1,11 +1,12 @@
-const express = require("express");
-const router = express.Router();
-const Menu = require("../models/Menu");
-const Fitness = require("../models/Fitness");
-const User = require("../models/User"); 
-const dayjs = require("dayjs");
-const { generateJSON } = require("../utils/aiProvider"); // 刚才封装好的 AI 工具
-const mongoose = require("mongoose");
+import { Router } from 'express';
+const router = Router();
+import Menu from '../models/Menu.js';
+import Fitness from '../models/Fitness.js';
+import User from '../models/User.js';
+import dayjs from 'dayjs';
+import { generateJSON } from '../utils/aiProvider.js';
+
+import { Types } from 'mongoose';
 
 /**
  * =================================================================
@@ -17,10 +18,10 @@ const mongoose = require("mongoose");
  * * @param   {string} category - (Query可选) 按分类筛选，如 "晚餐"
  * @returns {Array} 菜品对象数组
  */
-router.get("/", async (req, res) => {
+router.get('/', async (req, res) => {
   try {
     const { category } = req.query;
-    
+
     // 基础查询：只查找状态为 isActive=true 的
     let query = { isActive: true };
     if (category) query.category = category;
@@ -28,10 +29,9 @@ router.get("/", async (req, res) => {
     // 按创建时间倒序排列 (新加的菜在最上面)
     const menus = await Menu.find(query).sort({ createdAt: -1 });
     res.json(menus);
-
   } catch (err) {
     console.error(err);
-    res.status(500).send("Server Error");
+    res.status(500).send('Server Error');
   }
 });
 
@@ -43,22 +43,22 @@ router.get("/", async (req, res) => {
  * @desc    根据用户最新体重、BMI、健身目标，推荐 3 道适合的菜品
  * @access  Private
  */
-router.post("/recommend", async (req, res) => {
+router.post('/recommend', async (req, res) => {
   try {
     const userId = req.user.id;
 
     // 1. 并行查询：基础档案 & 最新健身状态
     const [userProfile, latestFitness] = await Promise.all([
-      User.findById(userId).select("fitnessGoal height displayName"), 
+      User.findById(userId).select('fitnessGoal height displayName'),
       Fitness.findOne({ user: userId }).sort({ date: -1 }) // 找最近的一条记录
     ]);
 
     // ==========================================
     // 2. 智能数据组装 (Snapshot 优先策略)
     // ==========================================
-    
+
     // A. 确定目标 (Fitness里的临时目标 > User里的长期目标 > 默认保持)
-    let currentGoal = "maintain";
+    let currentGoal = 'maintain';
     if (latestFitness && latestFitness.diet && latestFitness.diet.goalSnapshot) {
       currentGoal = latestFitness.diet.goalSnapshot;
     } else if (userProfile.fitnessGoal) {
@@ -79,15 +79,15 @@ router.post("/recommend", async (req, res) => {
     // ==========================================
     // 3. 构建 AI 提示词 (Prompt Engineering)
     // ==========================================
-    
+
     // 翻译目标给 AI
     const goalMap = {
-      cut: "减脂/刷脂 (Fat Loss) - 需要制造热量缺口，高饱腹感",
-      bulk: "增肌/增重 (Muscle Gain) - 需要热量盈余，高碳水高蛋白",
-      maintain: "保持/塑形 (Maintain) - 营养均衡"
+      cut: '减脂/刷脂 (Fat Loss) - 需要制造热量缺口，高饱腹感',
+      bulk: '增肌/增重 (Muscle Gain) - 需要热量盈余，高碳水高蛋白',
+      maintain: '保持/塑形 (Maintain) - 营养均衡'
     };
 
-    let userContext = `用户昵称: ${userProfile.displayName || "健身者"}。`;
+    let userContext = `用户昵称: ${userProfile.displayName || '健身者'}。`;
     if (currentWeight) userContext += ` 当前体重: ${currentWeight}kg。`;
     if (currentHeight) userContext += ` 身高: ${currentHeight}cm。`;
     if (currentBMI) userContext += ` BMI指数: ${currentBMI}。`;
@@ -143,14 +143,11 @@ router.post("/recommend", async (req, res) => {
       },
       recommendation: data
     });
-
   } catch (err) {
-    console.error("Menu Recommend Error:", err);
-    res.status(500).json({ msg: "AI 营养师正在忙，请稍后再试" });
+    console.error('Menu Recommend Error:', err);
+    res.status(500).json({ msg: 'AI 营养师正在忙，请稍后再试' });
   }
 });
-
-module.exports = router;
 
 /**
  * =================================================================
@@ -169,10 +166,10 @@ module.exports = router;
  * "meta": { ... }      // 调试元数据
  * }
  */
-router.get("/draw", async (req, res) => {
+router.get('/draw', async (req, res) => {
   try {
     const { category, cooldown, healthy } = req.query;
-    
+
     // --- Step 1: 构建过滤条件 ---
     let query = { isActive: true };
 
@@ -200,21 +197,21 @@ router.get("/draw", async (req, res) => {
     const candidates = await Menu.find(query);
 
     if (candidates.length === 0) {
-      return res.status(404).json({ msg: "没有符合条件的菜品，请尝试关闭一些过滤开关" });
+      return res.status(404).json({ msg: '没有符合条件的菜品，请尝试关闭一些过滤开关' });
     }
 
     // --- Step 3: 带权重的随机算法 (Weighted Random) ---
     // 逻辑：weight (1-10) 越高，被抽中的概率越大 (扇形面积越大)
-    
+
     // 3.1 计算总权重
     let totalWeight = 0;
-    candidates.forEach(item => {
-      totalWeight += (item.weight || 1);
+    candidates.forEach((item) => {
+      totalWeight += item.weight || 1;
     });
 
     // 3.2 生成随机数 (0 到 totalWeight 之间)
     let random = Math.random() * totalWeight;
-    
+
     // 3.3 寻找中奖者
     let winner = null;
     for (const item of candidates) {
@@ -225,23 +222,22 @@ router.get("/draw", async (req, res) => {
       }
       random -= w; // 减去当前权重，继续下一轮检测
     }
-    
+
     // 兜底：如果因浮点数精度问题没选中，默认选最后一个
     if (!winner) winner = candidates[candidates.length - 1];
 
     // --- Step 4: 返回结果 ---
     res.json({
-      winner: winner,  // 前端用这个控制停止位置
+      winner: winner, // 前端用这个控制停止位置
       pool: candidates, // 前端用这个渲染转盘 UI
       meta: {
         totalCandidates: candidates.length,
         filterMode: { cooldown, healthy }
       }
     });
-
   } catch (err) {
     console.error(err);
-    res.status(500).send("Server Error");
+    res.status(500).send('Server Error');
   }
 });
 
@@ -252,13 +248,13 @@ router.get("/draw", async (req, res) => {
  * @route   POST /api/menu
  * @body    { name, category, tags, weight, caloriesLevel, image }
  */
-router.post("/", async (req, res) => {
+router.post('/', async (req, res) => {
   try {
     const { name, category, tags, image, weight, caloriesLevel } = req.body;
-    
+
     // 查重
     const exists = await Menu.findOne({ name });
-    if (exists) return res.status(400).json({ msg: "这道菜已经在菜单里啦" });
+    if (exists) return res.status(400).json({ msg: '这道菜已经在菜单里啦' });
 
     const newMenu = new Menu({
       createdBy: req.user.id,
@@ -274,24 +270,28 @@ router.post("/", async (req, res) => {
     res.json(newMenu);
   } catch (err) {
     console.error(err);
-    res.status(500).send("Server Error");
+    res.status(500).send('Server Error');
   }
 });
 
 // 标准 CRUD: 修改
-router.put("/:id", async (req, res) => {
+router.put('/:id', async (req, res) => {
   try {
     const updated = await Menu.findByIdAndUpdate(req.params.id, { $set: req.body }, { new: true });
     res.json(updated);
-  } catch (err) { res.status(500).send("Error"); }
+  } catch (err) {
+    res.status(500).send('Error');
+  }
 });
 
 // 标准 CRUD: 删除
-router.delete("/:id", async (req, res) => {
+router.delete('/:id', async (req, res) => {
   try {
     await Menu.findByIdAndDelete(req.params.id);
-    res.json({ msg: "Deleted" });
-  } catch (err) { res.status(500).send("Error"); }
+    res.json({ msg: 'Deleted' });
+  } catch (err) {
+    res.status(500).send('Error');
+  }
 });
 
 /**
@@ -307,102 +307,100 @@ router.delete("/:id", async (req, res) => {
  * 2. Fitness表：在当前用户的今日记录中，追加饮食内容。
  * 3. Auto-Water: 如果菜名含“汤”，自动 +300ml 水。
  */
-router.post("/confirm/:id", async (req, res) => {
-    // 1. 获取并解码参数 (防止中文乱码)
-    // 这里的 id 可能是 "65a..." (数据库ID) 也可能是 "红烧牛肉" (AI生成的菜名)
-    const paramId = decodeURIComponent(req.params.id);
-    const userId = req.user.id;
-    const todayStr = dayjs().format("YYYY-MM-DD");
-    const { mealTime } = req.body; 
-  
-    try {
-      // 2. 先查用户 (User 是必须要查的，为了拿 fitnessGoal)
-      const currentUser = await User.findById(userId);
-      if (!currentUser) return res.status(404).json({ msg: "用户未找到" });
-  
-      // 3. 核心分叉逻辑：判断 paramId 到底是个 ID 还是个菜名
-      let menuItem = null;
-      let finalDishName = "";
-      let isSoup = false;
-  
-      // 判断逻辑：是合法的 ObjectId 格式吗？
-      if (mongoose.Types.ObjectId.isValid(paramId)) {
-        // ---> 分支 A: 看起来像个 ID，去 Menu 表查查看
-        menuItem = await Menu.findById(paramId);
-      }
-  
-      if (menuItem) {
-        // [情况 1]: 是现有菜单 (数据库里查到了)
-        finalDishName = menuItem.name;
-        
-        // --- A. 更新全局菜单 (触发冷却) ---
-        // 只有数据库里的菜才需要更新"上次吃的时间"
-        menuItem.timesEaten += 1;
-        menuItem.lastEaten = new Date();
-        await menuItem.save();
-  
-        // 判断是否汤品 (查 tags 或 名字)
-        isSoup = menuItem.name.includes("汤") || (menuItem.tags && menuItem.tags.some(t => t.includes("汤")));
-  
-      } else {
-        // [情况 2]: 是 AI 菜品 (不是 ID，或者库里没这个 ID)
-        // 直接把 paramId 当作菜名
-        finalDishName = paramId;
-        
-        // 判断是否汤品 (只能查名字)
-        isSoup = finalDishName.includes("汤");
-      }
-  
-      // --- B. 写入个人 Fitness 记录 (通用逻辑) ---
-      // 这里的逻辑对 AI 菜品和现有菜品是通用的，只认 finalDishName
-      
-      let fitnessRecord = await Fitness.findOne({ user: userId, dateStr: todayStr });
-      
-      // 如果今天还没记录，初始化一条
-      if (!fitnessRecord) {
-        fitnessRecord = new Fitness({
-          user: userId,
-          date: new Date(),
-          dateStr: todayStr,
-          diet: { content: "", water: 0 },
-          body: {},    // 初始化防止报错
-          workout: {}  // 初始化防止报错
-        });
-      }
-  
-      // 记录当时的模式快照
-      const currentGoal = currentUser.fitnessGoal || 'maintain';
-      if (fitnessRecord.diet) {
-          fitnessRecord.diet.goalSnapshot = currentGoal;
-      }
-  
-      // 生成日记文案
-      // 格式： "晚餐选中了：【红烧肉】。"
-      const newContent = `${mealTime || '大厨转盘'}选中了：【${finalDishName}】。`;
-      const oldContent = fitnessRecord.diet.content || "";
-      
-      // 简单的去重/追加逻辑
-      fitnessRecord.diet.content = oldContent ? `${oldContent}\n${newContent}` : newContent;
-  
-      // 自动补水逻辑 (通用)
-      if (isSoup) {
-        fitnessRecord.diet.water = (fitnessRecord.diet.water || 0) + 300;
-        fitnessRecord.diet.content += " (汤品自动补水 +300ml)";
-      }
-  
-      await fitnessRecord.save();
-  
-      res.json({ 
-        msg: `已确认【${finalDishName}】，并记录到您的饮食日记`,
-        // 如果是 AI 菜，menu 字段返回 null 或构建一个临时对象，防止前端报错
-        menu: menuItem || { name: finalDishName, _id: "ai_generated" },
-        fitness: fitnessRecord
-      });
-  
-    } catch (err) {
-      console.error("Confirm Dish Error:", err);
-      res.status(500).send("Server Error");
-    }
-  });
+router.post('/confirm/:id', async (req, res) => {
+  // 1. 获取并解码参数 (防止中文乱码)
+  // 这里的 id 可能是 "65a..." (数据库ID) 也可能是 "红烧牛肉" (AI生成的菜名)
+  const paramId = decodeURIComponent(req.params.id);
+  const userId = req.user.id;
+  const todayStr = dayjs().format('YYYY-MM-DD');
+  const { mealTime } = req.body;
 
-module.exports = router;
+  try {
+    // 2. 先查用户 (User 是必须要查的，为了拿 fitnessGoal)
+    const currentUser = await User.findById(userId);
+    if (!currentUser) return res.status(404).json({ msg: '用户未找到' });
+
+    // 3. 核心分叉逻辑：判断 paramId 到底是个 ID 还是个菜名
+    let menuItem = null;
+    let finalDishName = '';
+    let isSoup = false;
+
+    // 判断逻辑：是合法的 ObjectId 格式吗？
+    if (Types.ObjectId.isValid(paramId)) {
+      // ---> 分支 A: 看起来像个 ID，去 Menu 表查查看
+      menuItem = await Menu.findById(paramId);
+    }
+
+    if (menuItem) {
+      // [情况 1]: 是现有菜单 (数据库里查到了)
+      finalDishName = menuItem.name;
+
+      // --- A. 更新全局菜单 (触发冷却) ---
+      // 只有数据库里的菜才需要更新"上次吃的时间"
+      menuItem.timesEaten += 1;
+      menuItem.lastEaten = new Date();
+      await menuItem.save();
+
+      // 判断是否汤品 (查 tags 或 名字)
+      isSoup = menuItem.name.includes('汤') || (menuItem.tags && menuItem.tags.some((t) => t.includes('汤')));
+    } else {
+      // [情况 2]: 是 AI 菜品 (不是 ID，或者库里没这个 ID)
+      // 直接把 paramId 当作菜名
+      finalDishName = paramId;
+
+      // 判断是否汤品 (只能查名字)
+      isSoup = finalDishName.includes('汤');
+    }
+
+    // --- B. 写入个人 Fitness 记录 (通用逻辑) ---
+    // 这里的逻辑对 AI 菜品和现有菜品是通用的，只认 finalDishName
+
+    let fitnessRecord = await Fitness.findOne({ user: userId, dateStr: todayStr });
+
+    // 如果今天还没记录，初始化一条
+    if (!fitnessRecord) {
+      fitnessRecord = new Fitness({
+        user: userId,
+        date: new Date(),
+        dateStr: todayStr,
+        diet: { content: '', water: 0 },
+        body: {}, // 初始化防止报错
+        workout: {} // 初始化防止报错
+      });
+    }
+
+    // 记录当时的模式快照
+    const currentGoal = currentUser.fitnessGoal || 'maintain';
+    if (fitnessRecord.diet) {
+      fitnessRecord.diet.goalSnapshot = currentGoal;
+    }
+
+    // 生成日记文案
+    // 格式： "晚餐选中了：【红烧肉】。"
+    const newContent = `${mealTime || '大厨转盘'}选中了：【${finalDishName}】。`;
+    const oldContent = fitnessRecord.diet.content || '';
+
+    // 简单的去重/追加逻辑
+    fitnessRecord.diet.content = oldContent ? `${oldContent}\n${newContent}` : newContent;
+
+    // 自动补水逻辑 (通用)
+    if (isSoup) {
+      fitnessRecord.diet.water = (fitnessRecord.diet.water || 0) + 300;
+      fitnessRecord.diet.content += ' (汤品自动补水 +300ml)';
+    }
+
+    await fitnessRecord.save();
+
+    res.json({
+      msg: `已确认【${finalDishName}】，并记录到您的饮食日记`,
+      // 如果是 AI 菜，menu 字段返回 null 或构建一个临时对象，防止前端报错
+      menu: menuItem || { name: finalDishName, _id: 'ai_generated' },
+      fitness: fitnessRecord
+    });
+  } catch (err) {
+    console.error('Confirm Dish Error:', err);
+    res.status(500).send('Server Error');
+  }
+});
+
+export default router;

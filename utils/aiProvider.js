@@ -1,11 +1,9 @@
 // utils/aiProvider.js
-const {
-  GoogleGenAI
-} = require("@google/genai");
+import { GoogleGenAI } from '@google/genai';
 
 // 1. 基础配置
 if (!process.env.GEMINI_API_KEY) {
-  throw new Error("❌ [Fatal] 缺少环境变量 GEMINI_API_KEY");
+  throw new Error('❌ [Fatal] 缺少环境变量 GEMINI_API_KEY');
 }
 
 // 初始化客户端
@@ -16,23 +14,23 @@ const ai = new GoogleGenAI({
 // 生产级配置常量
 const CONFIG = {
   // 首选模型 (Gemini 3 Flash Preview, 适合快速响应)
-  PRIMARY_MODEL: "gemini-3-flash-preview",
+  PRIMARY_MODEL: 'gemini-3-flash-preview',
   // 备胎模型 (Gemini 2.0 Flash Exp, 稳定性高)
-  FALLBACK_MODEL: "gemini-2.0-flash-exp",
+  FALLBACK_MODEL: 'gemini-2.0-flash-exp',
   // 最大重试次数
   MAX_RETRIES: 2,
   // 超时时间 (毫秒)
-  TIMEOUT_MS: 30000, // 稍微调大一点，Agent 执行可能较慢
+  TIMEOUT_MS: 30000 // 稍微调大一点，Agent 执行可能较慢
 };
 
 /**
  * 辅助函数：清洗 AI 返回的 JSON 字符串
  */
 function cleanJSONString(text) {
-  if (!text) return "{}";
-  let clean = text.replace(/```json|```/g, "").trim();
-  const firstOpen = clean.indexOf("{");
-  const lastClose = clean.lastIndexOf("}");
+  if (!text) return '{}';
+  let clean = text.replace(/```json|```/g, '').trim();
+  const firstOpen = clean.indexOf('{');
+  const lastClose = clean.lastIndexOf('}');
   if (firstOpen !== -1 && lastClose !== -1) {
     clean = clean.substring(firstOpen, lastClose + 1);
   }
@@ -43,12 +41,7 @@ function cleanJSONString(text) {
  * 辅助函数：带超时的 Promise 包装器
  */
 function withTimeout(promise, ms) {
-  return Promise.race([
-    promise,
-    new Promise((_, reject) =>
-      setTimeout(() => reject(new Error("TIMEOUT")), ms)
-    ),
-  ]);
+  return Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), ms))]);
 }
 
 /**
@@ -70,8 +63,8 @@ async function generateJSON(prompt, modelName = CONFIG.PRIMARY_MODEL) {
           model: currentModel,
           contents: prompt,
           config: {
-            responseMimeType: "application/json"
-          },
+            responseMimeType: 'application/json'
+          }
         }),
         CONFIG.TIMEOUT_MS
       );
@@ -83,24 +76,23 @@ async function generateJSON(prompt, modelName = CONFIG.PRIMARY_MODEL) {
 
       // 3. 解析并返回
       return JSON.parse(cleanedText);
-
     } catch (err) {
       console.error(`⚠️ [AI Error] 模型 ${currentModel} 报错:`, err.message);
 
       // 🛑 致命错误处理
-      if (err.message.includes("404") || err.message.includes("not found") || err.message.includes("400")) {
+      if (err.message.includes('404') || err.message.includes('not found') || err.message.includes('400')) {
         if (currentModel !== CONFIG.FALLBACK_MODEL) {
           console.warn(`🔄 [AI Fallback] 切换备用模型: ${CONFIG.FALLBACK_MODEL}`);
           currentModel = CONFIG.FALLBACK_MODEL;
           attempts = 0;
           continue;
         } else {
-          throw new Error("所有模型均不可用，请检查 API Key 或网络");
+          throw new Error('所有模型均不可用，请检查 API Key 或网络');
         }
       }
 
       // 🛑 临时错误重试
-      const isRetryable = err.message.includes("429") || err.message.includes("503") || err.message === "TIMEOUT";
+      const isRetryable = err.message.includes('429') || err.message.includes('503') || err.message === 'TIMEOUT';
       if (isRetryable && attempts <= CONFIG.MAX_RETRIES) {
         const delay = attempts * 1000;
         console.log(`⏳ [AI Retry] ${delay}ms 后重试...`);
@@ -109,8 +101,8 @@ async function generateJSON(prompt, modelName = CONFIG.PRIMARY_MODEL) {
       }
 
       return {
-        error: "AI_GENERATION_FAILED",
-        message: "大厨正在忙，请稍后再试",
+        error: 'AI_GENERATION_FAILED',
+        message: '大厨正在忙，请稍后再试',
         debug: err.message
       };
     }
@@ -125,27 +117,31 @@ async function generateStream(promptInput) {
   let currentModel = CONFIG.PRIMARY_MODEL;
 
   // 格式化输入
-  const formattedContents = typeof promptInput === 'string' ?
-    [{
-      role: 'user',
-      parts: [{
-        text: promptInput
-      }]
-    }] :
-    promptInput;
+  const formattedContents =
+    typeof promptInput === 'string'
+      ? [
+          {
+            role: 'user',
+            parts: [
+              {
+                text: promptInput
+              }
+            ]
+          }
+        ]
+      : promptInput;
 
   try {
     console.log(`🌊 [AI Stream] Attempting model: ${currentModel}`);
 
     const responseStream = await ai.models.generateContentStream({
       model: currentModel,
-      contents: formattedContents,
+      contents: formattedContents
       // config: { maxOutputTokens: 8192 } // 可选
     });
 
     // 直接返回 stream 对象 (AsyncIterable)
     return responseStream;
-
   } catch (err) {
     console.error(`⚠️ [AI Stream Error] ${currentModel} failed:`, err.message);
 
@@ -154,7 +150,7 @@ async function generateStream(promptInput) {
       try {
         const fallbackResponse = await ai.models.generateContentStream({
           model: CONFIG.FALLBACK_MODEL,
-          contents: formattedContents,
+          contents: formattedContents
         });
         return fallbackResponse;
       } catch (fallbackErr) {
@@ -175,7 +171,6 @@ async function* createAgentStream(params) {
   try {
     console.log(`🌊 [Agent Stream] Attempting with ${currentModel}...`);
     yield* _runAgentLoop(currentModel, params);
-
   } catch (err) {
     console.warn(`⚠️ [Agent Warning] ${currentModel} failed: ${err.message}`);
 
@@ -184,7 +179,7 @@ async function* createAgentStream(params) {
       try {
         yield* _runAgentLoop(CONFIG.FALLBACK_MODEL, params);
       } catch (fallbackErr) {
-        console.error("❌ [Agent Error] All models failed.");
+        console.error('❌ [Agent Error] All models failed.');
         throw new Error(`Agent failed on both models: ${fallbackErr.message}`);
       }
     } else {
@@ -196,31 +191,25 @@ async function* createAgentStream(params) {
 /**
  * 🕵️ 内部核心逻辑：Agent 循环
  */
-async function* _runAgentLoop(modelName, {
-  systemInstruction,
-  history,
-  prompt,
-  toolsSchema,
-  functionsMap
-}) {
-
+async function* _runAgentLoop(modelName, { systemInstruction, history, prompt, toolsSchema, functionsMap }) {
   // 🔥🔥🔥 核心修复：智能处理 tools 格式 (防止双重包装) 🔥🔥🔥
   let finalTools = undefined;
 
   if (toolsSchema) {
     // 检查 1: 是否已经是标准的 [{ functionDeclarations: [...] }] 格式
-    const isAlreadyWrapped = Array.isArray(toolsSchema) &&
-      toolsSchema.length > 0 &&
-      toolsSchema[0].functionDeclarations;
+    const isAlreadyWrapped =
+      Array.isArray(toolsSchema) && toolsSchema.length > 0 && toolsSchema[0].functionDeclarations;
 
     if (isAlreadyWrapped) {
       // 如果调用方已经包装好了，直接用
       finalTools = toolsSchema;
     } else if (Array.isArray(toolsSchema)) {
       // 如果只是纯函数定义的数组，我们帮它包装
-      finalTools = [{
-        functionDeclarations: toolsSchema
-      }];
+      finalTools = [
+        {
+          functionDeclarations: toolsSchema
+        }
+      ];
     }
   }
 
@@ -231,7 +220,7 @@ async function* _runAgentLoop(modelName, {
     config: {
       systemInstruction: systemInstruction,
       tools: finalTools, // ✅ 使用处理过的 tools
-      maxOutputTokens: 8192,
+      maxOutputTokens: 8192
     }
   });
 
@@ -267,7 +256,6 @@ async function* _runAgentLoop(modelName, {
   // 第二阶段：执行工具并获取最终回复 (Agent 核心)
   // =================================================
   if (functionCallFound && functionCallsToExecute.length > 0) {
-
     const functionResponsesParts = [];
 
     // 1. 执行所有被请求的函数
@@ -318,7 +306,6 @@ async function* _runAgentLoop(modelName, {
   }
 }
 
-
 /**
  * ⚡️ 专门用于生成简短标题的工具函数
  * 使用最便宜的 Flash 模型
@@ -339,14 +326,13 @@ async function generateTitle(historyText) {
 
     // 3. 解析并返回
     return JSON.parse(cleanedText);
-
   } catch (e) {
-    console.error("标题生成失败:", e);
+    console.error('标题生成失败:', e);
     return null;
   }
 }
 
-module.exports = {
+export {
   generateJSON,
   generateStream,
   createAgentStream,

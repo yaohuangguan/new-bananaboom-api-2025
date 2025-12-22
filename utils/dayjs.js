@@ -2,7 +2,7 @@
  * @module utils/time
  * @description 统一时间处理工具
  */
-const dayjs = require('dayjs');
+import dayjs from 'dayjs';
 
 // 格式常量：精确到分钟
 const FORMAT_MINUTE = 'YYYY-MM-DD HH:mm';
@@ -15,7 +15,7 @@ const getCurrentTime = () => {
   return dayjs().format(FORMAT_MINUTE);
 };
 
-module.exports = {
+export {
   getCurrentTime,
   dayjs // 导出原始实例以备不时之需
 };

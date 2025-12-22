@@ -1,25 +1,25 @@
-const express = require("express");
-const router = express.Router();
-const Todo = require("../models/Todo");
-const User = require("../models/User");
-const { NEW_NOTIFICATION } = require("../socket/events");
-const axios = require("axios");
-const cronParser = require("cron-parser"); // 🔥 务必 npm install cron-parser
+import { Router } from 'express';
+const router = Router();
+import Todo from '../models/Todo.js';
+import User from '../models/User.js';
+import { NEW_NOTIFICATION } from '../socket/events.js';
+import fetch from '../utils/http.js';
+import cronParser from 'cron-parser'; // 🔥 务必 npm install cron-parser
 
 // 从环境变量读取 Secret
-const CRON_SECRET = process.env.CRON_SECRET || "my-secret-key";
+const CRON_SECRET = process.env.CRON_SECRET || 'my-secret-key';
 
 // @route   GET /api/cron/trigger
-router.get("/trigger", async (req, res) => {
+router.get('/trigger', async (req, res) => {
   // 1. 安全校验
-  if (req.headers["x-scheduler-secret"] !== CRON_SECRET) {
+  if (req.headers['x-scheduler-secret'] !== CRON_SECRET) {
     if (process.env.NODE_ENV === 'production') {
-       return res.status(401).json({ msg: "Unauthorized" });
+      return res.status(401).json({ msg: 'Unauthorized' });
     }
   }
 
   try {
-    const io = req.app.get("socketio");
+    const io = req.app.get('socketio');
     const now = new Date();
 
     // 2. 查库：找 [到期] 且 [未通知] 且 [未完成] 的任务
@@ -34,7 +34,7 @@ router.get("/trigger", async (req, res) => {
     });
 
     if (tasksToRemind.length === 0) {
-      return res.json({ success: true, msg: "No tasks to remind" });
+      return res.json({ success: true, msg: 'No tasks to remind' });
     }
 
     console.log(`⏰ [Cron] 触发提醒: 处理 ${tasksToRemind.length} 个任务`);
@@ -48,14 +48,14 @@ router.get("/trigger", async (req, res) => {
       if (!task.user) continue;
 
       const title = `🔔 提醒：${task.todo}`;
-      const content = task.description || "任务时间到了，快去完成吧！";
-      
+      const content = task.description || '任务时间到了，快去完成吧！';
+
       const socketPayload = {
-        type: "system_reminder",
+        type: 'system_reminder',
         content: `${title}`,
         taskId: task._id,
         timestamp: new Date(),
-        fromUser: { displayName: "家庭管家", id: "system" }
+        fromUser: { displayName: '家庭管家', id: 'system' }
       };
 
       // --- A. 确定推送目标 ---
@@ -73,12 +73,12 @@ router.get("/trigger", async (req, res) => {
       for (const target of targetUsers) {
         // 1. Socket 推送 (在线)
         if (io && target._id) {
-            io.to(target._id.toString()).emit(NEW_NOTIFICATION, socketPayload);
+          io.to(target._id.toString()).emit(NEW_NOTIFICATION, socketPayload);
         }
 
         // 2. Bark 推送 (离线/手机)
         if (target.barkUrl) {
-           await sendBarkNotification(target.barkUrl, title, content);
+          await sendBarkNotification(target.barkUrl, title, content);
         }
       }
 
@@ -97,9 +97,8 @@ router.get("/trigger", async (req, res) => {
           // 2. 更新任务：设为新时间 + 重置通知状态 (关键!)
           task.remindAt = nextRun;
           task.isNotified = false; // 重置为 false，这样 Scheduler 下次还能扫到它
-          
-          await task.save();
 
+          await task.save();
         } else {
           // === 普通任务 ===
           // 标记为已通知 (如果不点击完成，就不再提醒了)
@@ -115,10 +114,9 @@ router.get("/trigger", async (req, res) => {
     }
 
     res.json({ success: true, processed: tasksToRemind.length });
-
   } catch (err) {
-    console.error("❌ Scheduler Fatal Error:", err);
-    res.status(500).send("Server Error");
+    console.error('❌ Scheduler Fatal Error:', err);
+    res.status(500).send('Server Error');
   }
 });
 
@@ -126,21 +124,21 @@ router.get("/trigger", async (req, res) => {
 async function sendBarkNotification(barkUrl, title, body) {
   try {
     if (!barkUrl) return;
-    
+
     // 处理 URL 结尾的斜杠
     const baseUrl = barkUrl.endsWith('/') ? barkUrl.slice(0, -1) : barkUrl;
     const encodedTitle = encodeURIComponent(title);
     const encodedBody = encodeURIComponent(body);
-    
+
     // 拼接 (指定图标)
     const finalUrl = `${baseUrl}/${encodedTitle}/${encodedBody}?icon=https://cdn-icons-png.flaticon.com/512/3602/3602145.png`;
-    
+
     // Bark 默认是 GET 请求
-    await axios.get(finalUrl);
+    await fetch.get(finalUrl);
     console.log(`📱 Bark 推送成功 -> ${baseUrl.slice(-10)}`);
   } catch (e) {
     console.error(`❌ Bark 推送失败: ${e.message}`);
   }
 }
 
-module.exports = router;
+export default router;

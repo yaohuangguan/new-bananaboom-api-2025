@@ -1,11 +1,11 @@
-const express = require("express");
-const router = express.Router();
-const Homepage = require("../models/Homepage");
-const Project = require("../models/Project");
-const Log = require("../models/Log");
+import { Router } from 'express';
+const router = Router();
+import Homepage from '../models/Homepage.js';
+import Project from '../models/Project.js';
+import Log from '../models/Log.js';
 
 // 🔥 引入限流中间件
-const rateLimit = require("express-rate-limit");
+import rateLimit from 'express-rate-limit';
 
 // ==========================================
 // 🛡️ 配置限流器 (Anti-Brushing Strategy)
@@ -19,8 +19,8 @@ const likeLimiter = rateLimit({
   standardHeaders: true, // 返回 RateLimit-* 头信息
   legacyHeaders: false, // 禁用 X-RateLimit-* 头信息
   message: {
-    message: "点赞太频繁了，请稍作休息再试！(Rate limit exceeded)"
-  },
+    message: '点赞太频繁了，请稍作休息再试！(Rate limit exceeded)'
+  }
   // 关键：如果你的应用部署在 Nginx/Vercel/Heroku 后，需要信任代理 IP
   // 否则所有请求都会被识别为同一个 IP (负载均衡器的 IP)
   // keyGenerator: (req) => req.ip // 默认就是用 IP，通常不需要改，但在 app.js 里要设置 app.set('trust proxy', 1)
@@ -32,7 +32,7 @@ const readLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 60,
   message: {
-    message: "请求过于频繁，请稍后再试。"
+    message: '请求过于频繁，请稍后再试。'
   }
 });
 
@@ -46,13 +46,13 @@ const readLimiter = rateLimit({
  * @access  Public
  */
 // ✅ 应用宽松限流
-router.get("/", readLimiter, async (req, res) => {
+router.get('/', readLimiter, async (req, res) => {
   try {
     const response = await Homepage.find().lean();
     res.status(200).json(response);
   } catch (error) {
-    console.error("Fetch homepage error:", error);
-    res.status(500).json({ message: "服务器内部错误" });
+    console.error('Fetch homepage error:', error);
+    res.status(500).json({ message: '服务器内部错误' });
   }
 });
 
@@ -61,7 +61,7 @@ router.get("/", readLimiter, async (req, res) => {
  * @desc    单独获取点赞数据
  * @access  Public
  */
-router.get("/likes", readLimiter, async (req, res) => {
+router.get('/likes', readLimiter, async (req, res) => {
   try {
     const response = await Homepage.find({}, { likes: 1 }).lean();
     res.status(200).json(response);
@@ -76,17 +76,17 @@ router.get("/likes", readLimiter, async (req, res) => {
  * @access  Public (每个人都能点)
  */
 // ✅ 🔥 应用严格限流 (防刷核心)
-router.post("/likes/:id/add", likeLimiter, async (req, res) => {
+router.post('/likes/:id/add', likeLimiter, async (req, res) => {
   try {
     // 使用原子操作 $inc 确保并发安全
     const updatedDoc = await Homepage.findByIdAndUpdate(
       req.params.id,
       { $inc: { likes: 1 } },
-      { new: true, select: "likes" } 
+      { new: true, select: 'likes' }
     );
 
     if (!updatedDoc) {
-      return res.status(404).json({ message: "未找到对应的首页记录" });
+      return res.status(404).json({ message: '未找到对应的首页记录' });
     }
 
     res.status(200).json(updatedDoc);
@@ -101,16 +101,16 @@ router.post("/likes/:id/add", likeLimiter, async (req, res) => {
  * @access  Public
  */
 // ✅ 应用严格限流
-router.post("/likes/:id/remove", likeLimiter, async (req, res) => {
+router.post('/likes/:id/remove', likeLimiter, async (req, res) => {
   try {
     const updatedDoc = await Homepage.findByIdAndUpdate(
       req.params.id,
       { $inc: { likes: -1 } },
-      { new: true, select: "likes" }
+      { new: true, select: 'likes' }
     );
 
     if (!updatedDoc) {
-      return res.status(404).json({ message: "未找到对应的首页记录" });
+      return res.status(404).json({ message: '未找到对应的首页记录' });
     }
 
     res.status(200).json(updatedDoc);
@@ -128,11 +128,11 @@ router.post("/likes/:id/remove", likeLimiter, async (req, res) => {
  * @desc    获取项目列表
  * @access  Public
  */
-router.get("/projects", readLimiter, async (_req, res) => {
+router.get('/projects', readLimiter, async (_req, res) => {
   try {
     const response = await Project.find().lean();
     // 静态内容缓存 1 小时
-    res.setHeader("Cache-Control", "public, max-age=3600");
+    res.setHeader('Cache-Control', 'public, max-age=3600');
     res.status(200).json(response);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -144,14 +144,14 @@ router.get("/projects", readLimiter, async (_req, res) => {
  * @desc    获取更新日志
  * @access  Public
  */
-router.get("/logs", readLimiter, async (_req, res) => {
+router.get('/logs', readLimiter, async (_req, res) => {
   try {
     const response = await Log.find().sort({ version: 1 }).lean();
-    res.setHeader("Cache-Control", "public, max-age=3600");
+    res.setHeader('Cache-Control', 'public, max-age=3600');
     res.status(200).json(response);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 });
 
-module.exports = router;
+export default router;

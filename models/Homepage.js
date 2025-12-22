@@ -1,6 +1,6 @@
-const mongoose = require("mongoose");
+import { Schema, model } from 'mongoose';
 
-const HomePageSchema = mongoose.Schema({
+const HomePageSchema = Schema({
   likes: Number,
   jumbo_name: {
     type: String
@@ -43,4 +43,4 @@ const HomePageSchema = mongoose.Schema({
   }
 });
 
-module.exports = mongoose.model("homepages", HomePageSchema);
+export default model('homepages', HomePageSchema);

@@ -1,7 +1,6 @@
-const express = require("express");
-const router = express.Router();
-const cloudinary = require("cloudinary").v2;
-
+import { Router } from 'express';
+const router = Router();
+import { v2 as cloudinary } from 'cloudinary';
 
 // 1. 初始化配置 (从环境变量读取)
 cloudinary.config({
@@ -10,15 +9,14 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
-
 /**
  * @route   GET /api/cloudinary/config
  * @desc    获取前端初始化所需的公开信息
  */
-router.get("/config", (req, res) => {
+router.get('/config', (req, res) => {
   res.json({
     cloudName: process.env.CLOUDINARY_CLOUD_NAME,
-    apiKey: process.env.CLOUDINARY_API_KEY,
+    apiKey: process.env.CLOUDINARY_API_KEY
     // 注意：绝对不能返回 API Secret！
   });
 });
@@ -28,14 +26,14 @@ router.get("/config", (req, res) => {
  * @desc    生成上传签名 (这是前端安全上传的核心)
  * 前端拿到这个 timestamp 和 signature 后，就可以直接传图给 Cloudinary
  */
-router.get("/signature", (req, res) => {
+router.get('/signature', (req, res) => {
   const timestamp = Math.round(new Date().getTime() / 1000);
 
   // 生成签名
   // 你可以在 params 里加更多限制，比如 folder: 'blog-images'
   const signature = cloudinary.utils.api_sign_request(
     {
-      timestamp: timestamp,
+      timestamp: timestamp
       // folder: "next-bananaboom", // 可选：指定上传文件夹
     },
     process.env.CLOUDINARY_API_SECRET
@@ -101,14 +99,14 @@ router.get("/signature", (req, res) => {
     "rate_limit_remaining": 497
 }
  */
-router.get("/usage", async (req, res) => {
+router.get('/usage', async (req, res) => {
   try {
     // 使用 Admin API 查询
     const result = await cloudinary.api.usage();
     res.json(result);
   } catch (error) {
-    console.error("Cloudinary usage error:", error);
-    res.status(500).json({ message: "Failed to fetch Cloudinary usage" });
+    console.error('Cloudinary usage error:', error);
+    res.status(500).json({ message: 'Failed to fetch Cloudinary usage' });
   }
 });
 
@@ -133,25 +131,24 @@ router.get("/usage", async (req, res) => {
     }>  (直接返回数组，保持前端零修改)
  * 
  */
-router.get("/resources", async (req, res) => {
+router.get('/resources', async (req, res) => {
   try {
-      // 1. 调用 Cloudinary API
-      const result = await cloudinary.api.resources({
-          max_results: 30,   // 限制返回数量
-          direction: 'desc', // 最新的在前
-          resource_type: 'image',
-          type: 'upload'
-      });
+    // 1. 调用 Cloudinary API
+    const result = await cloudinary.api.resources({
+      max_results: 30, // 限制返回数量
+      direction: 'desc', // 最新的在前
+      resource_type: 'image',
+      type: 'upload'
+    });
 
-      // 2. 🔥 关键点：只提取 resources 数组直接返回
-      // Cloudinary 返回的是 { resources: [...], next_cursor: "..." }
-      // 我们直接 res.json(数组)，这样前端拿到的就是 [ {asset_id...}, {asset_id...} ]
-      res.json(result.resources);
-
+    // 2. 🔥 关键点：只提取 resources 数组直接返回
+    // Cloudinary 返回的是 { resources: [...], next_cursor: "..." }
+    // 我们直接 res.json(数组)，这样前端拿到的就是 [ {asset_id...}, {asset_id...} ]
+    res.json(result.resources);
   } catch (error) {
-      console.error("Cloudinary error:", error);
-      // 出错时最好也保持简单的 JSON 结构，或者返回空数组防止前端 .map 报错
-      res.status(500).json([]); 
+    console.error('Cloudinary error:', error);
+    // 出错时最好也保持简单的 JSON 结构，或者返回空数组防止前端 .map 报错
+    res.status(500).json([]);
   }
 });
 
@@ -160,11 +157,11 @@ router.get("/resources", async (req, res) => {
  * @desc    删除指定图片
  * @body    { public_id: "bnqa86xkeknlk3yxvi7i" }
  */
-router.post("/delete", async (req, res) => {
+router.post('/delete', async (req, res) => {
   const { public_id } = req.body;
 
   if (!public_id) {
-    return res.status(400).json({ msg: "Public ID is required" });
+    return res.status(400).json({ msg: 'Public ID is required' });
   }
 
   try {
@@ -174,15 +171,14 @@ router.post("/delete", async (req, res) => {
 
     // Cloudinary 返回格式通常是: { result: 'ok' } 或 { result: 'not found' }
     if (result.result === 'ok') {
-      res.json({ success: true, msg: "删除成功" });
+      res.json({ success: true, msg: '删除成功' });
     } else {
-      res.status(404).json({ success: false, msg: "未找到该图片或删除失败", details: result });
+      res.status(404).json({ success: false, msg: '未找到该图片或删除失败', details: result });
     }
-
   } catch (error) {
-    console.error("Cloudinary Delete Error:", error);
-    res.status(500).json({ msg: "Server Error" });
+    console.error('Cloudinary Delete Error:', error);
+    res.status(500).json({ msg: 'Server Error' });
   }
 });
 
-module.exports = router;
+export default router;

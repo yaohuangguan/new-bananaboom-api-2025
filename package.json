@@ -3,13 +3,12 @@
   "version": "1.0.0",
   "description": "banana backend",
   "main": "index.js",
+  "type": "module",
   "engines": {
-    "node": ">= 18",
-    "npm": "6.13.1"
+    "node": ">= 22"
   },
   "dependencies": {
     "@google/genai": "^1.34.0",
-    "and": "^0.0.3",
     "axios": "^1.13.2",
     "bcryptjs": "^2.4.3",
     "cloudinary": "^2.8.0",
@@ -17,26 +16,19 @@
     "cors": "^2.8.5",
     "cron-parser": "^5.4.0",
     "dayjs": "^1.11.19",
-    "delete": "^1.1.0",
-    "dotenv": "^17.2.3",
-    "express": "^4.17.1",
+    "express": "^5.2.1",
     "express-rate-limit": "^8.2.1",
     "express-validator": "^6.3.1",
-    "helmet": "^3.21.2",
-    "isomorphic-unfetch": "^3.0.0",
+    "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.2",
-    "mongoose": "^9.0.0",
+    "mongoose": "^9.0.2",
     "morgan": "^1.9.1",
     "node-cache": "^5.1.2",
     "node-cron": "^4.2.1",
-    "npm": "^11.7.0",
     "passport": "^0.7.0",
     "passport-google-oauth20": "^2.0.0",
     "passport-wechat": "^0.0.0",
-    "puppeteer": "^3.3.0",
-    "redis": "^3.0.2",
-    "socket.io": "^4.8.1",
-    "spdy": "^4.0.1"
+    "socket.io": "^4.8.1"
   },
   "devDependencies": {
     "cross-env": "^10.1.0",
@@ -45,15 +37,15 @@
     "husky": "^8.0.0",
     "jest": "^30.2.0",
     "mongodb-memory-server": "^11.0.0",
-    "nodemon": "^2.0.1",
     "supertest": "^7.1.4"
   },
   "scripts": {
-    "start": "node --experimental-specifier-resolution=node index.js",
-    "dev": "nodemon index.js --use-strict",
-    "test": "cross-env NODE_ENV=test jest --detectOpenHandles",
-    "bark": "node ./utils/updateBark.js",
-    "prepare": "husky install"
+    "start": "node index.js",
+    "dev": "node --watch --env-file=.env index.js",
+    "test": "node --experimental-vm-modules --env-file=.env.test node_modules/jest/bin/jest.js --detectOpenHandles --forceExit",
+    "bark": "node --env-file=.env ./utils/updateBark.js",
+    "prepare": "husky install",
+    "format": "prettier --write ."
   },
   "author": "samyao",
   "license": "ISC"

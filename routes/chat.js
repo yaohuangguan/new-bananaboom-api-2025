@@ -1,19 +1,16 @@
-const express = require("express");
-const router = express.Router();
-const Chat = require("../models/Chat");
-const Conversation = require("../models/Conversation"); // 🔥 引用新模型
-const mongoose = require('mongoose');
-const {
-  generateTitle
-} = require("../utils/aiProvider");
-
+import { Router } from 'express';
+const router = Router();
+import Chat from '../models/Chat.js';
+import Conversation from '../models/Conversation.js'; // 🔥 引用新模型
+import { Types } from 'mongoose';
+import { generateTitle } from '../utils/aiProvider.js';
 
 // =========================================================================
 // 🤖 系统配置区域
 // =========================================================================
 
 // 🔥🔥🔥【重要】请确保此 ID 与数据库中真实的 Bot 用户 ID 一致
-const AI_USER_ID = "6946005372b6aea1602bf390";
+const AI_USER_ID = '6946005372b6aea1602bf390';
 
 /**
  * 🛡️ 防缓存中间件
@@ -36,11 +33,9 @@ router.use((req, res, next) => {
  * @desc    获取公共聊天室/群聊的历史记录
  * @access  Private
  */
-router.get("/public/:roomName", async (req, res) => {
+router.get('/public/:roomName', async (req, res) => {
   try {
-    const {
-      roomName
-    } = req.params;
+    const { roomName } = req.params;
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
     const skip = (page - 1) * limit;
@@ -59,9 +54,9 @@ router.get("/public/:roomName", async (req, res) => {
 
     res.json(messages.reverse());
   } catch (err) {
-    console.error("获取群聊记录失败:", err);
+    console.error('获取群聊记录失败:', err);
     res.status(500).json({
-      msg: "Server Error"
+      msg: 'Server Error'
     });
   }
 });
@@ -71,29 +66,32 @@ router.get("/public/:roomName", async (req, res) => {
  * @desc    获取私聊历史记录
  * @access  Private
  */
-router.get("/private/:targetUserId", async (req, res) => {
+router.get('/private/:targetUserId', async (req, res) => {
   try {
     const targetUserId = req.params.targetUserId;
     const currentUserId = (req.user && req.user.id) || req.userId;
 
-    if (!currentUserId) return res.status(401).json({
-      msg: "用户未授权"
-    });
-    if (!mongoose.Types.ObjectId.isValid(targetUserId)) return res.status(400).json({
-      msg: "无效ID"
-    });
+    if (!currentUserId)
+      return res.status(401).json({
+        msg: '用户未授权'
+      });
+    if (!Types.ObjectId.isValid(targetUserId))
+      return res.status(400).json({
+        msg: '无效ID'
+      });
 
-    const myId = new mongoose.Types.ObjectId(currentUserId);
-    const targetId = new mongoose.Types.ObjectId(targetUserId);
+    const myId = new Types.ObjectId(currentUserId);
+    const targetId = new Types.ObjectId(targetUserId);
 
     const query = {
-      room: "private",
-      $or: [{
-          "user.id": myId,
+      room: 'private',
+      $or: [
+        {
+          'user.id': myId,
           toUser: targetId
         },
         {
-          "user.id": targetId,
+          'user.id': targetId,
           toUser: myId
         }
       ]
@@ -103,11 +101,11 @@ router.get("/private/:targetUserId", async (req, res) => {
       .sort({
         createdDate: -1
       })
-      .populate("toUser", "displayName photoURL")
-      .populate("user.id", "displayName photoURL");
+      .populate('toUser', 'displayName photoURL')
+      .populate('user.id', 'displayName photoURL');
 
     // 数据清洗：确保 displayName 正确显示
-    const formattedMessages = messages.map(msg => {
+    const formattedMessages = messages.map((msg) => {
       const m = msg.toObject();
       if (m.user && m.user.id) {
         const senderInfo = m.user.id;
@@ -120,9 +118,9 @@ router.get("/private/:targetUserId", async (req, res) => {
 
     res.json(formattedMessages.reverse());
   } catch (err) {
-    console.error("❌ 私聊接口报错:", err);
+    console.error('❌ 私聊接口报错:', err);
     res.status(500).json({
-      msg: "Server Error"
+      msg: 'Server Error'
     });
   }
 });
@@ -139,20 +137,20 @@ router.get("/private/:targetUserId", async (req, res) => {
  * @access  Private
  * @return  [ { sessionId, title, lastActiveAt }, ... ]
  */
-router.get("/ai/conversations",  async (req, res) => {
+router.get('/ai/conversations', async (req, res) => {
   try {
     const conversations = await Conversation.find({
-        user: req.user.id
-      })
+      user: req.user.id
+    })
       .sort({
         lastActiveAt: -1
       }) // 核心逻辑：按活跃时间倒序，最近聊的排最前
       .limit(50); // 性能优化：限制返回最近 50 个会话
     res.json(conversations);
   } catch (err) {
-    console.error("获取会话列表失败:", err);
+    console.error('获取会话列表失败:', err);
     res.status(500).json({
-      msg: "获取列表失败"
+      msg: '获取列表失败'
     });
   }
 });
@@ -166,12 +164,10 @@ router.get("/ai/conversations",  async (req, res) => {
  * @query   page, limit - 分页参数
  * @access  Private
  */
-router.get("/ai",  async (req, res) => {
+router.get('/ai', async (req, res) => {
   try {
     const userId = req.user.id;
-    const {
-      sessionId
-    } = req.query; // 🔥 必须从前端传过来
+    const { sessionId } = req.query; // 🔥 必须从前端传过来
 
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
@@ -199,7 +195,7 @@ router.get("/ai",  async (req, res) => {
     // 数据库存的是真实的 Bot ID (为了数据一致性)，
     // 但前端通过 'ai_assistant' 来判断是否在左侧显示头像，
     // 所以这里临时把 ID 替换一下，保持前端兼容性。
-    const formattedMessages = messages.map(msg => {
+    const formattedMessages = messages.map((msg) => {
       const m = msg.toObject();
       if (m.user && m.user.id && m.user.id.toString() === AI_USER_ID) {
         m.user.id = 'ai_assistant';
@@ -208,11 +204,10 @@ router.get("/ai",  async (req, res) => {
     });
 
     res.json(formattedMessages.reverse()); // 翻转数组，让旧消息在上，新消息在下
-
   } catch (err) {
-    console.error("获取AI记录失败:", err);
+    console.error('获取AI记录失败:', err);
     res.status(500).json({
-      msg: "Server Error"
+      msg: 'Server Error'
     });
   }
 });
@@ -227,29 +222,23 @@ router.get("/ai",  async (req, res) => {
  * @body    { text, role, sessionId, image }
  * @access  Private
  */
-router.post("/ai/save", async (req, res) => {
+router.post('/ai/save', async (req, res) => {
   try {
     const userId = req.user.id;
     // 参数解构
-    const {
-      text,
-      content,
-      role,
-      sessionId,
-      image
-    } = req.body;
-    const msgContent = text || content || "[图片消息]"; // 兼容字段
+    const { text, content, role, sessionId, image } = req.body;
+    const msgContent = text || content || '[图片消息]'; // 兼容字段
 
     // 1. 基础校验
     if (!sessionId) {
       return res.status(400).json({
-        msg: "缺少 sessionId，无法保存消息"
+        msg: '缺少 sessionId，无法保存消息'
       });
     }
 
-    if (AI_USER_ID === "请在这里填入脚本生成的ID") {
+    if (AI_USER_ID === '请在这里填入脚本生成的ID') {
       return res.status(500).json({
-        msg: "后端配置错误：未设置 AI_USER_ID"
+        msg: '后端配置错误：未设置 AI_USER_ID'
       });
     }
 
@@ -306,7 +295,7 @@ router.post("/ai/save", async (req, res) => {
     if (!conversation) {
       // 如果是新会话，创建目录记录
       // 默认标题先取第一句话的前 15 个字作为占位符
-      const initialTitle = role === 'user' ? msgContent.substring(0, 15) : "新对话";
+      const initialTitle = role === 'user' ? msgContent.substring(0, 15) : '新对话';
       conversation = new Conversation({
         user: userId,
         sessionId: sessionId,
@@ -327,22 +316,19 @@ router.post("/ai/save", async (req, res) => {
     // 1. role !== 'user' : 等 AI 回复了再生成，这样上下文才完整（有一问一答）。
     // 2. !isTitleAutoGenerated : 之前没生成过，避免每次对话都改标题。
     if (role !== 'user' && !conversation.isTitleAutoGenerated) {
-
       console.log(`🤖 [AutoTitle] 正在后台为会话 ${sessionId} 生成标题...`);
 
       // A. 查出最近的 3 条消息作为上下文给 AI 参考
       Chat.find({
-          sessionId
-        })
+        sessionId
+      })
         .sort({
           createdDate: 1
         }) // 按时间正序：问 -> 答
         .limit(3)
-        .then(recentChats => {
+        .then((recentChats) => {
           // B. 拼接对话文本
-          const historyText = recentChats
-            .map(m => `${m.user.displayName}: ${m.content}`)
-            .join("\n");
+          const historyText = recentChats.map((m) => `${m.user.displayName}: ${m.content}`).join('\n');
 
           // C. 调用 Gemini 生成标题
           return generateTitle(historyText);
@@ -362,8 +348,8 @@ router.post("/ai/save", async (req, res) => {
             }
           }
         })
-        .catch(err => {
-          console.error("❌ [AutoTitle] 标题生成失败:", err);
+        .catch((err) => {
+          console.error('❌ [AutoTitle] 标题生成失败:', err);
           // 失败了没事，下次 AI 回复时会再次尝试，因为 isTitleAutoGenerated 还是 false
         });
 
@@ -377,11 +363,10 @@ router.post("/ai/save", async (req, res) => {
     }
 
     res.json(resObj);
-
   } catch (err) {
-    console.error("保存AI消息失败:", err);
+    console.error('保存AI消息失败:', err);
     res.status(500).json({
-      msg: "Server Error"
+      msg: 'Server Error'
     });
   }
 });
@@ -393,11 +378,9 @@ router.post("/ai/save", async (req, res) => {
  * @desc    删除整个会话（包括目录和所有聊天记录）
  * @access  Private
  */
-router.delete("/ai/conversation/:sessionId", async (req, res) => {
+router.delete('/ai/conversation/:sessionId', async (req, res) => {
   try {
-    const {
-      sessionId
-    } = req.params;
+    const { sessionId } = req.params;
     const userId = req.user.id;
 
     // 1. 删除侧边栏目录项
@@ -409,16 +392,16 @@ router.delete("/ai/conversation/:sessionId", async (req, res) => {
     // 2. 删除该 ID 下所有的聊天详情
     await Chat.deleteMany({
       sessionId,
-      "user.id": userId
+      'user.id': userId
     });
 
     res.json({
-      msg: "会话已删除"
+      msg: '会话已删除'
     });
   } catch (err) {
-    console.error("删除会话失败:", err);
+    console.error('删除会话失败:', err);
     res.status(500).json({
-      msg: "Server Error"
+      msg: 'Server Error'
     });
   }
 });
@@ -428,7 +411,7 @@ router.delete("/ai/conversation/:sessionId", async (req, res) => {
  * ------------------------------------------------------------------
  * @route   DELETE /api/chat/ai
  */
-router.delete("/ai", async (req, res) => {
+router.delete('/ai', async (req, res) => {
   try {
     const userId = req.user.id;
     const aiRoomName = `ai_session_${userId}`;
@@ -442,13 +425,13 @@ router.delete("/ai", async (req, res) => {
     });
 
     res.json({
-      msg: "所有 AI 对话历史已清空"
+      msg: '所有 AI 对话历史已清空'
     });
   } catch (err) {
     res.status(500).json({
-      msg: "Server Error"
+      msg: 'Server Error'
     });
   }
 });
 
-module.exports = router;
+export default router;

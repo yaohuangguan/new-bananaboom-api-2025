@@ -1,6 +1,6 @@
-const mongoose = require('mongoose');
+import { Schema, model } from 'mongoose';
 
-const PostSchema = mongoose.Schema({
+const PostSchema = Schema({
   // --- 基础信息 ---
   name: {
     type: String,
@@ -60,8 +60,8 @@ const PostSchema = mongoose.Schema({
 
   // --- 关联 ---
   user: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "users"
+    type: Schema.Types.ObjectId,
+    ref: 'users'
   }
 });
 
@@ -71,4 +71,4 @@ PostSchema.index({
   createdDate: -1
 });
 
-module.exports = mongoose.model('post', PostSchema);
+export default model('post', PostSchema);

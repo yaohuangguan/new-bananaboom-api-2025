@@ -1,36 +1,23 @@
-const express = require("express");
-const router = express.Router();
-const {
-  generateJSON
-} = require("../utils/aiProvider"); // 引入我们刚才封装好的工具
+import { Router } from 'express';
+const router = Router();
+import { createAgentStream, generateJSON } from '../utils/aiProvider.js';
+import { toolsSchema, functions } from '../utils/aiTools.js';
+import { PERIOD_COLORS } from '../config/periodConstants.js';
 
-const {
-  toolsSchema,
-  functions
-} = require("../utils/aiTools");
-const {
-  createAgentStream
-} = require("../utils/aiProvider");
-
-const {
-  PERIOD_COLORS
-} = require('../config/periodConstants')
 // 引入所有数据模型 (根据你实际的文件路径调整)
-const User = require("../models/User");
-const Fitness = require("../models/Fitness");
-const Todo = require("../models/Todo");
-const Project = require("../models/Project");
-const Post = require("../models/Post");
-const Resume = require("../models/Resume");
-const Period = require("../models/Period");
-const systemCache = require("../cache/memoryCache");
-
-
+import User from '../models/User.js';
+import Fitness from '../models/Fitness.js';
+import Todo from '../models/Todo.js';
+import Project from '../models/Project.js';
+import Post from '../models/Post.js';
+import Resume from '../models/Resume.js';
+import Period from '../models/Period.js';
+import systemCache from '../cache/memoryCache.js';
 
 // 引入 Day.js 处理时区
-const dayjs = require('dayjs');
-const utc = require('dayjs/plugin/utc');
-const timezone = require('dayjs/plugin/timezone');
+import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc.js';
+import timezone from 'dayjs/plugin/timezone.js';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -41,36 +28,33 @@ dayjs.extend(timezone);
  * =================================================================
  * @route   POST /api/ai/ask-life/stream
  */
-router.post("/ask-life/stream", async (req, res) => {
-  const {
-    prompt,
-    history,
-    image
-  } = req.body;
+router.post('/ask-life/stream', async (req, res) => {
+  const { prompt, history, image } = req.body;
 
   // 1. 获取当前用户对象
   const currentUser = req.user;
   const userId = currentUser.id;
 
-  if (!prompt) return res.status(400).json({
-    msg: "请说话"
-  });
+  if (!prompt)
+    return res.status(400).json({
+      msg: '请说话'
+    });
 
   // 设置流式响应头
-  res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
-  res.setHeader("Cache-Control", "no-cache");
-  res.setHeader("Connection", "keep-alive");
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
 
   try {
     // ==========================================
     // 2. 智能时间计算 (Day.js)
     // ==========================================
-    const userTimezone = currentUser.timezone || "Asia/Shanghai";
+    const userTimezone = currentUser.timezone || 'Asia/Shanghai';
 
     const nowObj = dayjs().tz(userTimezone);
-    const userLocalTime = nowObj.format("YYYY-MM-DD HH:mm:ss");
-    const userDate = nowObj.format("YYYY-MM-DD");
-    const weekDayMap = ["日", "一", "二", "三", "四", "五", "六"];
+    const userLocalTime = nowObj.format('YYYY-MM-DD HH:mm:ss');
+    const userDate = nowObj.format('YYYY-MM-DD');
+    const weekDayMap = ['日', '一', '二', '三', '四', '五', '六'];
     const currentWeekDay = weekDayMap[nowObj.day()];
 
     // ==========================================
@@ -86,38 +70,52 @@ router.post("/ask-life/stream", async (req, res) => {
 
       // 并行查询所有数据
       const [userProfile, fitness, todos, projects, posts, resume, periods] = await Promise.all([
-        User.findById(userId).select("-password -googleId -__v").lean(),
+        User.findById(userId).select('-password -googleId -__v').lean(),
         Fitness.find({
           user: userId
-        }).sort({
-          date: -1
-        }).limit(30).select("-photos -__v -user").lean(),
+        })
+          .sort({
+            date: -1
+          })
+          .limit(30)
+          .select('-photos -__v -user')
+          .lean(),
         Todo.find({
           user: userId
-        }).sort({
-          date: -1
-        }).select("-__v -user").lean(),
+        })
+          .sort({
+            date: -1
+          })
+          .select('-__v -user')
+          .lean(),
         // 4. 🔥 项目经历 (全局数据，不查 user)
         // 既然是你个人的全量项目，直接查所有
-        Project.find({}).select("-__v").lean(),
+        Project.find({}).select('-__v').lean(),
         Post.find({
           user: userId
-        }).sort({
-          date: -1
-        }).select("title tags date summary content").lean(),
+        })
+          .sort({
+            date: -1
+          })
+          .select('title tags date summary content')
+          .lean(),
         Resume.find({}).lean(),
         // 查最近 12 次记录，足够 AI 分析周期规律了
         Period.find({
           user: userId
-        }).sort({
-          startDate: -1
-        }).limit(12).select("-__v -user").lean()
+        })
+          .sort({
+            startDate: -1
+          })
+          .limit(12)
+          .select('-__v -user')
+          .lean()
       ]);
 
       // 截断过长的博客内容，防止 Token 爆炸
-      const processedPosts = posts.map(p => ({
+      const processedPosts = posts.map((p) => ({
         ...p,
-        content: p.content ? p.content.substring(0, 500) + "..." : ""
+        content: p.content ? p.content.substring(0, 500) + '...' : ''
       }));
 
       contextData = {
@@ -186,7 +184,9 @@ router.post("/ask-life/stream", async (req, res) => {
     - 在建议健身计划时，请智能结合生理期状态（例如：经期建议轻量运动，黄体期注意情绪波动）。
     生理周期数据说明】
     - PeriodRecords 中的 'color' 字段对应以下身体状态：
-    ${Object.values(PERIOD_COLORS).map(c => `- ${c.code}: ${c.label} (${c.meaning})`).join('\n')}
+    ${Object.values(PERIOD_COLORS)
+      .map((c) => `- ${c.code}: ${c.label} (${c.meaning})`)
+      .join('\n')}
 
   如果你发现用户最近的记录中出现了 PINK、ORANGE 或 BLACK，请在回答中给予适当的健康提醒，并建议咨询医生。
 
@@ -224,12 +224,14 @@ router.post("/ask-life/stream", async (req, res) => {
     // ==========================================
     const geminiHistory = [];
     if (history && Array.isArray(history)) {
-      history.slice(-10).forEach(h => {
+      history.slice(-10).forEach((h) => {
         geminiHistory.push({
           role: h.role === 'ai' ? 'model' : 'user',
-          parts: [{
-            text: h.content
-          }]
+          parts: [
+            {
+              text: h.content
+            }
+          ]
         });
       });
     }
@@ -238,52 +240,55 @@ router.post("/ask-life/stream", async (req, res) => {
     // 6. 透传 User 对象给工具
     // ==========================================
     const boundFunctions = {};
-    Object.keys(functions).forEach(funcName => {
+    Object.keys(functions).forEach((funcName) => {
       // 将当前用户对象注入到每个工具调用的 context 中
-      boundFunctions[funcName] = (args) => functions[funcName](args, {
-        user: currentUser
-      });
+      boundFunctions[funcName] = (args) =>
+        functions[funcName](args, {
+          user: currentUser
+        });
     });
 
-   // 构建 Gemini 接受的内容数组
-   const contentParts = [{
-    text: prompt
-  }];
-
-  // 🔥 修复后的图片处理逻辑
-  if (image) {
-    let imageData = "";
-    let mimeType = "image/jpeg"; // 默认格式
-
-    // 情况 1: 前端传的是 Data URI 字符串 ("data:image/jpeg;base64,/9j/...")
-    if (typeof image === "string" && image.startsWith("data:")) {
-      // 使用正则提取 mimeType 和 base64 数据
-      const matches = image.match(/^data:(.+);base64,(.+)$/);
-      if (matches && matches.length === 3) {
-        mimeType = matches[1]; // 例如 "image/png"
-        imageData = matches[2]; // 纯 Base64 字符串
+    // 构建 Gemini 接受的内容数组
+    const contentParts = [
+      {
+        text: prompt
       }
-    } 
-    // 情况 2: 前端传的是纯 Base64 字符串 (没有前缀)
-    else if (typeof image === "string") {
-      imageData = image;
-    }
-    // 情况 3: 前端传的是对象结构 (兼容之前的写法)
-    else if (image.inlineData && image.inlineData.data) {
-      imageData = image.inlineData.data;
-      mimeType = image.inlineData.mimeType || mimeType;
-    }
+    ];
 
-    // 只有解析出数据才推入数组
-    if (imageData) {
-      contentParts.push({
-        inlineData: {
-          data: imageData,
-          mimeType: mimeType
+    // 🔥 修复后的图片处理逻辑
+    if (image) {
+      let imageData = '';
+      let mimeType = 'image/jpeg'; // 默认格式
+
+      // 情况 1: 前端传的是 Data URI 字符串 ("data:image/jpeg;base64,/9j/...")
+      if (typeof image === 'string' && image.startsWith('data:')) {
+        // 使用正则提取 mimeType 和 base64 数据
+        const matches = image.match(/^data:(.+);base64,(.+)$/);
+        if (matches && matches.length === 3) {
+          mimeType = matches[1]; // 例如 "image/png"
+          imageData = matches[2]; // 纯 Base64 字符串
         }
-      });
+      }
+      // 情况 2: 前端传的是纯 Base64 字符串 (没有前缀)
+      else if (typeof image === 'string') {
+        imageData = image;
+      }
+      // 情况 3: 前端传的是对象结构 (兼容之前的写法)
+      else if (image.inlineData && image.inlineData.data) {
+        imageData = image.inlineData.data;
+        mimeType = image.inlineData.mimeType || mimeType;
+      }
+
+      // 只有解析出数据才推入数组
+      if (imageData) {
+        contentParts.push({
+          inlineData: {
+            data: imageData,
+            mimeType: mimeType
+          }
+        });
+      }
     }
-  }
 
     // ==========================================
     // 7. 启动 Agent 流
@@ -301,16 +306,15 @@ router.post("/ask-life/stream", async (req, res) => {
     }
 
     res.end();
-
   } catch (err) {
-    console.error("AI Route Error:", err);
+    console.error('AI Route Error:', err);
     if (!res.headersSent) {
       res.status(500).json({
-        msg: "大脑短路了",
+        msg: '大脑短路了',
         error: err.message
       });
     } else {
-      res.write("\n\n[System Error: 连接中断]");
+      res.write('\n\n[System Error: 连接中断]');
       res.end();
     }
   }
@@ -324,14 +328,13 @@ router.post("/ask-life/stream", async (req, res) => {
  * @desc    前端传什么就问什么，AI 返回 JSON 格式的答案
  * @body    { "prompt": "如何评价红楼梦？" }
  */
-router.post("/ask", async (req, res) => {
-  const {
-    prompt
-  } = req.body;
+router.post('/ask', async (req, res) => {
+  const { prompt } = req.body;
 
-  if (!prompt) return res.status(400).json({
-    msg: "请提供问题内容"
-  });
+  if (!prompt)
+    return res.status(400).json({
+      msg: '请提供问题内容'
+    });
 
   // 构造 Prompt：强制要求 JSON，防止 AI 废话
   const systemPrompt = `
@@ -349,7 +352,7 @@ router.post("/ask", async (req, res) => {
     res.json(data); // 返回 { answer: "..." }
   } catch (err) {
     res.status(500).json({
-      msg: "AI 思考超时，请重试"
+      msg: 'AI 思考超时，请重试'
     });
   }
 });
@@ -362,14 +365,13 @@ router.post("/ask", async (req, res) => {
  * @desc    前端传菜名，AI 返回：详细做法 + 3道推荐配菜
  * @body    { "dishName": "红烧肉" }
  */
-router.post("/recipe-recommend", async (req, res) => {
-  const {
-    dishName
-  } = req.body;
+router.post('/recipe-recommend', async (req, res) => {
+  const { dishName } = req.body;
 
-  if (!dishName) return res.status(400).json({
-    msg: "请提供菜品名称"
-  });
+  if (!dishName)
+    return res.status(400).json({
+      msg: '请提供菜品名称'
+    });
 
   // 构造 Prompt：核心是让 AI 既给做法，又给配菜
   const systemPrompt = `
@@ -415,7 +417,7 @@ router.post("/recipe-recommend", async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({
-      msg: "大厨正在忙，没顾上回复，请稍后再试"
+      msg: '大厨正在忙，没顾上回复，请稍后再试'
     });
   }
 });
@@ -428,49 +430,48 @@ router.post("/recipe-recommend", async (req, res) => {
  * @desc    读取用户 Fitness, Todo, Project, Post, Resume 所有数据进行回答
  * @body    { "prompt": "我最近健身效果咋样？顺便看看我项目进度和待办还剩多少？" }
  */
-router.post("/ask-life", async (req, res) => {
-  const {
-    prompt
-  } = req.body;
+router.post('/ask-life', async (req, res) => {
+  const { prompt } = req.body;
   const userId = req.user.id;
 
-  if (!prompt) return res.status(400).json({
-    msg: "请告诉我你想问什么"
-  });
+  if (!prompt)
+    return res.status(400).json({
+      msg: '请告诉我你想问什么'
+    });
 
   try {
-    console.log("🧠 [Second Brain] 开始加载用户全量数据...");
+    console.log('🧠 [Second Brain] 开始加载用户全量数据...');
 
     // 1. 并行查询所有数据 (使用 Promise.all 极速加载)
     // 注意：这里做了 limit 限制防止 Token 溢出，Gemini 虽然大，但最好还是防一下
     // 如果数据量巨大，可以只取最近半年的，或者关键字段
-    const [
-      userProfile,
-      fitnessRecords,
-      todos,
-      projects,
-      posts,
-      resume
-    ] = await Promise.all([
-      User.findById(userId).select("-password -googleId"),
+    const [userProfile, fitnessRecords, todos, projects, posts, resume] = await Promise.all([
+      User.findById(userId).select('-password -googleId'),
       Fitness.find({
         user: userId
-      }).sort({
-        date: -1
-      }).limit(50), // 最近50条健身
+      })
+        .sort({
+          date: -1
+        })
+        .limit(50), // 最近50条健身
       Todo.find({
         user: userId
-      }).sort({
-        date: -1
-      }).limit(50), // 最近50条待办
+      })
+        .sort({
+          date: -1
+        })
+        .limit(50), // 最近50条待办
       Project.find({
         user: userId
-      }).select("title description techStack status"), // 所有项目
+      }).select('title description techStack status'), // 所有项目
       Post.find({
         user: userId
-      }).sort({
-        date: -1
-      }).limit(20).select("title content tags"), // 最近20篇博客
+      })
+        .sort({
+          date: -1
+        })
+        .limit(20)
+        .select('title content tags'), // 最近20篇博客
       Resume.findOne({
         user: userId
       }) // 简历通常只有一份
@@ -484,33 +485,35 @@ router.post("/ask-life", async (req, res) => {
         goal: userProfile.fitnessGoal,
         height: userProfile.height
       },
-      FitnessHistory: fitnessRecords.map(r => ({
+      FitnessHistory: fitnessRecords.map((r) => ({
         date: r.dateStr,
         weight: r.body.weight,
-        workout: r.workout.types.join(","),
+        workout: r.workout.types.join(','),
         duration: r.workout.duration,
         diet_mode: r.diet.goalSnapshot
       })),
-      PendingTodos: todos.map(t => ({
+      PendingTodos: todos.map((t) => ({
         task: t.title,
-        status: t.isCompleted ? "Done" : "Pending",
+        status: t.isCompleted ? 'Done' : 'Pending',
         deadline: t.dateStr
       })),
-      Projects: projects.map(p => ({
+      Projects: projects.map((p) => ({
         name: p.title,
         desc: p.description,
         tech: p.techStack,
         status: p.status
       })),
-      RecentThoughts: posts.map(p => ({
+      RecentThoughts: posts.map((p) => ({
         date: p.date,
         title: p.title,
-        summary: p.content ? p.content.substring(0, 100) + "..." : "" // 截取前100字节省token
+        summary: p.content ? p.content.substring(0, 100) + '...' : '' // 截取前100字节省token
       })),
-      ResumeHighlights: resume ? {
-        skills: resume.skills,
-        experience: resume.experience
-      } : "暂无简历"
+      ResumeHighlights: resume
+        ? {
+            skills: resume.skills,
+            experience: resume.experience
+          }
+        : '暂无简历'
     };
 
     // 3. 构造超级 Prompt
@@ -541,15 +544,12 @@ router.post("/ask-life", async (req, res) => {
       success: true,
       data: data
     });
-
   } catch (err) {
-    console.error("Second Brain Error:", err);
+    console.error('Second Brain Error:', err);
     res.status(500).json({
-      msg: "大脑过载了，请稍后再试"
+      msg: '大脑过载了，请稍后再试'
     });
   }
 });
 
-
-
-module.exports = router;
+export default router;

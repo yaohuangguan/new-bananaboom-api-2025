@@ -1,41 +1,38 @@
-const express = require("express");
-const router = express.Router();
+import { Router } from 'express';
+const router = Router();
 
 // 引入所有数据模型
-const User = require("../models/User");
-const Post = require("../models/Post");
-const Comment = require("../models/Comment");
-const Todo = require("../models/Todo");
-const Chat = require("../models/Chat");
-const Photo = require("../models/Photo");
-const Fitness = require("../models/Fitness");
-const AuditLog = require("../models/AuditLog");
-
-
-
+import User from '../models/User.js';
+import Post from '../models/Post.js';
+import Comment from '../models/Comment.js';
+import Todo from '../models/Todo.js';
+import Chat from '../models/Chat.js';
+import Photo from '../models/Photo.js';
+import Fitness from '../models/Fitness.js';
+import AuditLog from '../models/AuditLog.js';
 
 // @route   GET /api/backup
 // @desc    导出数据库备份 (支持 ?type=users 单独导出)
 // @access  Private & VIP Only
-router.get("/", async (req, res) => {
+router.get('/', async (req, res) => {
   const { type } = req.query; // 获取查询参数，例如: ?type=photos
 
   try {
     let data = {};
-    let filenamePrefix = "full";
+    let filenamePrefix = 'full';
 
     // 定义所有查询任务
     // 使用 Promise.all 并行查询，速度最快
     const fetchAll = async () => {
       const [users, posts, comments, todos, chats, photos, fitness, auditLog] = await Promise.all([
-        User.find({}).select("-password"), // 为了安全，不导出密码哈希
+        User.find({}).select('-password'), // 为了安全，不导出密码哈希
         Post.find({}).sort({ createdDate: -1 }),
         Comment.find({}).sort({ date: -1 }),
         Todo.find({}).sort({ timestamp: -1 }), // Todo 用的是 timestamp
         Chat.find({}).sort({ createdDate: -1 }),
         Photo.find({}).sort({ createdDate: -1 }),
         Fitness.find({}).sort({ createdDate: -1 }),
-        AuditLog.find({}).sort({ createdDate: -1 }),
+        AuditLog.find({}).sort({ createdDate: -1 })
       ]);
       return { users, posts, comments, todos, chats, photos, fitness, auditLog };
     };
@@ -44,34 +41,34 @@ router.get("/", async (req, res) => {
     if (type) {
       filenamePrefix = type; // 文件名变成 bananaboom-photos-xxx.json
       switch (type) {
-        case "users":
-          data.users = await User.find({}).select("-password");
+        case 'users':
+          data.users = await User.find({}).select('-password');
           break;
-        case "posts":
+        case 'posts':
           data.posts = await Post.find({}).sort({ createdDate: -1 });
           break;
-        case "comments":
+        case 'comments':
           data.comments = await Comment.find({}).sort({ date: -1 });
           break;
-        case "todos":
+        case 'todos':
           data.todos = await Todo.find({}).sort({ timestamp: -1 });
           break;
-        case "chats":
+        case 'chats':
           data.chats = await Chat.find({}).sort({ createdDate: -1 });
           break;
-        case "photos":
+        case 'photos':
           data.photos = await Photo.find({}).sort({ createdDate: -1 });
           break;
-        case "fitness":
+        case 'fitness':
           data.fitness = await Fitness.find({}).sort({ createdDate: -1 });
           break;
-        case "audit":
+        case 'audit':
           data.audit = await AuditLog.find({}).sort({ createdDate: -1 });
           break;
         default:
           // 如果 type 写错了，默认导出全部
           data = await fetchAll();
-          filenamePrefix = "full";
+          filenamePrefix = 'full';
       }
     } else {
       // 默认情况：导出全部
@@ -81,28 +78,27 @@ router.get("/", async (req, res) => {
     // 组装最终 JSON
     const backupJSON = {
       meta: {
-        version: "2.0",
+        version: '2.0',
         exportDate: new Date().toISOString(),
         exporter: req.user.displayName,
-        type: type || "full_backup"
+        type: type || 'full_backup'
       },
       data: data
     };
 
     // 设置下载响应头
-    const dateStr = new Date().toISOString().split("T")[0];
+    const dateStr = new Date().toISOString().split('T')[0];
     const filename = `bananaboom-${filenamePrefix}-${dateStr}.json`;
 
-    res.setHeader("Content-Type", "application/json");
-    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
 
     // 发送美化后的 JSON (缩进2空格)
     res.send(JSON.stringify(backupJSON, null, 2));
-
   } catch (error) {
-    console.error("Backup error:", error);
-    res.status(500).json({ message: "Server Error during backup" });
+    console.error('Backup error:', error);
+    res.status(500).json({ message: 'Server Error during backup' });
   }
 });
 
-module.exports = router;
+export default router;

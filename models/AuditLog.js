@@ -1,11 +1,10 @@
-const mongoose = require("mongoose");
-const Schema = mongoose.Schema;
+import { Schema, model } from 'mongoose';
 
 const AuditLogSchema = new Schema({
   // 操作人 (关联 User)
   operator: {
     type: Schema.Types.ObjectId,
-    ref: "users",
+    ref: 'users',
     required: true
   },
   // 操作类型 (例如: "CREATE_POST", "DELETE_COMMENT", "LOGIN")
@@ -33,4 +32,4 @@ const AuditLogSchema = new Schema({
   }
 });
 
-module.exports = mongoose.model("audit_logs", AuditLogSchema);
+export default model('audit_logs', AuditLogSchema);

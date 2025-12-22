@@ -1,9 +1,9 @@
-const mongoose = require("mongoose");
+import { Schema, model } from 'mongoose';
 
-const LogSchema = mongoose.Schema({
+const LogSchema = Schema({
   version: String,
   update_date: String,
   info: String
 });
 
-module.exports = mongoose.model("logs", LogSchema);
+export default model('logs', LogSchema);

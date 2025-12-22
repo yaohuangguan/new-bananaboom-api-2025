@@ -1,26 +1,26 @@
 {
-    "env": {
-        "node": true,
-        "es2021": true,
-        "jest": true // 🔥🔥🔥 加上这一行！告诉 ESLint 识别 Jest 全局变量
-    },
-    "extends": [
-        "eslint:recommended"
+  "env": {
+    "node": true,
+    "es2021": true,
+    "jest": true // 🔥🔥🔥 加上这一行！告诉 ESLint 识别 Jest 全局变量
+  },
+  "parserOptions": {
+    "ecmaVersion": "latest", // 支持最新的 JS 语法（比如 class 里的字段）
+    "sourceType": "module" // 🔥 关键：告诉 ESLint 我在用 import/export
+  },
+  "extends": ["eslint:recommended"],
+  "plugins": ["import"],
+  "rules": {
+    // 🔥 核心规则：找不到文件就报错 (2 代表 error)
+    // commonjs: true 表示也要检查 require 写法
+    "import/no-unresolved": [
+      2,
+      {
+        "commonjs": true,
+        "caseSensitive": true
+      }
     ],
-    "plugins": [
-        "import"
-    ],
-    "rules": {
-        // 🔥 核心规则：找不到文件就报错 (2 代表 error)
-        // commonjs: true 表示也要检查 require 写法
-        "import/no-unresolved": [
-            2,
-            {
-                "commonjs": true,
-                "caseSensitive": true
-            }
-        ],
-        // 🔥 加上这一行：0=off, 1=warn, 2=error
-        "no-unused-vars": "warn"
-    }
+    // 🔥 加上这一行：0=off, 1=warn, 2=error
+    "no-unused-vars": "warn"
+  }
 }

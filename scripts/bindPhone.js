@@ -1,6 +1,5 @@
-require('dotenv').config(); // 加载 .env 环境变量
-const mongoose = require('mongoose');
-const User = require('../models/User'); // ⚠️ 注意根据你的实际路径调整
+import { connect } from 'mongoose';
+import { findOne } from '../models/User'; // ⚠️ 注意根据你的实际路径调整
 
 // 获取命令行参数
 // 用法: node scripts/bindPhone.js <email> <phone>
@@ -21,7 +20,7 @@ const bindPhone = async () => {
   try {
     // 1. 连接数据库
     console.log('🔄 正在连接数据库...');
-    await mongoose.connect(process.env.MONGO_URI);
+    await connect(process.env.MONGO_URI);
     console.log('✅ 数据库连接成功');
 
     // 2. 格式校验
@@ -33,7 +32,7 @@ const bindPhone = async () => {
     }
 
     // 3. 查找目标用户
-    const user = await User.findOne({ email: targetEmail });
+    const user = await findOne({ email: targetEmail });
     if (!user) {
       console.error(`❌ 未找到用户: ${targetEmail}`);
       process.exit(1);
@@ -42,7 +41,7 @@ const bindPhone = async () => {
     console.log(`   当前手机号: ${user.phone || '未绑定'}`);
 
     // 4. 冲突检测 (检查该手机号是否已被其他人绑定)
-    const phoneOwner = await User.findOne({ phone: cleanPhone });
+    const phoneOwner = await findOne({ phone: cleanPhone });
     if (phoneOwner) {
       // 如果查到的人不是当前用户，说明撞车了
       if (phoneOwner.id !== user.id) {
@@ -65,7 +64,6 @@ const bindPhone = async () => {
     console.log('========================================');
 
     process.exit(0);
-
   } catch (err) {
     console.error('❌ 系统错误:', err);
     process.exit(1);
