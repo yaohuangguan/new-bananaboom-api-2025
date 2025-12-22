@@ -13,7 +13,7 @@ describe('🛡️ 系统核心 API 集成测试', () => {
   beforeAll(async () => {
     if (mongoose.connection.readyState !== 1) {
       await new Promise((resolve) => {
-        connection.once('open', resolve);
+        mongoose.connection.once('open', resolve);
       });
     }
   });
