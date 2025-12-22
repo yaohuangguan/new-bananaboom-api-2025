@@ -15,7 +15,7 @@ COPY package.json pnpm-lock.yaml ./
 # 5. 安装依赖 (生产模式)
 # --prod: 只安装 dependencies，不装 devDependencies (如 eslint/jest)
 # --frozen-lockfile: 严格按照 lock 文件安装，不更新版本 (类似 npm ci)
-RUN pnpm install --prod --frozen-lockfile
+RUN pnpm install --prod --frozen-lockfile --ignore-scripts
 
 # 6. 拷贝源代码
 COPY . .
