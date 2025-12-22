@@ -38,8 +38,13 @@ export default [
         }
       ],
 
-      // 4. 强制优先使用 const (配合 --fix 使用)
-      'prefer-const': 'error'
+     // 🔥 修改这一行：允许解构时混合使用
+     'prefer-const': [
+      'error',
+      {
+        'destructuring': 'all' 
+      }
+    ]
     }
   }
 ];
