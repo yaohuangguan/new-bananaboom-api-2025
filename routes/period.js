@@ -177,7 +177,7 @@ router.put('/:id', async (req, res) => {
   const { startDate, endDate, symptoms, flow, note, color } = req.body;
 
   try {
-    let query = { _id: req.params.id };
+    const query = { _id: req.params.id };
     // 越权校验：非管理员只能修改属于自己的数据
     if (req.user.role !== 'super_admin') {
       query.user = req.user.id;
@@ -219,7 +219,7 @@ router.put('/:id', async (req, res) => {
  */
 router.delete('/:id', async (req, res) => {
   try {
-    let query = { _id: req.params.id };
+    const query = { _id: req.params.id };
     // 越权校验
     if (req.user.role !== 'super_admin') {
       query.user = req.user.id;

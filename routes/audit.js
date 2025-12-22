@@ -22,7 +22,7 @@ router.get('/', async (req, res) => {
     } = req.query;
 
     // 3. 构建 MongoDB 查询对象
-    let query = {};
+    const query = {};
 
     // A. 操作类型 (精确匹配)
     // 比如前端下拉框选了 "LOGIN"，这里就只查登录日志

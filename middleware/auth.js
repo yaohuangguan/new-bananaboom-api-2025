@@ -29,7 +29,7 @@ export default async function (req, res, next) {
     // B. 安全校验：JWT 真伪
     // ============================================================
     // 确保 Token 是由本服务器签发的且未过期
-    const decoded = jwt.verify(token, SECRET);
+    jwt.verify(token, SECRET);
 
     // ============================================================
     // C. 状态校验：Session 白名单 (防止黑名单/已登出 Token 逃逸)

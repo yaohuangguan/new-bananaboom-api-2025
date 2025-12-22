@@ -27,7 +27,7 @@ const PHONE_REGEX = /^\+?[0-9]{7,15}$/;
 router.get('/profile', async (req, res) => {
   try {
     const { id } = req.user;
-    let user = await User.findById(id).select('-password +barkUrl');
+    const user = await User.findById(id).select('-password +barkUrl');
 
     if (!user) {
       return res.status(404).json({
@@ -36,7 +36,7 @@ router.get('/profile', async (req, res) => {
     }
 
     // 转为普通对象以便修改
-    let userObj = user.toObject();
+    const userObj = user.toObject();
 
     // 🔥 1. 注入权限列表
     userObj.permissions = permissionService.getUserMergedPermissions(user);
@@ -273,7 +273,7 @@ router.post(
 
     try {
       // 2. 检查邮箱唯一性 (转小写查)
-      let userByEmail = await User.findOne({
+      const userByEmail = await User.findOne({
         email: email.toLowerCase()
       });
       if (userByEmail) {

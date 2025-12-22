@@ -26,7 +26,7 @@ router.get('/', async (req, res) => {
     const canReadAll = allPerms.includes('*') || allPerms.includes(K.FITNESS_READ_ALL);
 
     // --- 2. 构建查询条件 ---
-    let query = {};
+    const query = {};
 
     // 👉 情况 A: 前端指定查某人
     if (email) {

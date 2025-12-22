@@ -174,7 +174,7 @@ router.get('/ai', async (req, res) => {
     const skip = (page - 1) * limit;
 
     // 基础安全隔离：确保只查该用户的 AI 房间
-    let query = {
+    const query = {
       room: `ai_session_${userId}`
     };
 
@@ -243,7 +243,7 @@ router.post('/ai/save', async (req, res) => {
     }
 
     // 2. 处理图片存储 (转换为 Base64 Data URI)
-    let imagesToSave = [];
+    const imagesToSave = [];
     if (image) {
       if (typeof image === 'string') {
         imagesToSave.push(image); // 直接是 Base64 字符串

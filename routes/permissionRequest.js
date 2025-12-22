@@ -121,7 +121,7 @@ router.post('/role', async (req, res) => {
 router.get('/', async (req, res) => {
   try {
     const { status } = req.query;
-    let query = {};
+    const query = {};
 
     // 默认只看待审批的，也可以传 'approved' 看历史
     if (status) {

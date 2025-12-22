@@ -243,7 +243,7 @@ const functions = {
 
       const userId = user._id; // 统一拿 ID
 
-      let record = await Fitness.findOne({
+      const record = await Fitness.findOne({
         user: userId,
         dateStr
       });
@@ -448,7 +448,7 @@ const functions = {
 
     try {
       const updateData = {};
-      let msg = [];
+      const msg = [];
 
       if (timezone) {
         updateData.timezone = timezone;

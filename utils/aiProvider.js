@@ -114,7 +114,7 @@ async function generateJSON(prompt, modelName = CONFIG.PRIMARY_MODEL) {
  * 使用 ai.models.generateContentStream
  */
 async function generateStream(promptInput) {
-  let currentModel = CONFIG.PRIMARY_MODEL;
+  const currentModel = CONFIG.PRIMARY_MODEL;
 
   // 格式化输入
   const formattedContents =
@@ -166,7 +166,7 @@ async function generateStream(promptInput) {
  * 包含了自动降级逻辑
  */
 async function* createAgentStream(params) {
-  let currentModel = CONFIG.PRIMARY_MODEL;
+  const currentModel = CONFIG.PRIMARY_MODEL;
 
   try {
     console.log(`🌊 [Agent Stream] Attempting with ${currentModel}...`);
@@ -225,12 +225,12 @@ async function* _runAgentLoop(modelName, { systemInstruction, history, prompt, t
   });
 
   // 2. 发送用户 Prompt
-  let resultStream = await chat.sendMessageStream({
+  const resultStream = await chat.sendMessageStream({
     message: prompt
   });
 
   let functionCallFound = false;
-  let functionCallsToExecute = [];
+  const functionCallsToExecute = [];
 
   // =================================================
   // 第一阶段：监听 AI 的初步反应

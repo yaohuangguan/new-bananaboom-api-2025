@@ -23,7 +23,7 @@ router.get('/', async (req, res) => {
     const { category } = req.query;
 
     // 基础查询：只查找状态为 isActive=true 的
-    let query = { isActive: true };
+    const query = { isActive: true };
     if (category) query.category = category;
 
     // 按创建时间倒序排列 (新加的菜在最上面)
@@ -66,8 +66,8 @@ router.post('/recommend', async (req, res) => {
     }
 
     // B. 确定身体数据 (Fitness快照 > User基础数据)
-    let currentWeight = latestFitness?.body?.weight || null;
-    let currentHeight = latestFitness?.body?.height || userProfile.height || null;
+    const currentWeight = latestFitness?.body?.weight || null;
+    const currentHeight = latestFitness?.body?.height || userProfile.height || null;
     let currentBMI = latestFitness?.body?.bmi || null;
 
     // C. 如果数据库里没存 BMI 但有身高体重，我们现场算一下补救
@@ -171,7 +171,7 @@ router.get('/draw', async (req, res) => {
     const { category, cooldown, healthy } = req.query;
 
     // --- Step 1: 构建过滤条件 ---
-    let query = { isActive: true };
+    const query = { isActive: true };
 
     // 筛选分类
     if (category) query.category = category;

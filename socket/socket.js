@@ -16,14 +16,14 @@ let connectedUsers = {};
 
 // 辅助函数：添加用户
 function addUser(userList, user) {
-  let newList = Object.assign({}, userList);
+  const newList = Object.assign({}, userList);
   newList[user.name] = user;
   return newList;
 }
 
 // 辅助函数：移除用户
 function removeUser(userList, username) {
-  let newList = Object.assign({}, userList);
+  const newList = Object.assign({}, userList);
   delete newList[username];
   return newList;
 }

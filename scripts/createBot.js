@@ -12,7 +12,7 @@ const createBot = async () => {
     const BOT_EMAIL = 'ai_brain@system.bot'; // 机器人的专用邮箱
 
     // 2. 检查机器人是否已存在
-    let botUser = await findOne({ email: BOT_EMAIL });
+    const botUser = await findOne({ email: BOT_EMAIL });
 
     if (botUser) {
       console.log(`⚠️ 机器人用户已存在!`);
