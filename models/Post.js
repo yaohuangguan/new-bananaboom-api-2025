@@ -1,4 +1,7 @@
-import { Schema, model } from 'mongoose';
+import {
+  Schema,
+  model
+} from 'mongoose';
 
 const PostSchema = Schema({
   // --- 基础信息 ---
@@ -41,15 +44,13 @@ const PostSchema = Schema({
     default: false
   },
 
-  // --- 时间字段 ---
-  // 这里不写 default，我们在 Controller 里统一生成，或者使用 Mongoose 的 default 函数
   createdDate: {
-    type: String,
-    required: true
+    type: Date,
+    default: Date.now
   },
   updatedDate: {
-    type: String,
-    required: true
+    type: Date,
+    default: Date.now
   },
 
   // --- 交互 ---

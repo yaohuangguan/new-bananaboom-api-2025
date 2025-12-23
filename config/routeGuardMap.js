@@ -38,6 +38,7 @@ const ROUTE_MAP = [
 
   { path: '/api/posts/private/posts', method: 'GET', permission: K.PRIVATE_POST_READ },
   { path: '/api/posts', method: 'GET', public: true },
+  { path: '/api/tags', method: 'GET', public: true },
 
   // 精确匹配 /api/posts/6583d987... 这种格式，防止被前缀匹配截断
   { regex: /^\/api\/posts\/[a-f\d]{24}$/, method: 'GET', public: true },

@@ -23,6 +23,7 @@ import resumeRoutes from './routes/resume.js';
 import projectRoutes from './routes/projects.js';
 import homepageRoutes from './routes/homepage.js';
 import menuRoutes from './routes/menu.js';
+import tagsRoutes from './routes/tags.js';
 
 // --- 用户与鉴权类 ---
 import authRoutes from './routes/auth.js';
@@ -127,6 +128,7 @@ app.use('/api/resumes', resumeRoutes);
 app.use('/api/projects', projectRoutes);
 app.use('/api/homepage', homepageRoutes);
 app.use('/api/menu', menuRoutes);
+app.use('/api/tags', tagsRoutes);
 
 // --- 用户与鉴权类 ---
 app.use('/api/auth', authRoutes);
