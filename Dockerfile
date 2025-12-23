@@ -25,4 +25,4 @@ EXPOSE 5000
 
 # 8. 启动命令
 # 建议直接用 node 启动，比 npm start 少一层进程消耗，信号转发更准
-CMD ["node", "--env-file=.env", "index.js"]
+CMD ["node", "index.js"]
