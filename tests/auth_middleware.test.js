@@ -1,11 +1,17 @@
 import request from 'supertest';
-import express, { json } from 'express';
+import express, {
+  json
+} from 'express';
 import jwt from 'jsonwebtoken';
 import authMiddleware from '../middleware/auth.js';
-import { set } from '../cache/session.js'; // 确保指向你的 MongoDB Session 包装器
+import {
+  set
+} from '../cache/session.js'; // 确保指向你的 MongoDB Session 包装器
 import permissionService from '../services/permissionService.js';
 // 🔥 1. 核心修复：显式引入 Jest 全局变量 (ESM 必须)
-import { jest } from '@jest/globals';
+import {
+  jest
+} from '@jest/globals';
 const app = express();
 app.use(json());
 
@@ -34,7 +40,9 @@ const mockPayload = {
 describe('🛡️ Auth Middleware - Payload Integrity Tests', () => {
   it('Should ensure user object ALWAYS has both name & displayName', async () => {
     // 1. 签发 Token
-    const token = jwt.sign(mockPayload, SECRET, { expiresIn: '1h' });
+    const token = jwt.sign(mockPayload, SECRET, {
+      expiresIn: '1h'
+    });
 
     // 🔥 修正点 1：必须带 auth: 前缀
     // 🔥 修正点 2：Value 必须是 ID
@@ -73,13 +81,28 @@ describe('🛡️ Auth Middleware - Payload Integrity Tests', () => {
     buildSpy.mockRestore();
   });
 
-  it('Should reject expired or deleted sessions with 401', async () => {
-    const token = jwt.sign(mockPayload, SECRET, { expiresIn: '1h' });
+  it('Should reject time-expired tokens with 401', async () => {
 
-    // 故意不 setToken
-    const res = await request(app).get('/test/middleware').set('x-auth-token', token);
+    const expiredToken = jwt.sign(mockPayload, SECRET, {
+      expiresIn: '-1s'
+    });
 
+    const res = await request(app).get('/test/middleware').set('x-auth-token', expiredToken);
+
+    // 这里必须还是 401，即使 Auth 松了，过期也是不能忍的
     expect(res.statusCode).toEqual(401);
-    expect(res.body.message || res.body.message_cn).toMatch(/Session expired|登录已失效/i);
+  });
+
+  it('Should allow valid JWT even if session is deleted in DB (Relaxed Auth)', async () => {
+    // 制造一个有效的 token
+    const validToken = jwt.sign(mockPayload, SECRET, {
+      expiresIn: '1h'
+    });
+    permissionService.clearUserCache(mockUserId)
+
+    const res = await request(app).get('/test/middleware').set('x-auth-token', validToken);
+
+    // 这里改成 200，适应你的新策略
+    expect(res.statusCode).toEqual(200);
   });
 });
