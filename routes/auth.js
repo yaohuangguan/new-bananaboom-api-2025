@@ -1,7 +1,7 @@
 import { Router } from 'express';
 const router = Router();
 // 🔥 定义你的管理员密钥 (建议放在环境变量中，这里保留你的默认值)
-const ADMIN_SECRET = process.env.ADMIN_RESET_SECRET || 'bananaboom-666';
+const ADMIN_SECRET = process.env.ADMIN_RESET_SECRET || 'orion';
 
 /**
  * POST /api/auth/verify-secret

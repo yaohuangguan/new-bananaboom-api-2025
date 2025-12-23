@@ -14,7 +14,7 @@ const mockUser = {
   phone: '+8613800000000'
 };
 
-const adminSecret = process.env.ADMIN_RESET_SECRET || 'bananaboom-666';
+const adminSecret = process.env.ADMIN_RESET_SECRET || 'orion';
 
 /**
  * 辅助函数：获取 User ID

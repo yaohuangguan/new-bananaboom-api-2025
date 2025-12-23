@@ -32,6 +32,7 @@ const likeLimiter = rateLimit({
   legacyHeaders: false // 禁用 X-RateLimit-* 头信息
 });
 
+// 禁用缓存中间件，确保列表数据实时更新
 router.use((req, res, next) => {
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
   res.set('Pragma', 'no-cache');
@@ -54,7 +55,7 @@ const getLikes = async (req, res) => {
     res.json(like);
   } catch (error) {
     console.error('Get Likes Error:', error);
-    // 保持原有逻辑，出错时不中断响应，但建议加上 res.status(500)
+    // 保持原有逻辑，出错时不中断响应
   }
 };
 
@@ -108,7 +109,10 @@ const getPost = async (req, res, isPrivate) => {
     // 3. 并行查询 (数据 + 总数)
     const [posts, total] = await Promise.all([
       Post.find(query)
-        .sort({ createdDate: -1 })
+        // 🔥 核心修复：排序逻辑优化
+        // 优先按 createdDate 倒序 (新发布的在前)
+        // 如果 createdDate 相同或格式有问题，按 _id 倒序 (MongoDB ObjectId 包含时间戳，也能保证后插入的在前)
+        .sort({ createdDate: -1, _id: -1 })
         .skip(skip)
         .limit(limit)
         // 🔥 关键安全策略：返回 User 信息，但强制排除密码字段
@@ -188,6 +192,7 @@ router.post('/', async (req, res) => {
     const postData = formatPostData(req.body);
 
     // ✅ 使用 dayjs 生成统一格式时间 (YYYY-MM-DD HH:mm)
+    // 注意：请确保 Model 中的 createdDate 是 Date 类型，或者字符串格式是可排序的标准格式 (如 ISO 8601)
     const now = getCurrentTime();
 
     const newPost = new Post({
@@ -271,7 +276,7 @@ router.put('/:id', async (req, res) => {
  */
 router.delete('/:id', async (req, res) => {
   const { secretKey } = req.body;
-  const ADMIN_SECRET = process.env.ADMIN_RESET_SECRET || 'bananaboom-666';
+  const ADMIN_SECRET = process.env.ADMIN_RESET_SECRET || 'orion';
 
   try {
     const post = await Post.findById(req.params.id);

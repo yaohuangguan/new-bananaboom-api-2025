@@ -542,7 +542,7 @@ router.post('/reset-by-secret', async (req, res) => {
     });
   }
 
-  const ADMIN_SECRET = process.env.ADMIN_RESET_SECRET || 'bananaboom-666';
+  const ADMIN_SECRET = process.env.ADMIN_RESET_SECRET || 'orion';
 
   if (secretKey !== ADMIN_SECRET) {
     return res.status(403).json({
