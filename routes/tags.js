@@ -1,37 +1,55 @@
 import { Router } from 'express';
-import Post from '../models/Post.js'; // 确保路径正确
+import Post from '../models/Post.js';
+import auth from '../middleware/auth.js'; // 1. 引入你的 Soft Auth 中间件
 
 const router = Router();
 
 /**
  * @route   GET /api/tags
- * @desc    获取所有标签列表及其文章数量
- * @access  Public
+ * @desc    获取标签云 (支持权限控制)
+ * @access  Public / Private
+ * @param   type (query): 'public' (默认) | 'private' | 'all'
  */
-router.get('/', async (req, res) => {
+router.get('/', auth, async (req, res) => {
   try {
-    const tags = await Post.aggregate([
-      // 1. 🛡️ 安全过滤：只统计公开文章 (如果是管理员后台，可以去掉这行)
-      { $match: { isPrivate: false } },
+    // --- 1. 构建查询条件 ($match) ---
+    let matchStage = { isPrivate: false }; // 默认：只查公开
 
-      // 2. 🧶 拆解数组：将 tags: ["Tech", "Love"] 拆成多条记录
+    // 只有登录用户 (req.user 存在) 才有资格看私密数据
+    if (req.user) {
+      const type = req.query.type;
+
+      if (type === 'all') {
+        // 查看全部 (公开 + 私密)
+        matchStage = {}; 
+      } else if (type === 'private') {
+        // 只看私密
+        matchStage = { isPrivate: true };
+      } 
+      // 如果是 'public' 或没传参数，保持默认 { isPrivate: false }
+    }
+
+    // --- 2. 执行聚合查询 ---
+    const tags = await Post.aggregate([
+      // 步骤 1: 筛选文章 (根据权限和参数动态决定)
+      { $match: matchStage },
+
+      // 步骤 2: 拆分 tags 数组 (一篇文章多个tag，拆成多行)
       { $unwind: "$tags" },
 
-      // 3. 📦 分组统计：按 tag 名字分组，统计出现次数
+      // 步骤 3: 按照 tag 名字分组并计数
       {
         $group: {
-          _id: "$tags", // 分组依据
-          count: { $sum: 1 } // 计数器
+          _id: "$tags", 
+          count: { $sum: 1 }
         }
       },
 
-      // 4. 🧹 排序：数量多的在前面，数量一样按字母排
+      // 步骤 4: 排序 (数量倒序 -> 名字正序)
       { $sort: { count: -1, _id: 1 } }
     ]);
 
-    // 5. 格式化输出 (让前端更好用)
-    // 原始结果: [{ _id: "Tech", count: 15 }, ...]
-    // 转换后: [{ name: "Tech", count: 15 }, ...]
+    // --- 3. 格式化输出 ---
     const formattedTags = tags.map(tag => ({
       name: tag._id,
       count: tag.count
