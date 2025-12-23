@@ -32,6 +32,13 @@ const likeLimiter = rateLimit({
   legacyHeaders: false // 禁用 X-RateLimit-* 头信息
 });
 
+router.use((req, res, next) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
+  next();
+});
+
 // =================================================================
 // 🔧 辅助函数 (Controller Helpers)
 // =================================================================
@@ -161,9 +168,6 @@ router.get('/:id', async (req, res) => {
   try {
     // 🔥 安全策略：Populate 时排除 password
     const response = await Post.find({ _id: req.params.id }).populate('user', '-password');
-
-    // 设置缓存策略 (1小时)
-    res.setHeader('Cache-Control', 'max-age=3600');
     res.json(response);
   } catch (error) {
     res.status(404).json({ message: 'Not found the posts' });
