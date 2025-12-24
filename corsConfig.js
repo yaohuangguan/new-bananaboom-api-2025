@@ -19,8 +19,8 @@ const whitelist = [
 // 需要模糊匹配的域名后缀 (专门针对 AI Studio 预览地址)
 const allowedSuffixes = [
   '.scf.usercontent.goog',
-  '.vercel.app'
-  '.run.app', // 兼容 Cloud Run 的自动域名
+  '.vercel.app',
+  '.run.app' // 兼容 Cloud Run 的自动域名
 ];
 
 const corsConfig = {
