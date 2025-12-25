@@ -128,44 +128,73 @@ router.post('/presign', async (req, res) => {
 
 /**
  * @route   GET /api/upload/list
- * @desc    获取 R2 文件列表 (支持文件夹层级浏览)
+ * @desc    获取 R2 文件列表 (支持文件夹层级浏览，智能路径修正)
  * @query   limit (默认50), cursor (分页), type ('image' | 'backup'), folder (子目录路径)
  */
 router.get('/list', async (req, res) => {
   try {
-    const limit = parseInt(req.query.limit) || 50; // 调大一点，浏览文件更爽
+    const limit = parseInt(req.query.limit) || 50;
     const cursor = req.query.cursor || undefined;
     const type = req.query.type || 'image';
-    
-    // 🔥 新增：获取前端想看的子文件夹，例如 "2025-12-25/"
-    // 如果是根目录，这个值可能是 undefined 或空字符串
-    let subFolder = req.query.folder || '';
 
-    // 1. 确定根仓库 (Root)
-    let rootPrefix = 'uploads/';
+    // 1. 确定根仓库目录 (Root Prefix)
+    let rootPrefix = 'uploads/'; // 默认图片库
     if (type === 'backup') {
       rootPrefix = 'db-backups/';
     }
 
-    // 2. 拼接完整查询路径 (Full Prefix)
-    // 逻辑：根仓库 + 用户点的子目录
-    // 比如: "db-backups/" + "2025-12-25/170xxx/"
-    // 注意：我们要防止用户传入的 folder 开头带斜杠导致双斜杠
-    if (subFolder.startsWith('/')) subFolder = subFolder.substring(1);
+    // 2. 获取并清洗前端请求的 folder 参数
+    // 允许前端传 "2025" 或 "2025/" 或 "uploads/2025"
+    let requestFolder = req.query.folder || '';
     
-    const fullPrefix = subFolder ? (rootPrefix + subFolder) : rootPrefix;
+    // 移除开头和结尾的斜杠，防止双斜杠干扰 (e.g. "/2025/" -> "2025")
+    requestFolder = requestFolder.replace(/^\/+|\/+$/g, '');
 
-    // 3. 调用 utils (关键：传入 '/' 作为 delimiter)
-    // 只有传入 delimiter: '/'，S3 才会把子目录折叠成 CommonPrefixes 返回给我们
+    // 3. 智能拼接最终查询路径 (Full Prefix)
+    let fullPrefix = rootPrefix;
+
+    if (requestFolder) {
+      // 场景 A: 前端传了完整路径 (e.g. "uploads/2025") -> 直接用
+      if (requestFolder.startsWith(rootPrefix)) {
+        fullPrefix = requestFolder;
+      } 
+      // 场景 B: 前端传了相对路径 (e.g. "2025") -> 拼上去
+      else {
+        fullPrefix = `${rootPrefix}${requestFolder}`;
+      }
+      
+      // 保证必须以 '/' 结尾，否则 R2 无法识别为目录
+      if (!fullPrefix.endsWith('/')) {
+        fullPrefix += '/';
+      }
+    }
+
+    // console.log(`[R2 List] Type: ${type}, Folder: "${requestFolder}", FinalPrefix: "${fullPrefix}"`);
+
+    // 4. 调用 R2 工具函数 (传入 '/' 开启文件夹模式)
     const result = await listR2Files(fullPrefix, cursor, limit, '/');
 
-    // 4. 返回增强后的数据结构
+    // 5. 组装返回数据
+    // 我们需要计算出“纯净的相对路径”，方便前端面包屑导航使用
+    // currentRelativeFolder: 如果 fullPrefix 是 "uploads/2025/12/"，root 是 "uploads/"，那么相对路径就是 "2025/12"
+    let currentRelativePath = fullPrefix.replace(rootPrefix, '');
+    if (currentRelativePath.endsWith('/')) {
+        currentRelativePath = currentRelativePath.slice(0, -1);
+    }
+
     res.json({
       success: true,
       data: {
-        // 分开返回，前端好渲染不同图标
-        folders: result.folders, // 📁 文件夹列表
-        files: result.files      // 📄 文件列表
+        // 📁 文件夹列表
+        folders: result.folders.map(f => ({
+            ...f,
+            // 💡 关键优化：给前端一个 ready-to-use 的完整参数
+            // 下次点击这个文件夹时，前端直接把这个值塞给 ?folder= 即可
+            // 这样前端逻辑就可以无脑一点，不需要自己拼字符串
+            nextQueryParam: `${currentRelativePath ? currentRelativePath + '/' : ''}${f.name}`
+        })),
+        // 📄 文件列表
+        files: result.files
       },
       pagination: {
         nextCursor: result.nextCursor,
@@ -173,9 +202,9 @@ router.get('/list', async (req, res) => {
       },
       meta: {
         type: type,
-        currentRoot: rootPrefix, // 当前的大类根目录
-        currentFolder: subFolder, // 当前所在的子目录 (用于前端面包屑导航)
-        fullPrefix: fullPrefix   // 实际查询 R2 的路径
+        currentRoot: rootPrefix,     // e.g. "uploads/"
+        currentPath: currentRelativePath, // e.g. "2025/12" (用于显示面包屑：Home > 2025 > 12)
+        fullPrefix: fullPrefix       // e.g. "uploads/2025/12/" (调试用)
       }
     });
 
