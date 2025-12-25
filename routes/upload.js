@@ -34,8 +34,7 @@ const upload = multer({
 
 /**
  * @route   POST /api/upload
- * @desc    上传图片到 R2 (支持单张或多张并发)
- * @note    前端 FormData 的 field name 必须是 'files'
+ * @desc    上传图片到 R2 (强制在 uploads/ 下，支持自定义子目录)
  */
 router.post('/', upload.array('files', 10), async (req, res) => {
   try {
@@ -44,47 +43,71 @@ router.post('/', upload.array('files', 10), async (req, res) => {
       return res.status(400).json({ msg: 'No files uploaded.' });
     }
 
-    // 2. 并发处理所有文件
-    // 使用 Promise.all 极大提升多图上传速度
-    const uploadTasks = req.files.map(async file => {
-      // 生成规范文件名: uploads/2025/12/uuid.jpg
+    // ============================================================
+    // 2. 核心路径逻辑修改
+    // ============================================================
+    
+    // 根目录固定为 'uploads/'
+    const rootDir = 'uploads/'; 
+    let subDirectory = '';
+
+    if (req.body.folder) {
+      // 🟢 情况 A: 前端指定了文件夹 (例如 "journal" 或 "works/design")
+      // 我们只取它的值，去掉开头结尾的斜杠，防止双斜杠
+      subDirectory = req.body.folder.replace(/^\/+|\/+$/g, '');
+    } else {
+      // 🟠 情况 B: 前端没传，使用日期归档 (例如 "2025/12")
       const date = new Date();
       const year = date.getFullYear();
       const month = String(date.getMonth() + 1).padStart(2, '0');
-      const fileExt = path.extname(file.originalname).toLowerCase();
-      // 这里统一放到 uploads/ 目录下
-      const fileName = `uploads/${year}/${month}/${uuidv4()}${fileExt}`;
+      subDirectory = `${year}/${month}`;
+    }
 
-      // 执行上传 (流式)
+    // 最终前缀: uploads/ + 子目录 + /
+    // 结果 A: uploads/journal/
+    // 结果 B: uploads/2025/12/
+    const finalFolderPrefix = `${rootDir}${subDirectory}/`;
+
+    // ============================================================
+
+    // 3. 并发处理所有文件
+    const uploadTasks = req.files.map(async file => {
+      const fileExt = path.extname(file.originalname).toLowerCase();
+      
+      // 拼接文件名: uploads/journal/uuid.jpg
+      const fileName = `${finalFolderPrefix}${uuidv4()}${fileExt}`;
+
+      // 执行上传
       const url = await uploadToR2(file.buffer, fileName, file.mimetype);
 
-      // 记录审计日志
+      // 记录日志
       logOperation({
         operatorId: req.user?.id || 'anonymous',
         action: 'UPLOAD_IMAGE',
         target: fileName,
-        details: { size: file.size, originalName: file.originalname },
+        details: { size: file.size, originalName: file.originalname, folder: finalFolderPrefix },
         ip: req.ip
       });
 
       return {
         url,
-        name: file.originalname
+        name: file.originalname,
+        key: fileName
       };
     });
 
-    // 3. 等待全部完成
+    // 4. 等待完成
     const results = await Promise.all(uploadTasks);
 
-    // 4. 返回结果
     res.json({
       success: true,
       msg: `Successfully uploaded ${results.length} images`,
-      data: results // 返回 [{url, name}, ...] 方便前端展示
+      folder: finalFolderPrefix, // 返回给前端看一眼最终存哪了
+      data: results
     });
+
   } catch (error) {
     console.error('Upload Route Error:', error);
-    // 捕获 Multer 的错误 (如文件太大、数量太多)
     if (error instanceof multer.MulterError) {
       return res.status(400).json({ msg: `Upload validation failed: ${error.message}` });
     }
