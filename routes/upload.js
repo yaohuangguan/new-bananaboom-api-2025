@@ -146,10 +146,9 @@ router.post('/presign', async (req, res) => {
     // 5. 返回结果
     res.json({
       success: true,
-      uploadUrl: url, // 前端 PUT 请求地址
-      publicUrl: `${process.env.R2_PUBLIC_DOMAIN}/${finalKey}`, // 最终访问地址
       key: finalKey,  // 存储 Key (建议前端存库)
-      folder: targetFolder // 返回实际使用的文件夹路径供前端确认
+      folder: targetFolder, // 返回实际使用的文件夹路径供前端确认
+      ...url
     });
 
   } catch (error) {
