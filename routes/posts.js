@@ -10,7 +10,6 @@ const router = Router();
 
 // 引入依赖
 import Post from '../models/Post.js';
-import { getCurrentTime } from '../utils/dayjs.js';
 import logOperation from '../utils/audit.js'; // 审计日志工具
 
 // =================================================================
@@ -74,8 +73,7 @@ const formatPostData = (body) => {
       .filter((t) => t);
   }
 
-  // 2. 这里的 code/code2/codeGroup 逻辑已删除
-
+  // 2. 返回清洗后的数据
   return { name, info, author, content, isPrivate, tags, url, button };
 };
 
@@ -98,7 +96,11 @@ const getPost = async (req, res, isPrivate) => {
     // 搜索逻辑 (匹配 标题 OR 内容)
     if (req.query.q) {
       const keyword = req.query.q;
-      query.$or = [{ name: { $regex: keyword, $options: 'i' } }, { content: { $regex: keyword, $options: 'i' } }];
+      // 使用正则进行模糊匹配
+      query.$or = [
+        { name: { $regex: keyword, $options: 'i' } }, 
+        { content: { $regex: keyword, $options: 'i' } }
+      ];
     }
 
     // 标签筛选
@@ -109,13 +111,11 @@ const getPost = async (req, res, isPrivate) => {
     // 3. 并行查询 (数据 + 总数)
     const [posts, total] = await Promise.all([
       Post.find(query)
-        // 🔥 核心修复：排序逻辑优化
-        // 优先按 createdDate 倒序 (新发布的在前)
-        // 如果 createdDate 相同或格式有问题，按 _id 倒序 (MongoDB ObjectId 包含时间戳，也能保证后插入的在前)
-        .sort({ _id: -1 })
+        // 🔥 优化：明确按创建时间倒序排列 (最新的在前)
+        .sort({ createdDate: -1 }) 
         .skip(skip)
         .limit(limit)
-        // 🔥 关键安全策略：返回 User 信息，但强制排除密码字段
+        // 🔥 安全策略：返回 User 信息，但强制排除密码字段
         .populate('user', '-password'),
 
       Post.countDocuments(query)
@@ -170,11 +170,23 @@ router.get('/likes/:id', async (req, res) => await getLikes(req, res));
  */
 router.get('/:id', async (req, res) => {
   try {
-    // 🔥 安全策略：Populate 时排除 password
-    const response = await Post.find({ _id: req.params.id }).populate('user', '-password');
-    res.json(response);
+    // 🔥 核心修复：使用 findById 代替 find
+    // find 返回的是数组 [{...}]，findById 返回的是对象 {...}
+    // 这是详情页接口的标准写法
+    const post = await Post.findById(req.params.id).populate('user', '-password');
+
+    if (!post) {
+      return res.status(404).json({ message: 'Post not found' });
+    }
+
+    res.json(post);
   } catch (error) {
-    res.status(404).json({ message: 'Not found the posts' });
+    // 处理 ID 格式错误的情况
+    if (error.kind === 'ObjectId') {
+      return res.status(404).json({ message: 'Post not found' });
+    }
+    console.error('Get Single Post Error:', error);
+    res.status(500).send('Server Error');
   }
 });
 
@@ -191,16 +203,11 @@ router.post('/', async (req, res) => {
   try {
     const postData = formatPostData(req.body);
 
-    // ✅ 使用 dayjs 生成统一格式时间 (YYYY-MM-DD HH:mm)
-    // 注意：请确保 Model 中的 createdDate 是 Date 类型，或者字符串格式是可排序的标准格式 (如 ISO 8601)
-    const now = getCurrentTime();
-
     const newPost = new Post({
       ...postData,
-      createdDate: now, // 创建时间
-      updatedDate: now, // 初始更新时间 = 创建时间
       likes: 0,
       user: req.user.id
+      // createdDate 和 updatedDate 由 Schema 的 default: Date.now 自动处理
     });
 
     await newPost.save();
@@ -233,8 +240,8 @@ router.put('/:id', async (req, res) => {
   try {
     const updateData = formatPostData(req.body);
 
-    // ✅ 更新操作：刷新 updatedDate 为当前分钟
-    updateData.updatedDate = getCurrentTime();
+    // ✅ 更新操作：显式刷新 updatedDate 为当前时间
+    updateData.updatedDate = new Date();
 
     // 执行更新
     const updatedPost = await Post.findByIdAndUpdate(
@@ -321,11 +328,16 @@ router.delete('/:id', async (req, res) => {
  */
 router.post('/likes/:id/add', likeLimiter, async (req, res) => {
   try {
-    await Post.updateOne({ _id: req.params.id }, { $inc: { likes: 1 } });
+    // 🔥 timestamps: false 确保点赞不会更新 updatedDate
+    await Post.updateOne(
+      { _id: req.params.id }, 
+      { $inc: { likes: 1 } },
+      { timestamps: false } 
+    );
     await getLikes(req, res);
   } catch (error) {
     console.error('Add Like Error:', error);
-    // 可选：这里虽然报错了，但不建议给前端抛 500，以免影响体验，记录日志即可
+    // 错误不阻断前端交互
   }
 });
 
@@ -337,7 +349,12 @@ router.post('/likes/:id/add', likeLimiter, async (req, res) => {
  */
 router.post('/likes/:id/remove', likeLimiter, async (req, res) => {
   try {
-    await Post.updateOne({ _id: req.params.id }, { $inc: { likes: -1 } });
+    // 只有当 likes > 0 时才减 1，且不更新文章修改时间
+    await Post.updateOne(
+      { _id: req.params.id, likes: { $gt: 0 } },
+      { $inc: { likes: -1 } },
+      { timestamps: false } // 🔥 关键修复
+    );
     await getLikes(req, res);
   } catch (error) {
     console.error('Remove Like Error:', error);

@@ -33,7 +33,8 @@ const PostSchema = Schema({
   // --- 统计与状态 ---
   likes: {
     type: Number,
-    default: 0
+    default: 0,
+    min: 0
   },
   tags: {
     type: Array,
@@ -64,6 +65,10 @@ const PostSchema = Schema({
     type: Schema.Types.ObjectId,
     ref: 'users'
   }
+}, {
+  // 🔥 开启 Mongoose 自带的时间戳管理 (可选，推荐)
+  // 这会自动管理 createdAt 和 updatedAt，省去手动 update
+  timestamps: { createdAt: 'createdDate', updatedAt: 'updatedDate' } 
 });
 
 // 索引优化
