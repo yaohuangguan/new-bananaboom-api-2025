@@ -117,11 +117,11 @@ router.post('/', upload.array('files', 10), async (req, res) => {
 
 /**
  * @route   POST /api/upload/presign
- * @desc    获取通用上传签名 (支持自定义文件夹、任意文件类型、原名/UUID切换)
+ * @desc    获取通用上传签名 (逻辑统一：强制在 uploads/ 下)
  */
 router.post('/presign', async (req, res) => {
   try {
-    // folder: 前端传来的目标路径，例如 "2025/photography/" 或 "project-A/"
+    // folder: 前端传来的目标路径，例如 "journal" 或 "project-A"
     // useOriginalName: Boolean, true=保留原名, false=使用随机UUID
     const { fileName, fileType, folder, useOriginalName } = req.body;
 
@@ -130,35 +130,42 @@ router.post('/presign', async (req, res) => {
       return res.status(400).json({ msg: 'Missing fileName or fileType' });
     }
 
-    // 2. 处理文件夹路径 (标准化)
-    let targetFolder = folder || ''; // 默认为空，即根目录
+    // ============================================================
+    // 2. 核心路径逻辑 (与直传接口保持完全一致)
+    // ============================================================
     
-    // 如果有文件夹，进行清洗
-    if (targetFolder) {
-      // 替换掉潜在的非法字符 (可选，防止 ../ 路径穿越虽在 S3 只是字符串，但为了规范)
-      // targetFolder = targetFolder.replace(/\.\./g, '');
-      
-      // 去掉开头的 / (S3/R2 的 Key 不建议以 / 开头)
-      if (targetFolder.startsWith('/')) targetFolder = targetFolder.substring(1);
-      
-      // 确保结尾有 / (只要不是空字符串)
-      if (targetFolder.length > 0 && !targetFolder.endsWith('/')) {
-        targetFolder = targetFolder + '/';
-      }
+    // 根目录固定为 'uploads/'
+    const rootDir = 'uploads/'; 
+    let subDirectory = '';
+
+    if (folder) {
+      // 🟢 情况 A: 前端指定了文件夹
+      // 只取它的值，去掉开头结尾的斜杠，防止双斜杠
+      subDirectory = folder.replace(/^\/+|\/+$/g, '');
+    } else {
+      // 🟠 情况 B: 前端没传，使用日期归档 (例如 "2025/12")
+      const date = new Date();
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      subDirectory = `${year}/${month}`;
     }
+
+    // 最终前缀: uploads/ + 子目录 + /
+    // 结果 A: uploads/journal/
+    // 结果 B: uploads/2025/12/
+    const targetFolder = `${rootDir}${subDirectory}/`;
+
+    // ============================================================
 
     // 3. 决定最终文件名 (Key)
     let finalKey;
     
     if (useOriginalName) {
-      // 🅰️ 网盘/文件管理模式：完全信任前端传来的文件名
-      // 结果: "my-folder/report.pdf"
+      // 🅰️ 网盘模式：保留原名 -> "uploads/journal/report.pdf"
       finalKey = `${targetFolder}${fileName}`;
     } else {
-      // 🅱️ 图床/头像模式：防止重名覆盖，使用 UUID
-      // 结果: "my-folder/550e8400-e29b-....png"
+      // 🅱️ 图床模式：使用 UUID -> "uploads/journal/550e8400....png"
       const ext = path.extname(fileName);
-      // 如果没有后缀名，强行加一个 (视业务需求而定)
       finalKey = `${targetFolder}${uuidv4()}${ext || ''}`;
     }
 
@@ -169,8 +176,8 @@ router.post('/presign', async (req, res) => {
     // 5. 返回结果
     res.json({
       success: true,
-      key: finalKey,  // 存储 Key (建议前端存库)
-      folder: targetFolder, // 返回实际使用的文件夹路径供前端确认
+      key: finalKey,  // 存储 Key
+      folder: targetFolder, // 返回实际使用的文件夹路径
       ...url
     });
 
