@@ -61,11 +61,29 @@ const ROUTE_MAP = [
   { path: '/api/comments', method: 'ALL', permission: K.BLOG_INTERACT },
 
   // ============================================================
-  // Level 6: 图片服务
+  // Level 6: 图片服务 (R2 & Cloudinary)
   // ============================================================
+
+  // --- Cloudinary ---
+  // 1. 用量统计：只有超级管理员能看 (涉及钱/额度)
   { path: '/api/cloudinary/usage', method: 'GET', permission: K.SUPER_ADMIN },
-  { path: '/api/cloudinary', method: 'ALL', permission: K.IMAGE_RESOURCES_USE },
-  { path: '/api/upload', method: 'ALL', permission: K.IMAGE_RESOURCES_USE },
+  // 2. 签名与配置：普通用户写文章也需要直传 Cloudinary (如果作为 fallback)
+  { path: '/api/cloudinary', method: 'GET', permission: K.IMAGE_RESOURCES_USE },
+
+  // --- R2 (核心上传) ---
+  // 3. 媒体库列表：写文章的人需要能看到列表，方便选图
+  // 🔥 放在 /api/upload 之前，确保优先匹配
+  { path: '/api/upload/list', method: 'GET', permission: K.IMAGE_RESOURCES_USE },
+
+  // 4. 视频预签名：写文章的人需要上传视频
+  // 🔥 也是具体路径，放在前面
+  { path: '/api/upload/presign', method: 'POST', permission: K.IMAGE_RESOURCES_USE },
+
+  // 5. 删除图片：只有超级管理员能删 (防止误删/恶意删除)
+  { path: '/api/upload', method: 'DELETE', permission: K.SUPER_ADMIN },
+
+  // 6. 上传图片：普通权限 (注意这里明确指定了 POST)
+  { path: '/api/upload', method: 'POST', permission: K.IMAGE_RESOURCES_USE },
 
   // ============================================================
   // Level 7: 复杂用户管理 (正则优先级最高)
