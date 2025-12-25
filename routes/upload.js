@@ -128,23 +128,26 @@ router.post('/presign', async (req, res) => {
  * @query   limit (可选, 默认20), cursor (可选, 加载下一页用)
  */
 router.get('/list', async (req, res) => {
-  try {
-    const limit = parseInt(req.query.limit) || 20;
-    const cursor = req.query.cursor || undefined;
-
-    const result = await listR2Files(cursor, limit);
-
-    res.json({
-      success: true,
-      ...result
-    });
-  } catch (error) {
-    console.error('List Files Error:', error);
-    res.status(500).json({
-      msg: 'Failed to fetch file list'
-    });
-  }
-});
+    try {
+      const limit = parseInt(req.query.limit) || 20;
+      const cursor = req.query.cursor || undefined; // undefined 也就是第一页
+  
+      // 这里拿到的 result 已经是清洗过的干净数据了
+      const result = await listR2Files(cursor, limit);
+  
+      res.json({
+        success: true,
+        data: result.items,       // 统一放在 data 字段里
+        pagination: {             // 分页信息单独放
+          nextCursor: result.nextCursor,
+          hasMore: result.hasMore
+        }
+      });
+    } catch (error) {
+      console.error('List Files Error:', error);
+      res.status(500).json({ msg: 'Failed to fetch file list' });
+    }
+  });
 
 /**
  * @route   DELETE /api/upload

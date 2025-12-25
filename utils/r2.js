@@ -76,39 +76,57 @@ export const getR2PresignedUrl = async (fileName, mimeType) => {
 };
 
 /**
- * 获取 R2 文件列表 (支持分页)
- * @param {String} cursor - 分页游标 (NextContinuationToken)
- * @param {Number} limit - 每次加载数量 (默认 20)
+ * 获取 R2 文件列表 (经过清洗的标准数据)
+ * @param {String} cursor - 分页游标
+ * @param {Number} limit - 数量
  */
 export const listR2Files = async (cursor, limit = 20) => {
   try {
     const command = new ListObjectsV2Command({
       Bucket: process.env.R2_BUCKET_NAME,
       MaxKeys: limit,
-      ContinuationToken: cursor, // 如果有 cursor，说明是加载下一页
-      Prefix: 'uploads/' // 可选：只列出 uploads 文件夹下的内容
+      ContinuationToken: cursor,
+      Prefix: 'uploads/' // 建议只列出 uploads 目录
     });
 
     const data = await R2.send(command);
 
-    // 格式化返回数据，方便前端直接使用
-    const files = (data.Contents || []).map(item => ({
-      key: item.Key, // 文件路径 (用于删除)
-      url: `${process.env.R2_PUBLIC_DOMAIN}/${item.Key}`, // 公开访问链接
-      lastModified: item.LastModified, // 上传时间
-      size: item.Size // 文件大小 (字节)
-    }));
+    // 🔥 核心步骤：数据清洗 (Data Mapping)
+    // 把 S3 的原生字段映射成前端友好的字段
+    const files = (data.Contents || []).map(item => {
+      // 提取文件名 (去掉路径)
+      // 例如: uploads/2025/01/abc.jpg -> abc.jpg
+      const fileName = item.Key.split('/').pop();
+
+      return {
+        id: item.Key, // 唯一标识 (用于删除)
+        url: `${process.env.R2_PUBLIC_DOMAIN}/${item.Key}`, // 拼接完整链接
+        name: fileName, // 纯文件名 (前端展示用)
+        path: item.Key, // 完整路径
+        size: item.Size, // 大小 (字节)
+        type: getFileType(item.Key), // 简单的类型判断 (见下方辅助函数)
+        createdAt: item.LastModified // ISO 时间格式
+      };
+    });
 
     return {
-      files,
-      // 如果还有下一页，R2 会返回 NextContinuationToken
-      nextCursor: data.NextContinuationToken || null,
-      hasMore: data.IsTruncated // 是否还有更多
+      items: files, // 改名叫 items，比 files 更通用
+      nextCursor: data.NextContinuationToken || null, // 游标
+      hasMore: !!data.IsTruncated, // 是否还有更多
+      totalCount: data.KeyCount // 本次返回的数量
     };
   } catch (error) {
     console.error('❌ List R2 Files Error:', error);
     throw error;
   }
+};
+
+// 辅助小函数：根据后缀名猜类型
+const getFileType = key => {
+  if (!key) return 'unknown';
+  if (key.match(/\.(jpg|jpeg|png|gif|webp|svg)$/i)) return 'image';
+  if (key.match(/\.(mp4|mov|webm|avi)$/i)) return 'video';
+  return 'file';
 };
 
 /**
