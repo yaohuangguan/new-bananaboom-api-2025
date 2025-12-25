@@ -4,7 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
 // 引入优化后的 R2 工具函数
 // 注意：listR2Files 现在接受第一个参数 prefix
-import { uploadToR2, getR2PresignedUrl, listR2Files, deleteR2File } from '../utils/r2.js';
+import { uploadToR2, getR2PresignedUrl, listR2Files, deleteR2File, ListObjectsV2Command, R2 } from '../utils/r2.js';
 import logOperation from '../utils/audit.js';
 
 const router = Router();
@@ -250,6 +250,93 @@ router.delete('/', async (req, res) => {
   } catch (error) {
     console.error('Delete File Error:', error);
     res.status(500).json({ msg: 'Failed to delete file' });
+  }
+});
+
+// 辅助函数：字节转更友好的格式
+const formatBytes = (bytes, decimals = 2) => {
+  if (!+bytes) return '0 B';
+  const k = 1024;
+  const dm = decimals < 0 ? 0 : decimals;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
+};
+
+/**
+ * @route   GET /api/upload/r2/usage
+ * @desc    获取 R2 存储用量统计 (类似 Cloudinary Dashboard)
+ */
+router.get('/r2/usage', async (req, res) => {
+  try {
+    let isTruncated = true;
+    let continuationToken = undefined;
+    
+    // 统计数据结构
+    const stats = {
+      total: { count: 0, size: 0, sizeFormatted: '' },
+      images: { count: 0, size: 0, sizeFormatted: '' }, // uploads/
+      backups: { count: 0, size: 0, sizeFormatted: '' }, // db-backups/
+      others: { count: 0, size: 0, sizeFormatted: '' }
+    };
+
+    // 循环分页拉取所有文件 (如果文件几十万可能会慢，但几千个很快)
+    while (isTruncated) {
+      const command = new ListObjectsV2Command({
+        Bucket: process.env.R2_BUCKET_NAME,
+        ContinuationToken: continuationToken
+      });
+
+      const response = await R2.send(command);
+      
+      // 遍历当页文件
+      (response.Contents || []).forEach(item => {
+        const size = item.Size || 0;
+        const key = item.Key || '';
+
+        // 总计
+        stats.total.count++;
+        stats.total.size += size;
+
+        // 分类统计
+        if (key.startsWith('uploads/')) {
+          stats.images.count++;
+          stats.images.size += size;
+        } else if (key.startsWith('db-backups/')) {
+          stats.backups.count++;
+          stats.backups.size += size;
+        } else {
+          stats.others.count++;
+          stats.others.size += size;
+        }
+      });
+
+      isTruncated = response.IsTruncated;
+      continuationToken = response.NextContinuationToken;
+    }
+
+    // 格式化大小
+    stats.total.sizeFormatted = formatBytes(stats.total.size);
+    stats.images.sizeFormatted = formatBytes(stats.images.size);
+    stats.backups.sizeFormatted = formatBytes(stats.backups.size);
+    stats.others.sizeFormatted = formatBytes(stats.others.size);
+
+    // 计算百分比 (用于前端画进度条)
+    const totalSize = stats.total.size || 1; // 防止除以0
+    const usage = {
+      ...stats,
+      percentages: {
+        images: ((stats.images.size / totalSize) * 100).toFixed(1),
+        backups: ((stats.backups.size / totalSize) * 100).toFixed(1),
+        others: ((stats.others.size / totalSize) * 100).toFixed(1),
+      }
+    };
+
+    res.json({ success: true, usage });
+
+  } catch (error) {
+    console.error('Usage Stats Error:', error);
+    res.status(500).json({ message: 'Failed to calculate usage', error: error.message });
   }
 });
 

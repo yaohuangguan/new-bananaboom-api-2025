@@ -1,14 +1,14 @@
 import { Router } from 'express';
-const router = Router();
-
 import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import { glob } from 'glob'; // 需要安装: pnpm add glob
+import { glob } from 'glob'; // 确保安装: pnpm add glob
 import { uploadToR2 } from '../utils/r2.js';
 
+const router = Router();
+
 // ==========================================
-// 1. 引入所有数据模型 (已根据截图补充完整)
+// 1. 引入所有数据模型
 // ==========================================
 import User from '../models/User.js';
 import Post from '../models/Post.js';
@@ -18,8 +18,6 @@ import Chat from '../models/Chat.js';
 import Photo from '../models/Photo.js';
 import Fitness from '../models/Fitness.js';
 import AuditLog from '../models/AuditLog.js';
-
-// --- 新增的模型引入 ---
 import Conversation from '../models/Conversation.js';
 import ExternalResource from '../models/ExternalResource.js';
 import Footprint from '../models/Footprint.js';
@@ -34,180 +32,23 @@ import Resume from '../models/Resume.js';
 import Role from '../models/Role.js';
 import Session from '../models/Session.js';
 
-// @route   GET /api/backup
-// @desc    导出数据库备份 (支持 ?type=users 单独导出，或默认全量导出)
-// @access  Private & VIP Only
-router.get('/', async (req, res) => {
-  const { type } = req.query; // 获取查询参数，例如: ?type=projects
+// ==========================================
+// 2. 通用辅助函数
+// ==========================================
 
-  try {
-    let data = {};
-    let filenamePrefix = 'full';
+// 获取可读的时间字符串: HH-mm-ss (用于文件夹命名)
+const getTimeString = () => {
+  const now = new Date();
+  const hours = String(now.getHours()).padStart(2, '0');
+  const minutes = String(now.getMinutes()).padStart(2, '0');
+  const seconds = String(now.getSeconds()).padStart(2, '0');
+  return `${hours}-${minutes}-${seconds}`;
+};
 
-    // ==========================================
-    // 2. 定义全量查询任务
-    // 使用 Promise.all 并行查询，效率最高
-    // ==========================================
-    const fetchAll = async () => {
-      const [
-        users, posts, comments, todos, chats, photos, fitness, auditLog,
-        // 新增的解构变量
-        conversations, externalResources, footprints, homepage, logs,
-        menus, periods, permissions, permissionRequests, projects,
-        resumes, roles, sessions
-      ] = await Promise.all([
-        // 原有查询
-        User.find({}).select('-password'), // 安全起见，排除密码
-        Post.find({}).sort({ createdDate: -1 }),
-        Comment.find({}).sort({ date: -1 }),
-        Todo.find({}).sort({ timestamp: -1 }),
-        Chat.find({}).sort({ createdDate: -1 }),
-        Photo.find({}).sort({ createdDate: -1 }),
-        Fitness.find({}).sort({ createdDate: -1 }),
-        AuditLog.find({}).sort({ createdDate: -1 }),
-        
-        // --- 新增查询 (默认尝试按 createdDate 倒序，如果没有该字段不影响查询结果) ---
-        Conversation.find({}).sort({ updatedAt: -1 }), // 会话通常按更新时间
-        ExternalResource.find({}),
-        Footprint.find({}).sort({ createdDate: -1 }),
-        Homepage.find({}), // 既然是首页配置，可能只有一条或几条
-        Log.find({}).sort({ createdDate: -1 }), // 普通日志
-        Menu.find({}), // 菜单配置
-        Period.find({}), 
-        Permission.find({}), // 权限配置
-        PermissionRequest.find({}).sort({ createdDate: -1 }), // 权限申请
-        Project.find({}).sort({ createdDate: -1 }), // 项目展示
-        Resume.find({}), // 简历信息
-        Role.find({}), // 角色配置
-        Session.find({}).sort({ expires: -1 }) // 会话Session
-      ]);
-
-      return { 
-        users, posts, comments, todos, chats, photos, fitness, auditLog,
-        // 返回新增的数据
-        conversations, externalResources, footprints, homepage, logs,
-        menus, periods, permissions, permissionRequests, projects,
-        resumes, roles, sessions
-      };
-    };
-
-    // ==========================================
-    // 3. 根据 type 参数决定导出内容
-    // ==========================================
-    if (type) {
-      filenamePrefix = type; // 文件名变成 bananaboom-projects-xxx.json
-      switch (type) {
-        // --- 原有 Case ---
-        case 'users':
-          data.users = await User.find({}).select('-password');
-          break;
-        case 'posts':
-          data.posts = await Post.find({}).sort({ createdDate: -1 });
-          break;
-        case 'comments':
-          data.comments = await Comment.find({}).sort({ date: -1 });
-          break;
-        case 'todos':
-          data.todos = await Todo.find({}).sort({ timestamp: -1 });
-          break;
-        case 'chats':
-          data.chats = await Chat.find({}).sort({ createdDate: -1 });
-          break;
-        case 'photos':
-          data.photos = await Photo.find({}).sort({ createdDate: -1 });
-          break;
-        case 'fitness':
-          data.fitness = await Fitness.find({}).sort({ createdDate: -1 });
-          break;
-        case 'audit': // 注意：URL参数叫 audit，但变量叫 auditLog，保持原逻辑
-          data.auditLog = await AuditLog.find({}).sort({ createdDate: -1 });
-          break;
-
-        // --- 新增 Case ---
-        case 'conversations':
-          data.conversations = await Conversation.find({}).sort({ updatedAt: -1 });
-          break;
-        case 'external': // 简化参数名为 external
-          data.externalResources = await ExternalResource.find({});
-          break;
-        case 'footprints':
-          data.footprints = await Footprint.find({}).sort({ createdDate: -1 });
-          break;
-        case 'homepage':
-          data.homepage = await Homepage.find({});
-          break;
-        case 'logs':
-          data.logs = await Log.find({}).sort({ createdDate: -1 });
-          break;
-        case 'menus':
-          data.menus = await Menu.find({});
-          break;
-        case 'periods':
-          data.periods = await Period.find({});
-          break;
-        case 'permissions':
-          data.permissions = await Permission.find({});
-          break;
-        case 'requests': // 简化参数名为 requests
-          data.permissionRequests = await PermissionRequest.find({}).sort({ createdDate: -1 });
-          break;
-        case 'projects':
-          data.projects = await Project.find({}).sort({ createdDate: -1 });
-          break;
-        case 'resume':
-          data.resumes = await Resume.find({});
-          break;
-        case 'roles':
-          data.roles = await Role.find({});
-          break;
-        case 'sessions':
-          data.sessions = await Session.find({}).sort({ expires: -1 });
-          break;
-
-        default:
-          // 如果 type 写错了，默认导出全部
-          data = await fetchAll();
-          filenamePrefix = 'full';
-      }
-    } else {
-      // 默认情况：导出全部
-      data = await fetchAll();
-    }
-
-    // ==========================================
-    // 4. 组装最终 JSON 并发送
-    // ==========================================
-    const backupJSON = {
-      meta: {
-        version: '2.1', // 升级版本号
-        exportDate: new Date().toISOString(),
-        exporter: req.user ? req.user.displayName : 'System', // 防止 req.user 不存在时报错
-        type: type || 'full_backup',
-        includedModels: Object.keys(data) // 记录一下这次包里有哪些数据表
-      },
-      data: data
-    };
-
-    // 设置下载响应头
-    const dateStr = new Date().toISOString().split('T')[0];
-    const filename = `bananaboom-${filenamePrefix}-${dateStr}.json`;
-
-    res.setHeader('Content-Type', 'application/json');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-
-    // 发送美化后的 JSON (缩进2空格)
-    res.send(JSON.stringify(backupJSON, null, 2));
-
-  } catch (error) {
-    console.error('Backup error:', error);
-    res.status(500).json({ message: 'Server Error during backup', error: error.message });
-  }
-});
-
-// 辅助函数：递归删除文件夹 (用于清理临时文件)
+// 递归删除文件夹 (用于清理临时文件)
 const deleteFolderRecursive = (directoryPath) => {
   if (fs.existsSync(directoryPath)) {
-    fs.readdirSync(directoryPath).forEach((file, index) => {
+    fs.readdirSync(directoryPath).forEach((file) => {
       const curPath = path.join(directoryPath, file);
       if (fs.lstatSync(curPath).isDirectory()) {
         deleteFolderRecursive(curPath);
@@ -220,129 +61,225 @@ const deleteFolderRecursive = (directoryPath) => {
 };
 
 // ==========================================
-// 1. 辅助函数
+// 3. 接口 A: 导出 JSON (浏览器下载)
 // ==========================================
 
-// 获取可读的时间字符串: HH-mm-ss
-const getTimeString = () => {
-  const now = new Date();
-  const hours = String(now.getHours()).padStart(2, '0');
-  const minutes = String(now.getMinutes()).padStart(2, '0');
-  const seconds = String(now.getSeconds()).padStart(2, '0');
-  return `${hours}-${minutes}-${seconds}`;
-};
+// @route   GET /api/backup
+// @desc    导出纯文本 JSON 备份 (浏览器直接下载)
+// @access  Private & VIP Only
+router.get('/', async (req, res) => {
+  const { type } = req.query; 
+
+  try {
+    let data = {};
+    let filenamePrefix = 'full';
+
+    // 定义全量查询任务
+    const fetchAll = async () => {
+      const [
+        users, posts, comments, todos, chats, photos, fitness, auditLog,
+        conversations, externalResources, footprints, homepage, logs,
+        menus, periods, permissions, permissionRequests, projects,
+        resumes, roles, sessions
+      ] = await Promise.all([
+        User.find({}).select('-password'),
+        Post.find({}).sort({ createdDate: -1 }),
+        Comment.find({}).sort({ date: -1 }),
+        Todo.find({}).sort({ timestamp: -1 }),
+        Chat.find({}).sort({ createdDate: -1 }),
+        Photo.find({}).sort({ createdDate: -1 }),
+        Fitness.find({}).sort({ createdDate: -1 }),
+        AuditLog.find({}).sort({ createdDate: -1 }),
+        Conversation.find({}).sort({ updatedAt: -1 }),
+        ExternalResource.find({}),
+        Footprint.find({}).sort({ createdDate: -1 }),
+        Homepage.find({}),
+        Log.find({}).sort({ createdDate: -1 }),
+        Menu.find({}),
+        Period.find({}),
+        Permission.find({}),
+        PermissionRequest.find({}).sort({ createdDate: -1 }),
+        Project.find({}).sort({ createdDate: -1 }),
+        Resume.find({}),
+        Role.find({}),
+        Session.find({}).sort({ expires: -1 })
+      ]);
+
+      return { 
+        users, posts, comments, todos, chats, photos, fitness, auditLog,
+        conversations, externalResources, footprints, homepage, logs,
+        menus, periods, permissions, permissionRequests, projects,
+        resumes, roles, sessions
+      };
+    };
+
+    // 根据 type 参数决定导出内容
+    if (type) {
+      filenamePrefix = type;
+      switch (type) {
+        case 'users': data.users = await User.find({}).select('-password'); break;
+        case 'posts': data.posts = await Post.find({}).sort({ createdDate: -1 }); break;
+        case 'comments': data.comments = await Comment.find({}).sort({ date: -1 }); break;
+        case 'todos': data.todos = await Todo.find({}).sort({ timestamp: -1 }); break;
+        case 'chats': data.chats = await Chat.find({}).sort({ createdDate: -1 }); break;
+        case 'photos': data.photos = await Photo.find({}).sort({ createdDate: -1 }); break;
+        case 'fitness': data.fitness = await Fitness.find({}).sort({ createdDate: -1 }); break;
+        case 'audit': data.auditLog = await AuditLog.find({}).sort({ createdDate: -1 }); break;
+        case 'conversations': data.conversations = await Conversation.find({}).sort({ updatedAt: -1 }); break;
+        case 'external': data.externalResources = await ExternalResource.find({}); break;
+        case 'footprints': data.footprints = await Footprint.find({}).sort({ createdDate: -1 }); break;
+        case 'homepage': data.homepage = await Homepage.find({}); break;
+        case 'logs': data.logs = await Log.find({}).sort({ createdDate: -1 }); break;
+        case 'menus': data.menus = await Menu.find({}); break;
+        case 'periods': data.periods = await Period.find({}); break;
+        case 'permissions': data.permissions = await Permission.find({}); break;
+        case 'requests': data.permissionRequests = await PermissionRequest.find({}).sort({ createdDate: -1 }); break;
+        case 'projects': data.projects = await Project.find({}).sort({ createdDate: -1 }); break;
+        case 'resume': data.resumes = await Resume.find({}); break;
+        case 'roles': data.roles = await Role.find({}); break;
+        case 'sessions': data.sessions = await Session.find({}).sort({ expires: -1 }); break;
+        default: data = await fetchAll(); filenamePrefix = 'full';
+      }
+    } else {
+      data = await fetchAll();
+    }
+
+    const backupJSON = {
+      meta: {
+        version: '2.1',
+        exportDate: new Date().toISOString(),
+        exporter: req.user ? req.user.displayName : 'System',
+        type: type || 'full_backup',
+        includedModels: Object.keys(data)
+      },
+      data: data
+    };
+
+    const dateStr = new Date().toISOString().split('T')[0];
+    const filename = `bananaboom-${filenamePrefix}-${dateStr}.json`;
+
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(JSON.stringify(backupJSON, null, 2));
+
+  } catch (error) {
+    console.error('Backup error:', error);
+    res.status(500).json({ message: 'Server Error during backup', error: error.message });
+  }
+});
 
 // ==========================================
-// 2. 核心路由
+// 4. 接口 B: 系统级备份到 R2 (流式响应)
 // ==========================================
 
 // @route   POST /api/backup/database
-// @desc    执行 mongodump 并上传到 R2 (文件夹结构)
+// @desc    执行 mongodump 并上传到 R2 (流式输出日志，防止超时)
 router.post('/database', async (req, res) => {
-  // R2 路径规划
-  const dateStr = new Date().toISOString().split('T')[0]; // 例如: 2025-12-25
-  const timeStr = getTimeString(); // 例如: 14-30-05
+  const dateStr = new Date().toISOString().split('T')[0]; 
+  const timeStr = getTimeString(); 
   
-  // R2 最终存储前缀: db-backups/2025-12-25/14-30-05
+  // R2 路径: db-backups/2025-12-25/14-30-05/
   const r2FolderPrefix = `db-backups/${dateStr}/${timeStr}`;
 
-  // 本地临时目录 (使用时间戳，确保唯一性，避免并发冲突)
+  // 本地临时目录
   const timestamp = Date.now();
   const tempDir = path.join('/tmp', `backup-${timestamp}`);
 
+  // 🔥 关键设置：开启流式传输，防止 Nginx/CloudRun 超时
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('Transfer-Encoding', 'chunked');
+
+  // 内部小函数：发送日志给前端
+  const sendLog = (msg) => {
+    res.write(`[LOG] ${msg}\n`);
+  };
+
   try {
-    console.log(`[Backup] 1. Starting mongodump to local temp: ${tempDir}`);
-    
-    // 从环境变量获取连接串
+    sendLog(`🚀 任务启动: 数据库全量备份`);
+    sendLog(`📂 目标 R2 路径: ${r2FolderPrefix}`);
+
     const MONGO_URI = process.env.MONGO_URI;
-    if (!MONGO_URI) throw new Error('MONGO_URI is not defined in env');
+    if (!MONGO_URI) throw new Error('MONGO_URI 环境变量未定义');
 
     // 1. 执行 mongodump
-    // --out: 输出为文件夹结构
-    // --gzip: 压缩单个文件 (.bson.gz)
+    sendLog(`⏳ 正在执行 mongodump (导出到临时目录)...`);
     const child = spawn('mongodump', [
       `--uri=${MONGO_URI}`,
-      `--out=${tempDir}`,
-      '--gzip'
+      `--out=${tempDir}`, // 输出文件夹结构
+      '--gzip'            // 启用压缩
     ]);
 
-    // 等待子进程结束
+    // 实时转发 mongodump 的 stderr 日志
+    child.stderr.on('data', (data) => {
+      // 这里的日志包含进度条，转发给前端看会很酷
+      res.write(`[MONGO] ${data.toString()}`);
+    });
+
     await new Promise((resolve, reject) => {
       child.on('close', (code) => {
         if (code === 0) resolve();
-        else reject(new Error(`mongodump process exited with code ${code}`));
+        else reject(new Error(`mongodump 退出代码: ${code}`));
       });
       child.on('error', (err) => reject(err));
     });
 
-    console.log('[Backup] 2. Dump finished. Preparing to upload...');
+    sendLog(`✅ 数据库导出完成，准备扫描文件...`);
 
-    // 2. 扫描所有生成的文件
-    // nodir: true 表示只返回文件，不返回空文件夹
+    // 2. 扫描文件
     const files = await glob(`${tempDir}/**/*`, { nodir: true });
-
+    
     if (files.length === 0) {
-      throw new Error('No files generated by mongodump');
+      throw new Error('Mongodump 未生成任何文件');
     }
 
-    const uploadResults = [];
+    sendLog(`📦 扫描到 ${files.length} 个文件，开始上传 R2...`);
 
-    // 3. 遍历并上传
+    let uploadedCount = 0;
+
+    // 3. 逐个上传
     for (const filePath of files) {
-      // 计算相对路径，例如: my-database/users.bson.gz
       const relativePath = path.relative(tempDir, filePath);
-      
-      // 拼接 R2 Key，并统一使用 / 作为分隔符 (兼容 Windows)
       const r2Key = `${r2FolderPrefix}/${relativePath}`.replace(/\\/g, '/');
       
       const fileBuffer = fs.readFileSync(filePath);
-      
-      // 简单判断 MIME 类型
       const mimeType = filePath.endsWith('.json') || filePath.endsWith('.json.gz') 
         ? 'application/json' 
         : 'application/gzip';
       
-      // 调用工具函数上传
-      const publicUrl = await uploadToR2(fileBuffer, r2Key, mimeType);
+      await uploadToR2(fileBuffer, r2Key, mimeType);
       
-      uploadResults.push({
-        file: relativePath,
-        url: publicUrl
-      });
-      
-      // console.log(`   -> Uploaded: ${relativePath}`);
+      uploadedCount++;
+      // 每上传一个文件，通知前端进度
+      sendLog(`☁️ [${uploadedCount}/${files.length}] 已上传: ${relativePath}`);
     }
 
-    console.log(`[Backup] 3. Uploaded ${files.length} files to R2.`);
-
-    // 4. 清理临时文件 (非常重要)
+    // 4. 清理
     deleteFolderRecursive(tempDir);
-    console.log('[Backup] 4. Cleanup done.');
+    sendLog(`🧹 本地临时文件已清理`);
 
-    // 5. 返回结果
-    res.json({
+    // 5. 发送完成信号 (包含 JSON 数据供前端解析)
+    // 前端收到 [DONE] 后，解析后面的 JSON 刷新文件列表
+    const resultData = JSON.stringify({
       success: true,
-      message: `Backup success! Saved to folder: ${timeStr}`,
-      // 关键：返回这个 folder 路径，前端可以直接拿去刷新列表
-      folder: r2FolderPrefix, 
-      totalFiles: files.length,
-      files: uploadResults
+      folder: r2FolderPrefix,
+      totalFiles: files.length
     });
+    
+    res.write(`[DONE] ${resultData}\n`);
+    res.end(); // 结束响应流
 
   } catch (error) {
     console.error('[Backup] Failed:', error);
     
-    // 即使失败，也要尝试清理垃圾文件
+    // 错误处理也要流式输出
+    sendLog(`❌ 错误: ${error.message}`);
+    
+    // 尝试清理
     try {
       if (fs.existsSync(tempDir)) deleteFolderRecursive(tempDir);
-    } catch (cleanupError) {
-      console.error('Cleanup failed:', cleanupError);
-    }
+    } catch (e) { /* ignore */ }
 
-    res.status(500).json({ 
-      message: 'Server Error during mongodump backup', 
-      error: error.message 
-    });
+    res.end(); // 结束响应
   }
 });
 
