@@ -4,7 +4,8 @@ import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
 // 引入优化后的 R2 工具函数
 // 注意：listR2Files 现在接受第一个参数 prefix
-import { uploadToR2, getR2PresignedUrl, listR2Files, deleteR2File, ListObjectsV2Command, R2 } from '../utils/r2.js';
+import { uploadToR2, getR2PresignedUrl, listR2Files, deleteR2File, R2 } from '../utils/r2.js';
+import { ListObjectsV2Command } from '@aws-sdk/client-s3';
 import logOperation from '../utils/audit.js';
 
 const router = Router();
@@ -45,7 +46,7 @@ router.post('/', upload.array('files', 10), async (req, res) => {
 
     // 2. 并发处理所有文件
     // 使用 Promise.all 极大提升多图上传速度
-    const uploadTasks = req.files.map(async (file) => {
+    const uploadTasks = req.files.map(async file => {
       // 生成规范文件名: uploads/2025/12/uuid.jpg
       const date = new Date();
       const year = date.getFullYear();
@@ -81,7 +82,6 @@ router.post('/', upload.array('files', 10), async (req, res) => {
       msg: `Successfully uploaded ${results.length} images`,
       data: results // 返回 [{url, name}, ...] 方便前端展示
     });
-
   } catch (error) {
     console.error('Upload Route Error:', error);
     // 捕获 Multer 的错误 (如文件太大、数量太多)
@@ -146,7 +146,7 @@ router.get('/list', async (req, res) => {
     // 2. 获取并清洗前端请求的 folder 参数
     // 允许前端传 "2025" 或 "2025/" 或 "uploads/2025"
     let requestFolder = req.query.folder || '';
-    
+
     // 移除开头和结尾的斜杠，防止双斜杠干扰 (e.g. "/2025/" -> "2025")
     requestFolder = requestFolder.replace(/^\/+|\/+$/g, '');
 
@@ -157,12 +157,12 @@ router.get('/list', async (req, res) => {
       // 场景 A: 前端传了完整路径 (e.g. "uploads/2025") -> 直接用
       if (requestFolder.startsWith(rootPrefix)) {
         fullPrefix = requestFolder;
-      } 
+      }
       // 场景 B: 前端传了相对路径 (e.g. "2025") -> 拼上去
       else {
         fullPrefix = `${rootPrefix}${requestFolder}`;
       }
-      
+
       // 保证必须以 '/' 结尾，否则 R2 无法识别为目录
       if (!fullPrefix.endsWith('/')) {
         fullPrefix += '/';
@@ -179,7 +179,7 @@ router.get('/list', async (req, res) => {
     // currentRelativeFolder: 如果 fullPrefix 是 "uploads/2025/12/"，root 是 "uploads/"，那么相对路径就是 "2025/12"
     let currentRelativePath = fullPrefix.replace(rootPrefix, '');
     if (currentRelativePath.endsWith('/')) {
-        currentRelativePath = currentRelativePath.slice(0, -1);
+      currentRelativePath = currentRelativePath.slice(0, -1);
     }
 
     res.json({
@@ -187,11 +187,11 @@ router.get('/list', async (req, res) => {
       data: {
         // 📁 文件夹列表
         folders: result.folders.map(f => ({
-            ...f,
-            // 💡 关键优化：给前端一个 ready-to-use 的完整参数
-            // 下次点击这个文件夹时，前端直接把这个值塞给 ?folder= 即可
-            // 这样前端逻辑就可以无脑一点，不需要自己拼字符串
-            nextQueryParam: `${currentRelativePath ? currentRelativePath + '/' : ''}${f.name}`
+          ...f,
+          // 💡 关键优化：给前端一个 ready-to-use 的完整参数
+          // 下次点击这个文件夹时，前端直接把这个值塞给 ?folder= 即可
+          // 这样前端逻辑就可以无脑一点，不需要自己拼字符串
+          nextQueryParam: `${currentRelativePath ? currentRelativePath + '/' : ''}${f.name}`
         })),
         // 📄 文件列表
         files: result.files
@@ -202,12 +202,11 @@ router.get('/list', async (req, res) => {
       },
       meta: {
         type: type,
-        currentRoot: rootPrefix,     // e.g. "uploads/"
+        currentRoot: rootPrefix, // e.g. "uploads/"
         currentPath: currentRelativePath, // e.g. "2025/12" (用于显示面包屑：Home > 2025 > 12)
-        fullPrefix: fullPrefix       // e.g. "uploads/2025/12/" (调试用)
+        fullPrefix: fullPrefix // e.g. "uploads/2025/12/" (调试用)
       }
     });
-
   } catch (error) {
     console.error('List Files Error:', error);
     res.status(500).json({ msg: 'Failed to fetch file list', error: error.message });
@@ -271,7 +270,7 @@ router.get('/r2/usage', async (req, res) => {
   try {
     let isTruncated = true;
     let continuationToken = undefined;
-    
+
     // 统计数据结构
     const stats = {
       total: { count: 0, size: 0, sizeFormatted: '' },
@@ -288,7 +287,7 @@ router.get('/r2/usage', async (req, res) => {
       });
 
       const response = await R2.send(command);
-      
+
       // 遍历当页文件
       (response.Contents || []).forEach(item => {
         const size = item.Size || 0;
@@ -328,12 +327,11 @@ router.get('/r2/usage', async (req, res) => {
       percentages: {
         images: ((stats.images.size / totalSize) * 100).toFixed(1),
         backups: ((stats.backups.size / totalSize) * 100).toFixed(1),
-        others: ((stats.others.size / totalSize) * 100).toFixed(1),
+        others: ((stats.others.size / totalSize) * 100).toFixed(1)
       }
     };
 
     res.json({ success: true, usage });
-
   } catch (error) {
     console.error('Usage Stats Error:', error);
     res.status(500).json({ message: 'Failed to calculate usage', error: error.message });
