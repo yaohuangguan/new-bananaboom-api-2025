@@ -2,13 +2,16 @@ import { Upload } from '@aws-sdk/lib-storage';
 import {
   S3Client,
   PutObjectCommand,
-  ListObjectsV2Command, // 🔥 新增
-  DeleteObjectCommand // 🔥 新增
+  ListObjectsV2Command,
+  DeleteObjectCommand
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
+// ---------------------------------------------------------
 // 1. 初始化 S3 客户端 (直连 Cloudflare R2)
-const R2 = new S3Client({
+// ---------------------------------------------------------
+// 🔥 导出 R2 实例，方便 backup-to-r2.js 等其他脚本复用
+export const R2 = new S3Client({
   region: 'auto',
   endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
   credentials: {
@@ -17,15 +20,26 @@ const R2 = new S3Client({
   }
 });
 
+// 🛠️ 内部辅助函数：安全拼接域名和文件路径
+const getPublicUrl = (key) => {
+  // 去掉环境变量末尾可能多余的斜杠
+  const domain = (process.env.R2_PUBLIC_DOMAIN || '').replace(/\/$/, '');
+  return `${domain}/${key}`;
+};
+
+// ---------------------------------------------------------
+// 2. 核心功能函数
+// ---------------------------------------------------------
+
 /**
  * 上传文件流到 Cloudflare R2
  * @param {Buffer} fileBuffer - 文件内存 Buffer
- * @param {String} fileName - 存储路径/文件名
+ * @param {String} fileName - 存储路径/文件名 (e.g. "uploads/2025/abc.png")
  * @param {String} mimeType - 文件类型
  */
 export const uploadToR2 = async (fileBuffer, fileName, mimeType) => {
   try {
-    // 使用流式上传，适合 Cloud Run 内存环境
+    // 使用流式上传 (lib-storage)，适合 Cloud Run 内存受限环境
     const upload = new Upload({
       client: R2,
       params: {
@@ -38,9 +52,7 @@ export const uploadToR2 = async (fileBuffer, fileName, mimeType) => {
 
     await upload.done();
 
-    // 拼接公开访问 URL
-    // 确保你在 Cloudflare R2 后台绑定了域名，或者开启了 R2.dev
-    return `${process.env.R2_PUBLIC_DOMAIN}/${fileName}`;
+    return getPublicUrl(fileName);
   } catch (error) {
     console.error('❌ R2 Upload Error:', error);
     throw new Error('Image upload failed');
@@ -48,7 +60,7 @@ export const uploadToR2 = async (fileBuffer, fileName, mimeType) => {
 };
 
 /**
- * 生成预签名上传 URL (用于大文件直传)
+ * 生成预签名上传 URL (用于大文件/视频 前端直传)
  * @param {String} fileName - 在 R2 中的存储路径
  * @param {String} mimeType - 文件类型
  * @returns {Promise<Object>} - { uploadUrl, publicUrl }
@@ -59,14 +71,12 @@ export const getR2PresignedUrl = async (fileName, mimeType) => {
       Bucket: process.env.R2_BUCKET_NAME,
       Key: fileName,
       ContentType: mimeType
-      // ACL: 'public-read' // R2 不支持 ACL，靠 Bucket 自身的公开设置
+      // R2 不支持 ACL，权限完全由 Bucket 设置决定
     });
 
-    // 生成一个有效期为 1 小时 (3600秒) 的临时上传链接
+    // 生成有效期为 1 小时 (3600秒) 的临时上传链接
     const uploadUrl = await getSignedUrl(R2, command, { expiresIn: 3600 });
-
-    // 生成最终的公开访问链接
-    const publicUrl = `${process.env.R2_PUBLIC_DOMAIN}/${fileName}`;
+    const publicUrl = getPublicUrl(fileName);
 
     return { uploadUrl, publicUrl };
   } catch (error) {
@@ -76,44 +86,63 @@ export const getR2PresignedUrl = async (fileName, mimeType) => {
 };
 
 /**
- * 获取 R2 文件列表 (经过清洗的标准数据)
+ * 获取 R2 文件列表 (支持文件夹模式)
+ * @param {String} prefix - 完整前缀 (e.g. "db-backups/2025-01-01/")
  * @param {String} cursor - 分页游标
  * @param {Number} limit - 数量
+ * @param {String} delimiter - 分隔符 (传 '/' 开启文件夹模式，不传则列出所有后代文件)
  */
-export const listR2Files = async (cursor, limit = 20) => {
+export const listR2Files = async (prefix = 'uploads/', cursor, limit = 50, delimiter = '/') => {
   try {
     const command = new ListObjectsV2Command({
       Bucket: process.env.R2_BUCKET_NAME,
+      Prefix: prefix,
       MaxKeys: limit,
       ContinuationToken: cursor,
-      Prefix: 'uploads/' // 建议只列出 uploads 目录
+      Delimiter: delimiter // 🔥 核心：告诉 R2 按斜杠分组
     });
 
     const data = await R2.send(command);
 
-    // 🔥 核心步骤：数据清洗 (Data Mapping)
-    // 把 S3 的原生字段映射成前端友好的字段
-    const files = (data.Contents || []).map(item => {
-      // 提取文件名 (去掉路径)
-      // 例如: uploads/2025/01/abc.jpg -> abc.jpg
-      const fileName = item.Key.split('/').pop();
-
+    // 1. 处理文件夹 (CommonPrefixes)
+    // R2 返回的 Prefix 是完整路径，例如 "db-backups/2025-12-25/"
+    // 我们需要解析出纯文件夹名给前端展示
+    const folders = (data.CommonPrefixes || []).map(item => {
+      // 技巧：移除末尾斜杠，然后取最后一个分段
+      // "db-backups/2025-12-25/" -> "2025-12-25"
+      const parts = item.Prefix.replace(/\/$/, '').split('/');
+      const folderName = parts[parts.length - 1];
+      
       return {
-        id: item.Key, // 唯一标识 (用于删除)
-        url: `${process.env.R2_PUBLIC_DOMAIN}/${item.Key}`, // 拼接完整链接
-        name: fileName, // 纯文件名 (前端展示用)
-        path: item.Key, // 完整路径
-        size: item.Size, // 大小 (字节)
-        type: getFileType(item.Key), // 简单的类型判断 (见下方辅助函数)
-        createdAt: item.LastModified // ISO 时间格式
+        name: folderName,     // 展示名称: "2025-12-25"
+        path: item.Prefix,    // 完整路径: "db-backups/2025-12-25/" (点击进入下一级用)
+        type: 'folder'
       };
     });
 
+    // 2. 处理文件 (Contents)
+    const files = (data.Contents || []).map(item => {
+      const fileName = item.Key.split('/').pop();
+      return {
+        id: item.Key,
+        url: getPublicUrl(item.Key),
+        name: fileName,
+        path: item.Key,
+        size: item.Size,
+        lastModified: item.LastModified,
+        type: 'file' // 或者调用你之前的 getFileType(item.Key)
+      };
+    });
+
+    // 过滤掉“当前文件夹本身”的占位符 (S3 有时会返回 key 等于 prefix 的 0 字节对象)
+    const validFiles = files.filter(f => f.path !== prefix);
+
     return {
-      items: files, // 改名叫 items，比 files 更通用
-      nextCursor: data.NextContinuationToken || null, // 游标
-      hasMore: !!data.IsTruncated, // 是否还有更多
-      totalCount: data.KeyCount // 本次返回的数量
+      folders: folders,      // 📁
+      files: validFiles,     // 📄
+      nextCursor: data.NextContinuationToken || null,
+      hasMore: !!data.IsTruncated,
+      totalCount: data.KeyCount
     };
   } catch (error) {
     console.error('❌ List R2 Files Error:', error);
@@ -121,19 +150,11 @@ export const listR2Files = async (cursor, limit = 20) => {
   }
 };
 
-// 辅助小函数：根据后缀名猜类型
-const getFileType = key => {
-  if (!key) return 'unknown';
-  if (key.match(/\.(jpg|jpeg|png|gif|webp|svg)$/i)) return 'image';
-  if (key.match(/\.(mp4|mov|webm|avi)$/i)) return 'video';
-  return 'file';
-};
-
 /**
  * 删除 R2 中的文件
  * @param {String} key - 文件路径 (例如 uploads/2025/01/abc.jpg)
  */
-export const deleteR2File = async key => {
+export const deleteR2File = async (key) => {
   try {
     const command = new DeleteObjectCommand({
       Bucket: process.env.R2_BUCKET_NAME,
@@ -146,4 +167,19 @@ export const deleteR2File = async key => {
     console.error('❌ Delete R2 File Error:', error);
     throw error;
   }
+};
+
+// ---------------------------------------------------------
+// 3. 辅助小工具
+// ---------------------------------------------------------
+
+// 根据后缀名猜类型 (前端 UI 图标展示用)
+const getFileType = (key) => {
+  if (!key) return 'unknown';
+  const lowerKey = key.toLowerCase();
+  
+  if (lowerKey.match(/\.(gzip|gz|zip|sql|bson)$/)) return 'archive'; // 📦 备份文件
+  if (lowerKey.match(/\.(jpg|jpeg|png|gif|webp|svg)$/)) return 'image';
+  if (lowerKey.match(/\.(mp4|mov|webm|avi)$/)) return 'video';
+  return 'file';
 };

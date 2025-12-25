@@ -1,6 +1,12 @@
 import { Router } from 'express';
 const router = Router();
 
+import { spawn } from 'child_process';
+import fs from 'fs';
+import path from 'path';
+import { glob } from 'glob'; // 需要安装: pnpm add glob
+import { uploadToR2 } from '../utils/r2.js';
+
 // ==========================================
 // 1. 引入所有数据模型 (已根据截图补充完整)
 // ==========================================
@@ -195,6 +201,111 @@ router.get('/', async (req, res) => {
   } catch (error) {
     console.error('Backup error:', error);
     res.status(500).json({ message: 'Server Error during backup', error: error.message });
+  }
+});
+
+// 辅助函数：递归删除文件夹 (用于清理临时文件)
+const deleteFolderRecursive = (directoryPath) => {
+  if (fs.existsSync(directoryPath)) {
+    fs.readdirSync(directoryPath).forEach((file, index) => {
+      const curPath = path.join(directoryPath, file);
+      if (fs.lstatSync(curPath).isDirectory()) {
+        deleteFolderRecursive(curPath);
+      } else {
+        fs.unlinkSync(curPath);
+      }
+    });
+    fs.rmdirSync(directoryPath);
+  }
+};
+
+// @route   POST /api/backup/database
+// @desc    全量备份，但以文件夹结构上传 R2，方便前端浏览
+router.post('/database', async (req, res) => {
+  const dateStr = new Date().toISOString().split('T')[0]; // 2025-12-25
+  const timestamp = Date.now();
+  // 临时目录 (在容器内部)
+  const tempDir = path.join('/tmp', `backup-${timestamp}`);
+  // R2 上的目标文件夹路径
+  const r2FolderPrefix = `db-backups/${dateStr}/${timestamp}`;
+
+  try {
+    console.log(`[Backup] 1. Starting mongodump to local temp dir: ${tempDir}`);
+
+    const MONGO_URI = process.env.MONGO_URI;
+
+    // 1. 执行 mongodump (不使用 --archive，直接输出到目录)
+    // --gzip 表示压缩单个 .bson 文件，而不是整个包，既省空间又能分文件看
+    const child = spawn('mongodump', [
+      `--uri=${MONGO_URI}`,
+      `--out=${tempDir}`,
+      '--gzip'
+    ]);
+
+    // 等待子进程结束
+    await new Promise((resolve, reject) => {
+      child.on('close', (code) => {
+        if (code === 0) resolve();
+        else reject(new Error(`mongodump process exited with code ${code}`));
+      });
+      child.on('error', (err) => reject(err));
+    });
+
+    console.log('[Backup] 2. Dump finished. Preparing to upload individual files...');
+
+    // 2. 查找所有生成的文件 (使用 glob 匹配所有子文件)
+    // 结构通常是: tempDir/dbName/collection.bson.gz
+    const files = await glob(`${tempDir}/**/*`, { nodir: true });
+
+    console.log(`[Backup] Found ${files.length} files to upload.`);
+
+    const uploadResults = [];
+
+    // 3. 遍历文件并逐个上传
+    for (const filePath of files) {
+      // 计算相对路径，例如: my-database/users.bson.gz
+      const relativePath = path.relative(tempDir, filePath);
+      // 拼接 R2 最终路径: db-backups/2025-12-25/170xxx/my-database/users.bson.gz
+      const r2Key = `${r2FolderPrefix}/${relativePath}`.replace(/\\/g, '/'); // 兼容 Windows 路径符
+
+      const fileBuffer = fs.readFileSync(filePath);
+      
+      // 调用你的工具函数上传
+      // 根据后缀判断类型，bson.gz 也是二进制流
+      const mimeType = filePath.endsWith('.json') ? 'application/json' : 'application/gzip';
+      
+      const publicUrl = await uploadToR2(fileBuffer, r2Key, mimeType);
+      
+      uploadResults.push({
+        file: relativePath,
+        url: publicUrl,
+        size: fileBuffer.length
+      });
+      
+      console.log(`   -> Uploaded: ${relativePath}`);
+    }
+
+    // 4. 清理临时文件 (非常重要，防止 Docker 空间爆炸)
+    deleteFolderRecursive(tempDir);
+    console.log('[Backup] 4. Temp files cleaned up.');
+
+    // 5. 返回结果
+    res.json({
+      success: true,
+      message: `Backup success! Uploaded ${files.length} files.`,
+      folder: r2FolderPrefix, // 前端可以用这个前缀去查询列表
+      files: uploadResults
+    });
+
+  } catch (error) {
+    console.error('[Backup] Error:', error);
+    // 即使出错也要尝试清理
+    if (fs.existsSync(tempDir)) deleteFolderRecursive(tempDir);
+    
+    res.status(500).json({ 
+      message: 'Server Error during structured backup', 
+      error: error.message 
+    });
   }
 });
 
