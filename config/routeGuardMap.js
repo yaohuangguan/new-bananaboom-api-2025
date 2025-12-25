@@ -61,10 +61,11 @@ const ROUTE_MAP = [
   { path: '/api/comments', method: 'ALL', permission: K.BLOG_INTERACT },
 
   // ============================================================
-  // Level 6: Cloudinary 图片服务
+  // Level 6: 图片服务
   // ============================================================
   { path: '/api/cloudinary/usage', method: 'GET', permission: K.SUPER_ADMIN },
-  { path: '/api/cloudinary', method: 'ALL', permission: K.BLOG_INTERACT },
+  { path: '/api/cloudinary', method: 'ALL', permission: K.IMAGE_RESOURCES_USE },
+  { path: '/api/upload', method: 'ALL', permission: K.IMAGE_RESOURCES_USE },
 
   // ============================================================
   // Level 7: 复杂用户管理 (正则优先级最高)

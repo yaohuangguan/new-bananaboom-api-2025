@@ -49,6 +49,7 @@ import schedulerRoutes from './routes/scheduler.js';
 import cloudinaryRoutes from './routes/cloudinary.js';
 import externalRoutes from './routes/external.js';
 import aiRoutes from './routes/ai.js';
+import uploadRoutes from './routes/upload.js';
 
 // ==========================================
 // 🚀 初始化 App & Server
@@ -149,11 +150,12 @@ app.use('/api/chat', chatRoutes);
 
 // --- 工具与系统类 ---
 app.use('/api/backup', backupRoutes);
-app.use('/api/audit', auditRoutes); // ✅ 之前是 .default.default，现在不需要了
+app.use('/api/audit', auditRoutes);
 app.use('/api/cron', schedulerRoutes);
 app.use('/api/cloudinary', cloudinaryRoutes);
 app.use('/api/external', externalRoutes);
-app.use('/api/ai', aiRoutes); // ✅ 之前是 .default.default，现在不需要了
+app.use('/api/ai', aiRoutes);
+app.use('/api/upload', uploadRoutes);
 
 // ==========================================
 // 🏁 启动服务器
