@@ -45,8 +45,6 @@ router.use((req, res, next) => {
 
 /**
  * 获取点赞数辅助函数
- * @param {Object} req - Express Request
- * @param {Object} res - Express Response
  */
 const getLikes = async (req, res) => {
   try {
@@ -54,7 +52,6 @@ const getLikes = async (req, res) => {
     res.json(like);
   } catch (error) {
     console.error('Get Likes Error:', error);
-    // 保持原有逻辑，出错时不中断响应
   }
 };
 
@@ -67,21 +64,14 @@ const formatPostData = (body) => {
 
   // 1. 标签处理：字符串转数组 & 去空
   if (tags && typeof tags === 'string') {
-    tags = tags
-      .trim()
-      .split(' ')
-      .filter((t) => t);
+    tags = tags.trim().split(' ').filter((t) => t);
   }
 
-  // 2. 返回清洗后的数据
   return { name, info, author, content, isPrivate, tags, url, button };
 };
 
 /**
  * 获取文章列表核心逻辑 (支持分页、搜索、标签、私有过滤)
- * @param {Object} req - Express Request
- * @param {Object} res - Express Response
- * @param {Boolean} isPrivate - 是否查询私有文章
  */
 const getPost = async (req, res, isPrivate) => {
   try {
@@ -93,10 +83,9 @@ const getPost = async (req, res, isPrivate) => {
     // 2. 构建查询条件
     const query = { isPrivate };
 
-    // 搜索逻辑 (匹配 标题 OR 内容)
+    // 搜索逻辑
     if (req.query.q) {
       const keyword = req.query.q;
-      // 使用正则进行模糊匹配
       query.$or = [
         { name: { $regex: keyword, $options: 'i' } }, 
         { content: { $regex: keyword, $options: 'i' } }
@@ -111,11 +100,10 @@ const getPost = async (req, res, isPrivate) => {
     // 3. 并行查询 (数据 + 总数)
     const [posts, total] = await Promise.all([
       Post.find(query)
-        // 🔥 优化：明确按创建时间倒序排列 (最新的在前)
-        .sort({ createdDate: -1 }) 
+        // 🔥 修改：按 createdAt 倒序 (使用新字段名)
+        .sort({ createdAt: -1 }) 
         .skip(skip)
         .limit(limit)
-        // 🔥 安全策略：返回 User 信息，但强制排除密码字段
         .populate('user', '-password'),
 
       Post.countDocuments(query)
@@ -143,45 +131,34 @@ const getPost = async (req, res, isPrivate) => {
 
 /**
  * @route   GET /api/posts
- * @desc    获取公开文章列表 (支持分页/搜索)
- * @access  Public
+ * @desc    获取公开文章列表
  */
 router.get('/', async (req, res) => await getPost(req, res, false));
 
 /**
  * @route   GET /api/posts/private/posts
- * @desc    获取私有文章列表 (仅管理员)
- * @access  Private (Auth + CheckPrivate)
- * ⚠️ 注意：此路由必须定义在 GET /:id 之前，防止被 ID 参数拦截
+ * @desc    获取私有文章列表
  */
 router.get('/private/posts', async (req, res) => await getPost(req, res, true));
 
 /**
  * @route   GET /api/posts/likes/:id
  * @desc    获取某篇文章的点赞数
- * @access  Public
  */
 router.get('/likes/:id', async (req, res) => await getLikes(req, res));
 
 /**
  * @route   GET /api/posts/:id
  * @desc    获取单篇文章详情
- * @access  Public
  */
 router.get('/:id', async (req, res) => {
   try {
-    // 🔥 核心修复：使用 findById 代替 find
-    // find 返回的是数组 [{...}]，findById 返回的是对象 {...}
-    // 这是详情页接口的标准写法
     const post = await Post.findById(req.params.id).populate('user', '-password');
-
     if (!post) {
       return res.status(404).json({ message: 'Post not found' });
     }
-
     res.json(post);
   } catch (error) {
-    // 处理 ID 格式错误的情况
     if (error.kind === 'ObjectId') {
       return res.status(404).json({ message: 'Post not found' });
     }
@@ -197,7 +174,6 @@ router.get('/:id', async (req, res) => {
 /**
  * @route   POST /api/posts
  * @desc    发布新文章
- * @access  Private
  */
 router.post('/', async (req, res) => {
   try {
@@ -207,12 +183,12 @@ router.post('/', async (req, res) => {
       ...postData,
       likes: 0,
       user: req.user.id
-      // createdDate 和 updatedDate 由 Schema 的 default: Date.now 自动处理
+      // 🔥 移除：createdDate/updatedDate 赋值
+      // Mongoose timestamps: true 会自动在 .save() 时生成 createdAt 和 updatedAt
     });
 
     await newPost.save();
 
-    // 审计日志
     logOperation({
       operatorId: req.user.id,
       action: 'CREATE_POST',
@@ -234,16 +210,14 @@ router.post('/', async (req, res) => {
 /**
  * @route   PUT /api/posts/:id
  * @desc    更新文章
- * @access  Private
  */
 router.put('/:id', async (req, res) => {
   try {
     const updateData = formatPostData(req.body);
 
-    // ✅ 更新操作：显式刷新 updatedDate 为当前时间
-    updateData.updatedDate = new Date();
+    // 🔥 移除：手动更新 updatedDate
+    // findByIdAndUpdate + timestamps: true 会自动更新 updatedAt 字段
 
-    // 执行更新
     const updatedPost = await Post.findByIdAndUpdate(
       req.params.id,
       { $set: updateData },
@@ -254,7 +228,6 @@ router.put('/:id', async (req, res) => {
       return res.status(404).json({ msg: '文章不存在' });
     }
 
-    // 审计日志
     logOperation({
       operatorId: req.user.id,
       action: 'UPDATE_POST',
@@ -278,8 +251,7 @@ router.put('/:id', async (req, res) => {
 
 /**
  * @route   DELETE /api/posts/:id
- * @desc    删除文章 (需要 SecretKey 校验私有文章)
- * @access  Private (Auth + CheckPrivate)
+ * @desc    删除文章
  */
 router.delete('/:id', async (req, res) => {
   const { secretKey } = req.body;
@@ -289,17 +261,12 @@ router.delete('/:id', async (req, res) => {
     const post = await Post.findById(req.params.id);
     if (!post) return res.status(404).json({ message: 'Post not found' });
 
-    // 私有文章删除时的双重保险
-    const wasPrivate = post.isPrivate;
-    if (wasPrivate) {
-      if (secretKey !== ADMIN_SECRET) {
-        return res.status(403).json({ message: '暗号错误！删除私有日志需要超级权限。' });
-      }
+    if (post.isPrivate && secretKey !== ADMIN_SECRET) {
+      return res.status(403).json({ message: '暗号错误！删除私有日志需要超级权限。' });
     }
 
     await Post.findByIdAndDelete(req.params.id);
 
-    // 🔥 审计日志
     logOperation({
       operatorId: req.user.id,
       action: 'DELETE_POST',
@@ -308,8 +275,7 @@ router.delete('/:id', async (req, res) => {
       io: req.app.get('socketio')
     });
 
-    // 删除后返回列表 (如果删的是私有，返回私有列表；否则返回公开列表)
-    await getPost(req, res, wasPrivate);
+    await getPost(req, res, post.isPrivate);
   } catch (error) {
     console.error('Delete Post Error:', error);
     res.status(500).send('Server Error');
@@ -323,12 +289,11 @@ router.delete('/:id', async (req, res) => {
 /**
  * @route   POST /api/posts/likes/:id/add
  * @desc    点赞 (+1)
- * @access  Public
- * @middleware likeLimiter - 包含限流保护
  */
 router.post('/likes/:id/add', likeLimiter, async (req, res) => {
   try {
-    // 🔥 timestamps: false 确保点赞不会更新 updatedDate
+    // 🔥 timestamps: false 确保点赞不会更新 updatedAt
+    // 这是你最关心的功能：点赞不应该让文章“顶”到最前面
     await Post.updateOne(
       { _id: req.params.id }, 
       { $inc: { likes: 1 } },
@@ -337,23 +302,19 @@ router.post('/likes/:id/add', likeLimiter, async (req, res) => {
     await getLikes(req, res);
   } catch (error) {
     console.error('Add Like Error:', error);
-    // 错误不阻断前端交互
   }
 });
 
 /**
  * @route   POST /api/posts/likes/:id/remove
  * @desc    取消点赞 (-1)
- * @access  Public
- * @middleware likeLimiter - 包含限流保护
  */
 router.post('/likes/:id/remove', likeLimiter, async (req, res) => {
   try {
-    // 只有当 likes > 0 时才减 1，且不更新文章修改时间
     await Post.updateOne(
       { _id: req.params.id, likes: { $gt: 0 } },
       { $inc: { likes: -1 } },
-      { timestamps: false } // 🔥 关键修复
+      { timestamps: false }
     );
     await getLikes(req, res);
   } catch (error) {
