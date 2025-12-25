@@ -13,19 +13,112 @@ const ai = new GoogleGenAI({
 
 // 生产级配置常量
 const CONFIG = {
-  // 首选模型 (Gemini 3 Flash Preview, 适合快速响应)
+  // 首选模型
   PRIMARY_MODEL: 'gemini-3-flash-preview',
-  // 备胎模型 (Gemini 2.0 Flash Exp, 稳定性高)
+  // 备胎模型
   FALLBACK_MODEL: 'gemini-2.0-flash-exp',
   // 最大重试次数
   MAX_RETRIES: 2,
   // 超时时间 (毫秒)
-  TIMEOUT_MS: 30000 // 稍微调大一点，Agent 执行可能较慢
+  TIMEOUT_MS: 30000 
+};
+
+// ==========================================
+// 核心修复区域：图片预处理逻辑
+// ==========================================
+
+// 辅助函数：简单的后缀名判断 MimeType (修复 fix)
+const getMimeType = (urlOrBase64) => {
+  if (!urlOrBase64) return 'image/jpeg';
+  if (urlOrBase64.startsWith('http')) {
+      const lower = urlOrBase64.toLowerCase();
+      if (lower.endsWith('.png')) return 'image/png';
+      if (lower.endsWith('.webp')) return 'image/webp';
+      if (lower.endsWith('.gif')) return 'image/gif';
+  }
+  return 'image/jpeg';
+};
+
+// 辅助函数：将 URL 图片转换为 Base64
+const fetchImageAsBase64 = async (url) => {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`Failed to fetch image: ${response.statusText}`);
+    
+    const arrayBuffer = await response.arrayBuffer();
+    return Buffer.from(arrayBuffer).toString('base64');
+  } catch (error) {
+    console.error('Image conversion error:', error);
+    return null; 
+  }
 };
 
 /**
- * 辅助函数：清洗 AI 返回的 JSON 字符串
+ * 🔥 核心修复函数：递归清洗内容，兼容 URL 和 Base64
  */
+const prepareContentForGemini = async (contents) => {
+  if (!contents) return [];
+  if (typeof contents === 'string') return contents;
+  
+  const isArray = Array.isArray(contents);
+  const items = isArray ? contents : [contents];
+
+  const processedItems = await Promise.all(items.map(async (item) => {
+    // 处理 { role, parts } 结构
+    if (item.parts && Array.isArray(item.parts)) {
+      const newParts = await Promise.all(item.parts.map(async (part) => {
+        
+        // case 1: 这是一个 URL -> 下载转码
+        if (part.image && part.image.startsWith('http')) {
+          const base64 = await fetchImageAsBase64(part.image);
+          if (base64) {
+            return {
+              inline_data: {
+                mime_type: getMimeType(part.image),
+                data: base64
+              }
+            };
+          }
+          return { text: '[图片下载失败]' };
+        }
+
+        // case 2: 这是一个 Base64 -> 直接使用
+        if (part.image && !part.image.startsWith('http')) {
+             return {
+              inline_data: {
+                mime_type: 'image/jpeg',
+                data: part.image 
+              }
+            };
+        }
+
+        // case 3: 已经是 inline_data 但里面混了 URL -> 修复
+        if (part.inline_data && part.inline_data.data && part.inline_data.data.startsWith('http')) {
+            const base64 = await fetchImageAsBase64(part.inline_data.data);
+            if (base64) {
+                return {
+                    inline_data: {
+                        mime_type: getMimeType(part.inline_data.data),
+                        data: base64
+                    }
+                };
+            }
+        }
+
+        return part;
+      }));
+      return { ...item, parts: newParts };
+    }
+    return item;
+  }));
+
+  return isArray ? processedItems : processedItems[0];
+};
+
+// ==========================================
+// 通用辅助函数
+// ==========================================
+
 function cleanJSONString(text) {
   if (!text) return '{}';
   let clean = text.replace(/```json|```/g, '').trim();
@@ -37,31 +130,33 @@ function cleanJSONString(text) {
   return clean;
 }
 
-/**
- * 辅助函数：带超时的 Promise 包装器
- */
 function withTimeout(promise, ms) {
   return Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), ms))]);
 }
 
+// ==========================================
+// 导出接口
+// ==========================================
+
 /**
  * 核心生成函数 (支持重试、降级、清洗)
- * 使用 ai.models.generateContent
  */
 async function generateJSON(prompt, modelName = CONFIG.PRIMARY_MODEL) {
   let currentModel = modelName;
   let attempts = 0;
+
+  // 🔥 修复：预处理 prompt
+  const processedPrompt = await prepareContentForGemini(prompt);
 
   while (attempts <= CONFIG.MAX_RETRIES) {
     attempts++;
     console.log(`🤖 [AI JSON] 请求模型: ${currentModel} (尝试 ${attempts}/${CONFIG.MAX_RETRIES + 1})`);
 
     try {
-      // 1. 发起请求 (带超时控制)
       const response = await withTimeout(
         ai.models.generateContent({
           model: currentModel,
-          contents: prompt,
+          contents: processedPrompt, // 使用处理后的内容
           config: {
             responseMimeType: 'application/json'
           }
@@ -69,17 +164,12 @@ async function generateJSON(prompt, modelName = CONFIG.PRIMARY_MODEL) {
         CONFIG.TIMEOUT_MS
       );
 
-      // 2. 获取并清洗文本
-      // 新版 SDK 中 response.text 是一个 getter，直接访问即可
       const rawText = response.text || JSON.stringify(response);
       const cleanedText = cleanJSONString(rawText);
-
-      // 3. 解析并返回
       return JSON.parse(cleanedText);
     } catch (err) {
       console.error(`⚠️ [AI Error] 模型 ${currentModel} 报错:`, err.message);
 
-      // 🛑 致命错误处理
       if (err.message.includes('404') || err.message.includes('not found') || err.message.includes('400')) {
         if (currentModel !== CONFIG.FALLBACK_MODEL) {
           console.warn(`🔄 [AI Fallback] 切换备用模型: ${CONFIG.FALLBACK_MODEL}`);
@@ -87,11 +177,11 @@ async function generateJSON(prompt, modelName = CONFIG.PRIMARY_MODEL) {
           attempts = 0;
           continue;
         } else {
-          throw new Error('所有模型均不可用，请检查 API Key 或网络');
+          // 400 错误通常是图片格式问题
+          throw new Error(`AI 请求失败 (400/404). 请检查图片格式. ${err.message}`);
         }
       }
 
-      // 🛑 临时错误重试
       const isRetryable = err.message.includes('429') || err.message.includes('503') || err.message === 'TIMEOUT';
       if (isRetryable && attempts <= CONFIG.MAX_RETRIES) {
         const delay = attempts * 1000;
@@ -111,25 +201,16 @@ async function generateJSON(prompt, modelName = CONFIG.PRIMARY_MODEL) {
 
 /**
  * 🌊 基础流式生成 (无 Agent)
- * 使用 ai.models.generateContentStream
  */
 async function generateStream(promptInput) {
   const currentModel = CONFIG.PRIMARY_MODEL;
 
-  // 格式化输入
-  const formattedContents =
-    typeof promptInput === 'string'
-      ? [
-          {
-            role: 'user',
-            parts: [
-              {
-                text: promptInput
-              }
-            ]
-          }
-        ]
+  // 🔥 修复：预处理输入
+  let formattedContents = typeof promptInput === 'string'
+      ? [{ role: 'user', parts: [{ text: promptInput }] }]
       : promptInput;
+      
+  formattedContents = await prepareContentForGemini(formattedContents);
 
   try {
     console.log(`🌊 [AI Stream] Attempting model: ${currentModel}`);
@@ -137,10 +218,8 @@ async function generateStream(promptInput) {
     const responseStream = await ai.models.generateContentStream({
       model: currentModel,
       contents: formattedContents
-      // config: { maxOutputTokens: 8192 } // 可选
     });
 
-    // 直接返回 stream 对象 (AsyncIterable)
     return responseStream;
   } catch (err) {
     console.error(`⚠️ [AI Stream Error] ${currentModel} failed:`, err.message);
@@ -163,10 +242,15 @@ async function generateStream(promptInput) {
 
 /**
  * 🧠 Agent 流式生成器 (对外暴露)
- * 包含了自动降级逻辑
  */
 async function* createAgentStream(params) {
   const currentModel = CONFIG.PRIMARY_MODEL;
+
+  // 🔥 修复：预处理 history 和 prompt 中的图片
+  if (params.history && params.history.length > 0) {
+    params.history = await prepareContentForGemini(params.history);
+  }
+  params.prompt = await prepareContentForGemini(params.prompt);
 
   try {
     console.log(`🌊 [Agent Stream] Attempting with ${currentModel}...`);
@@ -192,19 +276,15 @@ async function* createAgentStream(params) {
  * 🕵️ 内部核心逻辑：Agent 循环
  */
 async function* _runAgentLoop(modelName, { systemInstruction, history, prompt, toolsSchema, functionsMap }) {
-  // 🔥🔥🔥 核心修复：智能处理 tools 格式 (防止双重包装) 🔥🔥🔥
   let finalTools = undefined;
 
   if (toolsSchema) {
-    // 检查 1: 是否已经是标准的 [{ functionDeclarations: [...] }] 格式
     const isAlreadyWrapped =
       Array.isArray(toolsSchema) && toolsSchema.length > 0 && toolsSchema[0].functionDeclarations;
 
     if (isAlreadyWrapped) {
-      // 如果调用方已经包装好了，直接用
       finalTools = toolsSchema;
     } else if (Array.isArray(toolsSchema)) {
-      // 如果只是纯函数定义的数组，我们帮它包装
       finalTools = [
         {
           functionDeclarations: toolsSchema
@@ -213,18 +293,16 @@ async function* _runAgentLoop(modelName, { systemInstruction, history, prompt, t
     }
   }
 
-  // 1. 创建 Chat 会话
   const chat = ai.chats.create({
     model: modelName,
     history: history || [],
     config: {
       systemInstruction: systemInstruction,
-      tools: finalTools, // ✅ 使用处理过的 tools
+      tools: finalTools,
       maxOutputTokens: 8192
     }
   });
 
-  // 2. 发送用户 Prompt
   const resultStream = await chat.sendMessageStream({
     message: prompt
   });
@@ -232,11 +310,7 @@ async function* _runAgentLoop(modelName, { systemInstruction, history, prompt, t
   let functionCallFound = false;
   const functionCallsToExecute = [];
 
-  // =================================================
-  // 第一阶段：监听 AI 的初步反应
-  // =================================================
   for await (const chunk of resultStream) {
-    // A. 检查函数调用
     const calls = chunk.functionCalls;
 
     if (calls && calls.length > 0) {
@@ -245,20 +319,15 @@ async function* _runAgentLoop(modelName, { systemInstruction, history, prompt, t
       continue;
     }
 
-    // B. 普通文本
     if (!functionCallFound) {
       const text = chunk.text;
       if (text) yield text;
     }
   }
 
-  // =================================================
-  // 第二阶段：执行工具并获取最终回复 (Agent 核心)
-  // =================================================
   if (functionCallFound && functionCallsToExecute.length > 0) {
     const functionResponsesParts = [];
 
-    // 1. 执行所有被请求的函数
     for (const call of functionCallsToExecute) {
       const funcName = call.name;
       const args = call.args;
@@ -291,14 +360,12 @@ async function* _runAgentLoop(modelName, { systemInstruction, history, prompt, t
       });
     }
 
-    // 2. 将执行结果发回给 AI
     console.log(`📤 [Agent Output] Sending ${functionResponsesParts.length} tool results back...`);
 
     const result2 = await chat.sendMessageStream({
       message: functionResponsesParts
     });
 
-    // 3. 将 AI 读完执行结果后的最终回复，推给前端
     for await (const chunk2 of result2) {
       const text2 = chunk2.text;
       if (text2) yield text2;
@@ -308,7 +375,6 @@ async function* _runAgentLoop(modelName, { systemInstruction, history, prompt, t
 
 /**
  * ⚡️ 专门用于生成简短标题的工具函数
- * 使用最便宜的 Flash 模型
  */
 async function generateTitle(historyText) {
   try {
@@ -321,14 +387,12 @@ async function generateTitle(historyText) {
     `;
 
     const result = await ai.models.generateContent(prompt);
-    const rawText = result.text || JSON.stringify(result);
-    const cleanedText = cleanJSONString(rawText);
 
-    // 3. 解析并返回
-    return JSON.parse(cleanedText);
+    // 修复：直接返回文本，因为 prompt 要求只返回文字，JSON.parse 容易报错
+    return result.text ? result.text.trim() : '新对话';
   } catch (e) {
     console.error('标题生成失败:', e);
-    return null;
+    return '新对话';
   }
 }
 

@@ -94,32 +94,64 @@ router.post('/', upload.array('files', 10), async (req, res) => {
 
 /**
  * @route   POST /api/upload/presign
- * @desc    获取大文件(视频)上传签名 URL
- * @note    视频不走服务器流量，直接从浏览器传到 R2
+ * @desc    获取通用上传签名 (支持自定义文件夹、任意文件类型、原名/UUID切换)
  */
 router.post('/presign', async (req, res) => {
   try {
-    const { fileName, fileType } = req.body;
+    // folder: 前端传来的目标路径，例如 "2025/photography/" 或 "project-A/"
+    // useOriginalName: Boolean, true=保留原名, false=使用随机UUID
+    const { fileName, fileType, folder, useOriginalName } = req.body;
 
+    // 1. 基础校验
     if (!fileName || !fileType) {
       return res.status(400).json({ msg: 'Missing fileName or fileType' });
     }
 
-    // 规范视频存储路径
-    const date = new Date();
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const ext = path.extname(fileName);
-    const storageKey = `uploads/videos/${year}/${month}/${uuidv4()}${ext}`;
+    // 2. 处理文件夹路径 (标准化)
+    let targetFolder = folder || ''; // 默认为空，即根目录
+    
+    // 如果有文件夹，进行清洗
+    if (targetFolder) {
+      // 替换掉潜在的非法字符 (可选，防止 ../ 路径穿越虽在 S3 只是字符串，但为了规范)
+      // targetFolder = targetFolder.replace(/\.\./g, '');
+      
+      // 去掉开头的 / (S3/R2 的 Key 不建议以 / 开头)
+      if (targetFolder.startsWith('/')) targetFolder = targetFolder.substring(1);
+      
+      // 确保结尾有 / (只要不是空字符串)
+      if (targetFolder.length > 0 && !targetFolder.endsWith('/')) {
+        targetFolder = targetFolder + '/';
+      }
+    }
 
-    const { uploadUrl, publicUrl } = await getR2PresignedUrl(storageKey, fileType);
+    // 3. 决定最终文件名 (Key)
+    let finalKey;
+    
+    if (useOriginalName) {
+      // 🅰️ 网盘/文件管理模式：完全信任前端传来的文件名
+      // 结果: "my-folder/report.pdf"
+      finalKey = `${targetFolder}${fileName}`;
+    } else {
+      // 🅱️ 图床/头像模式：防止重名覆盖，使用 UUID
+      // 结果: "my-folder/550e8400-e29b-....png"
+      const ext = path.extname(fileName);
+      // 如果没有后缀名，强行加一个 (视业务需求而定)
+      finalKey = `${targetFolder}${uuidv4()}${ext || ''}`;
+    }
 
+    // 4. 获取 R2 签名
+    // 调用 utils/r2.js 中的 helper
+    const url = await getR2PresignedUrl(finalKey, fileType);
+
+    // 5. 返回结果
     res.json({
       success: true,
-      uploadUrl,
-      publicUrl,
-      storageKey
+      uploadUrl: url, // 前端 PUT 请求地址
+      publicUrl: `${process.env.R2_PUBLIC_DOMAIN}/${finalKey}`, // 最终访问地址
+      key: finalKey,  // 存储 Key (建议前端存库)
+      folder: targetFolder // 返回实际使用的文件夹路径供前端确认
     });
+
   } catch (error) {
     console.error('Presign Error:', error);
     res.status(500).json({ msg: 'Failed to generate upload signature' });
