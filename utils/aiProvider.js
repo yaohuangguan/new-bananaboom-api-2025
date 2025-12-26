@@ -6,105 +6,115 @@ if (!process.env.GEMINI_API_KEY) {
   throw new Error('❌ [Fatal] 缺少环境变量 GEMINI_API_KEY');
 }
 
-// 初始化客户端
 const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY
 });
 
-// 生产级配置常量
+// 生产级配置
 const CONFIG = {
-  // 首选模型
   PRIMARY_MODEL: 'gemini-3-flash-preview',
-  // 备胎模型
   FALLBACK_MODEL: 'gemini-2.0-flash-exp',
-  // 最大重试次数
-  MAX_RETRIES: 2,
-  // 超时时间 (毫秒)
-  TIMEOUT_MS: 30000 
+  MAX_RETRIES: 1,
+  TIMEOUT_MS: 120000 // 2分钟超时
 };
 
 // ==========================================
-// 核心修复区域：图片预处理逻辑
-// ==========================================
-
-// 辅助函数：简单的后缀名判断 MimeType (修复 fix)
-const getMimeType = (urlOrBase64) => {
-  if (!urlOrBase64) return 'image/jpeg';
-  if (urlOrBase64.startsWith('http')) {
-      const lower = urlOrBase64.toLowerCase();
-      if (lower.endsWith('.png')) return 'image/png';
-      if (lower.endsWith('.webp')) return 'image/webp';
-      if (lower.endsWith('.gif')) return 'image/gif';
-  }
-  return 'image/jpeg';
-};
-
-// ==========================================
-// 核心修复：简单的下载转码函数
+// 1. 图片下载器
 // ==========================================
 const fetchImageAsBase64 = async (url) => {
   try {
-    // console.log(`⬇️ 下载图片转换: ${url}`);
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`下载失败 ${res.status}`);
-    const buf = await res.arrayBuffer();
-    return Buffer.from(buf).toString('base64');
-  } catch (e) {
-    console.error(`❌ 图片转码失败: ${url}`, e.message);
-    return null; // 失败返回 null
+    // 再次暴力去空
+    const cleanUrl = url.trim().replace(/[\r\n]/g, '');
+    
+    // 设置 25秒 下载超时
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 25000);
+
+    // fetch 会自动走 server.js 里配置的全局代理
+    const response = await fetch(cleanUrl, {
+        headers: { 
+            // 伪装成浏览器
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' 
+        },
+        signal: controller.signal
+    });
+    
+    clearTimeout(timeoutId);
+    
+    if (!response.ok) throw new Error(`Status ${response.status}`);
+    const arrayBuffer = await response.arrayBuffer();
+    return Buffer.from(arrayBuffer).toString('base64');
+  } catch (error) {
+    console.error(`❌ [Download Fail] ${url.substring(0, 30)}... : ${error.message}`);
+    return null; 
   }
 };
 
 // ==========================================
-// 核心修复：暴力清洗数据 (History & Prompt)
+// 2. 数据清洗 (长度启发式绝杀版)
 // ==========================================
 const prepareContentForGemini = async (contents) => {
   if (!contents) return [];
-  // 统一转成数组处理
   const items = Array.isArray(contents) ? contents : [contents];
 
-  // 深度遍历每一条消息
-  const processed = await Promise.all(items.map(async (msg) => {
-    // 如果没有 parts，直接返回
-    if (!msg.parts) return msg;
+  const processed = await Promise.all(items.map(async (msg, msgIdx) => {
+    if (!msg.parts || !Array.isArray(msg.parts)) return msg;
 
-    const newParts = await Promise.all(msg.parts.map(async (part) => {
+    const newParts = await Promise.all(msg.parts.map(async (part, partIdx) => {
       let targetUrl = null;
       let mimeType = 'image/jpeg';
+      let rawData = null;
 
-      // 🛑 场景 1: 你的历史记录里可能直接存了 { inline_data: { data: 'https://...' } }
-      // 这就是导致你报错的罪魁祸首！
-      if (part.inline_data && part.inline_data.data && part.inline_data.data.startsWith('http')) {
-        targetUrl = part.inline_data.data;
-        // 简单猜一下类型
-        if (targetUrl.endsWith('.png')) mimeType = 'image/png';
-        if (targetUrl.endsWith('.webp')) mimeType = 'image/webp';
-      }
-      
-      // 🛑 场景 2: 前端传来的 { image: 'https://...' } 自定义字段
-      else if (part.image && part.image.startsWith('http')) {
-        targetUrl = part.image;
-        if (targetUrl.endsWith('.png')) mimeType = 'image/png';
-        if (targetUrl.endsWith('.webp')) mimeType = 'image/webp';
+      // 提取原始数据
+      if (part.inline_data && typeof part.inline_data.data === 'string') {
+        rawData = part.inline_data.data;
+      } else if (typeof part.image === 'string') {
+        rawData = part.image;
       }
 
-      // ✅ 如果发现是 URL，立即下载转 Base64
+      // 🕵️‍♀️ 【核心逻辑修改】
+      // 不再迷信正则，而是使用“长度+特征”判断
+      // 如果数据存在，且长度小于 2048 (Base64图片通常极大)，且包含 "http"
+      // 那么它 1000% 是个 URL，不是 Base64
+      if (rawData && rawData.length < 5000 && rawData.includes('http')) {
+        targetUrl = rawData.trim();
+        console.log(`🧹 [Cleaner] 捕获 URL (Msg:${msgIdx} Part:${partIdx}): ${targetUrl.substring(0, 40)}...`);
+      }
+
+      // 🛠️ 执行下载与替换
       if (targetUrl) {
+        // 简单猜类型
+        const lower = targetUrl.toLowerCase();
+        if (lower.endsWith('.png')) mimeType = 'image/png';
+        if (lower.endsWith('.webp')) mimeType = 'image/webp';
+        if (lower.endsWith('.gif')) mimeType = 'image/gif';
+
         const base64 = await fetchImageAsBase64(targetUrl);
+        
         if (base64) {
+          // ✅ 成功转为 Base64
           return {
-            inline_data: {
-              mime_type: mimeType,
-              data: base64 // 必须是长字符串，不能是 URL
-            }
+            inline_data: { mime_type: mimeType, data: base64 }
           };
         } else {
-          // 下载失败，替换为文本，防止 API 崩溃
-          return { text: '[图片无法加载]' };
+          // 🛑 下载失败：强制替换为文本
+          console.warn(`⚠️ [Cleaner] 图片下载失败，已替换为文本占位符，防止 400 崩溃。`);
+          return { text: `[图片无法加载: ${targetUrl.substring(0, 20)}...]` };
         }
       }
 
-      // 如果本来就是 Base64 或者纯文本，原样返回
+      // 🛡️ 【最后一道保险】
+      // 如果上面的逻辑跑完，inline_data.data 依然是个短字符串且含 http，说明它是漏网之鱼
+      // 我们直接销毁这个 part，绝不让它发给 Google
+      if (part.inline_data?.data && 
+          part.inline_data.data.length < 5000 && 
+          part.inline_data.data.includes('http')) {
+          
+          console.error(`🛑 [Fatal] 拦截到顽固 URL，强制销毁！`);
+          return { text: '[无效图片数据]' };
+      }
+
+      // 原样返回 (纯文本或正常的长 Base64)
       return part;
     }));
 
@@ -115,9 +125,8 @@ const prepareContentForGemini = async (contents) => {
 };
 
 // ==========================================
-// 通用辅助函数
+// 3. 辅助工具
 // ==========================================
-
 function cleanJSONString(text) {
   if (!text) return '{}';
   let clean = text.replace(/```json|```/g, '').trim();
@@ -134,135 +143,87 @@ function withTimeout(promise, ms) {
 }
 
 // ==========================================
-// 导出接口
+// 4. 导出接口
 // ==========================================
 
-/**
- * 核心生成函数 (支持重试、降级、清洗)
- */
 async function generateJSON(prompt, modelName = CONFIG.PRIMARY_MODEL) {
   let currentModel = modelName;
   let attempts = 0;
-
-  // 🔥 修复：预处理 prompt
   const processedPrompt = await prepareContentForGemini(prompt);
 
   while (attempts <= CONFIG.MAX_RETRIES) {
     attempts++;
-    console.log(`🤖 [AI JSON] 请求模型: ${currentModel} (尝试 ${attempts}/${CONFIG.MAX_RETRIES + 1})`);
+    console.log(`🤖 [AI JSON] Model: ${currentModel} (Attempt ${attempts})`);
 
     try {
       const response = await withTimeout(
         ai.models.generateContent({
           model: currentModel,
-          contents: processedPrompt, // 使用处理后的内容
-          config: {
-            responseMimeType: 'application/json'
-          }
+          contents: processedPrompt,
+          config: { responseMimeType: 'application/json' }
         }),
         CONFIG.TIMEOUT_MS
       );
-
       const rawText = response.text || JSON.stringify(response);
-      const cleanedText = cleanJSONString(rawText);
-      return JSON.parse(cleanedText);
+      return JSON.parse(cleanJSONString(rawText));
     } catch (err) {
-      console.error(`⚠️ [AI Error] 模型 ${currentModel} 报错:`, err.message);
-
-      if (err.message.includes('404') || err.message.includes('not found') || err.message.includes('400')) {
-        if (currentModel !== CONFIG.FALLBACK_MODEL) {
-          console.warn(`🔄 [AI Fallback] 切换备用模型: ${CONFIG.FALLBACK_MODEL}`);
-          currentModel = CONFIG.FALLBACK_MODEL;
-          attempts = 0;
-          continue;
-        } else {
-          // 400 错误通常是图片格式问题
-          throw new Error(`AI 请求失败 (400/404). 请检查图片格式. ${err.message}`);
-        }
-      }
-
-      const isRetryable = err.message.includes('429') || err.message.includes('503') || err.message === 'TIMEOUT';
-      if (isRetryable && attempts <= CONFIG.MAX_RETRIES) {
-        const delay = attempts * 1000;
-        console.log(`⏳ [AI Retry] ${delay}ms 后重试...`);
-        await new Promise((r) => setTimeout(r, delay));
+      console.error(`⚠️ [AI Error] ${currentModel}:`, err.message);
+      if (err.message.includes('400')) throw err;
+      
+      if (currentModel !== CONFIG.FALLBACK_MODEL) {
+        currentModel = CONFIG.FALLBACK_MODEL;
+        attempts = 0;
         continue;
       }
-
-      return {
-        error: 'AI_GENERATION_FAILED',
-        message: '大厨正在忙，请稍后再试',
-        debug: err.message
-      };
+      if (attempts <= CONFIG.MAX_RETRIES) {
+        await new Promise(r => setTimeout(r, 1000));
+        continue;
+      }
+      return { error: 'AI_BUSY', message: '服务繁忙' };
     }
   }
 }
 
-/**
- * 🌊 基础流式生成 (无 Agent)
- */
 async function generateStream(promptInput) {
   const currentModel = CONFIG.PRIMARY_MODEL;
-
-  // 🔥 修复：预处理输入
-  let formattedContents = typeof promptInput === 'string'
-      ? [{ role: 'user', parts: [{ text: promptInput }] }]
+  let formattedContents = typeof promptInput === 'string' 
+      ? [{ role: 'user', parts: [{ text: promptInput }] }] 
       : promptInput;
-      
   formattedContents = await prepareContentForGemini(formattedContents);
 
   try {
-    console.log(`🌊 [AI Stream] Attempting model: ${currentModel}`);
-
-    const responseStream = await ai.models.generateContentStream({
+    return await ai.models.generateContentStream({
       model: currentModel,
       contents: formattedContents
     });
-
-    return responseStream;
   } catch (err) {
-    console.error(`⚠️ [AI Stream Error] ${currentModel} failed:`, err.message);
-
-    if (currentModel !== CONFIG.FALLBACK_MODEL) {
-      console.warn(`🔄 [AI Stream Fallback] Switching to ${CONFIG.FALLBACK_MODEL}...`);
-      try {
-        const fallbackResponse = await ai.models.generateContentStream({
-          model: CONFIG.FALLBACK_MODEL,
-          contents: formattedContents
-        });
-        return fallbackResponse;
-      } catch (fallbackErr) {
-        throw new Error(`AI Stream All Failed: ${fallbackErr.message}`);
-      }
-    }
-    throw err;
+    try {
+      return await ai.models.generateContentStream({
+        model: CONFIG.FALLBACK_MODEL,
+        contents: formattedContents
+      });
+    } catch (e) { throw err; }
   }
 }
 
-/**
- * 🧠 Agent 流式生成器 (对外暴露)
- */
 async function* createAgentStream(params) {
   const currentModel = CONFIG.PRIMARY_MODEL;
-
-  if (params.history) {
-    params.history = await prepareContentForGemini(params.history);
-  }
+  
+  // 🔥 清洗
+  if (params.history) params.history = await prepareContentForGemini(params.history);
   params.prompt = await prepareContentForGemini(params.prompt);
 
   try {
-    console.log(`🌊 [Agent Stream] Attempting with ${currentModel}...`);
+    console.log(`🌊 [Agent Stream] Start: ${currentModel}`);
     yield* _runAgentLoop(currentModel, params);
   } catch (err) {
     console.warn(`⚠️ [Agent Warning] ${currentModel} failed: ${err.message}`);
-
     if (currentModel !== CONFIG.FALLBACK_MODEL) {
-      console.log(`🔄 [Agent Fallback] Switching to ${CONFIG.FALLBACK_MODEL}...`);
+      console.log(`🔄 [Agent Fallback] Switching to ${CONFIG.FALLBACK_MODEL}`);
       try {
         yield* _runAgentLoop(CONFIG.FALLBACK_MODEL, params);
       } catch (fallbackErr) {
-        console.error('❌ [Agent Error] All models failed.');
-        throw new Error(`Agent failed on both models: ${fallbackErr.message}`);
+        throw new Error(`Agent failed: ${fallbackErr.message}`);
       }
     } else {
       throw err;
@@ -270,25 +231,12 @@ async function* createAgentStream(params) {
   }
 }
 
-/**
- * 🕵️ 内部核心逻辑：Agent 循环
- */
 async function* _runAgentLoop(modelName, { systemInstruction, history, prompt, toolsSchema, functionsMap }) {
   let finalTools = undefined;
-
   if (toolsSchema) {
-    const isAlreadyWrapped =
-      Array.isArray(toolsSchema) && toolsSchema.length > 0 && toolsSchema[0].functionDeclarations;
-
-    if (isAlreadyWrapped) {
-      finalTools = toolsSchema;
-    } else if (Array.isArray(toolsSchema)) {
-      finalTools = [
-        {
-          functionDeclarations: toolsSchema
-        }
-      ];
-    }
+    finalTools = Array.isArray(toolsSchema) && toolsSchema[0]?.functionDeclarations 
+        ? toolsSchema 
+        : [{ functionDeclarations: toolsSchema }];
   }
 
   const chat = ai.chats.create({
@@ -301,102 +249,49 @@ async function* _runAgentLoop(modelName, { systemInstruction, history, prompt, t
     }
   });
 
-  const resultStream = await chat.sendMessageStream({
-    message: prompt
-  });
+  const resultStream = await chat.sendMessageStream({ message: prompt });
 
   let functionCallFound = false;
   const functionCallsToExecute = [];
 
   for await (const chunk of resultStream) {
     const calls = chunk.functionCalls;
-
     if (calls && calls.length > 0) {
       functionCallFound = true;
       functionCallsToExecute.push(...calls);
       continue;
     }
-
-    if (!functionCallFound) {
-      const text = chunk.text;
-      if (text) yield text;
-    }
+    if (!functionCallFound && chunk.text) yield chunk.text;
   }
 
   if (functionCallFound && functionCallsToExecute.length > 0) {
     const functionResponsesParts = [];
-
     for (const call of functionCallsToExecute) {
       const funcName = call.name;
       const args = call.args;
-
-      console.log(`🤖 [Agent Executor] Calling: ${funcName}`, args);
-
+      console.log(`🤖 [Tool] ${funcName}`, args);
       let toolResult;
-      if (functionsMap && functionsMap[funcName]) {
-        try {
-          toolResult = await functionsMap[funcName](args);
-        } catch (e) {
-          console.error(`Tool execution error (${funcName}):`, e);
-          toolResult = {
-            error: `Execution failed: ${e.message}`
-          };
-        }
-      } else {
-        toolResult = {
-          error: `Function ${funcName} not found on server`
-        };
-      }
-
+      if (functionsMap?.[funcName]) {
+        try { toolResult = await functionsMap[funcName](args); } 
+        catch (e) { toolResult = { error: e.message }; }
+      } else { toolResult = { error: 'Function not found' }; }
       functionResponsesParts.push({
-        functionResponse: {
-          name: funcName,
-          response: {
-            content: toolResult
-          }
-        }
+        functionResponse: { name: funcName, response: { content: toolResult } }
       });
     }
-
-    console.log(`📤 [Agent Output] Sending ${functionResponsesParts.length} tool results back...`);
-
-    const result2 = await chat.sendMessageStream({
-      message: functionResponsesParts
-    });
-
+    const result2 = await chat.sendMessageStream({ message: functionResponsesParts });
     for await (const chunk2 of result2) {
-      const text2 = chunk2.text;
-      if (text2) yield text2;
+      if (chunk2.text) yield chunk2.text;
     }
   }
 }
 
-/**
- * ⚡️ 专门用于生成简短标题的工具函数
- */
 async function generateTitle(historyText) {
   try {
-    const prompt = `
-      基于以下对话，生成一个超简短的标题（5-15字）。
-      规则：不要引号，不要标点，只要文字。
-      
-      对话内容：
-      ${historyText.substring(0, 1000)}
-    `;
-
+    const prompt = `生成一个5-10字的纯文本标题: ${historyText.substring(0, 500)}`;
     const result = await ai.models.generateContent(prompt);
-
-    // 修复：直接返回文本，因为 prompt 要求只返回文字，JSON.parse 容易报错
     return result.text ? result.text.trim() : '新对话';
-  } catch (e) {
-    console.error('标题生成失败:', e);
-    return '新对话';
-  }
+  } catch (e) { return '新对话'; }
 }
 
-export {
-  generateJSON,
-  generateStream,
-  createAgentStream,
-  generateTitle
-};
+export { generateJSON, generateStream, createAgentStream, generateTitle };

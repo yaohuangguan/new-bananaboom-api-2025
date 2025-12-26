@@ -40,8 +40,10 @@ router.post('/ask-life/stream', async (req, res) => {
       msg: '请说话'
     });
 
-  // 设置流式响应头
-  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+// 1. 设置流式响应头 (关键！)
+  // 告诉浏览器：这是纯文本流，不要缓存，保持连接
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('Transfer-Encoding', 'chunked');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
 

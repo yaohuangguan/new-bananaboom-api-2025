@@ -51,6 +51,23 @@ import externalRoutes from './routes/external.js';
 import aiRoutes from './routes/ai.js';
 import uploadRoutes from './routes/upload.js';
 
+// 👇👇👇【新增】全局代理配置 (仅开发环境生效) 👇👇👇
+import { setGlobalDispatcher, ProxyAgent } from 'undici';
+
+// V2Ray 端口
+const PROXY_URL = process.env.PROXY_URL;
+
+// 只有在非生产环境才挂载代理
+if (process.env.NODE_ENV !== 'production') {
+  try {
+    const dispatcher = new ProxyAgent(PROXY_URL);
+    setGlobalDispatcher(dispatcher);
+    console.log(`🔌 [System] 全局代理已挂载 (Undici): ${PROXY_URL}`);
+  } catch (error) {
+    console.warn('⚠️ 代理设置失败:', error.message);
+  }
+}
+
 // ==========================================
 // 🚀 初始化 App & Server
 // ==========================================
