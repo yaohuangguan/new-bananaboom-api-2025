@@ -29,7 +29,7 @@ dayjs.extend(timezone);
  * @route   POST /api/ai/ask-life/stream
  */
 router.post('/ask-life/stream', async (req, res) => {
-  const { prompt, history, image } = req.body;
+  const { prompt, history, images } = req.body;
 
   // 1. 获取当前用户对象
   const currentUser = req.user;
@@ -40,12 +40,17 @@ router.post('/ask-life/stream', async (req, res) => {
       msg: '请说话'
     });
 
-// 1. 设置流式响应头 (关键！)
+  // 1. 设置流式响应头 (关键！)
   // 告诉浏览器：这是纯文本流，不要缓存，保持连接
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
   res.setHeader('Transfer-Encoding', 'chunked');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
+  // 🔥 告诉 Cloudflare / Nginx：我是实时流，别给我攒包，有多少发多少！
+  res.setHeader('X-Accel-Buffering', 'no');
+
+  // 双重保险：如果有 flushHeaders 方法，强制把头先发出去
+  if (res.flushHeaders) res.flushHeaders();
 
   try {
     // ==========================================
@@ -115,7 +120,7 @@ router.post('/ask-life/stream', async (req, res) => {
       ]);
 
       // 截断过长的博客内容，防止 Token 爆炸
-      const processedPosts = posts.map((p) => ({
+      const processedPosts = posts.map(p => ({
         ...p,
         content: p.content ? p.content.substring(0, 500) + '...' : ''
       }));
@@ -154,7 +159,7 @@ router.post('/ask-life/stream', async (req, res) => {
 
         【图像识别指令】
 
-    如果用户上传了图片（如体重秤照片、体检单、饮食照片,股票K线图），请优先分析图片内容。
+    如果用户上传了图片（如体重秤照片、体检单、饮食照片,股票K线图），请优先分析图片内容。用户发了多张图片你应该全部都分析到。
 
     场景示例：用户发了一张体重秤照片并说“记一下”，你应该识别出照片里的数字，然后自动调用 log_weight 工具。
 
@@ -187,7 +192,7 @@ router.post('/ask-life/stream', async (req, res) => {
     生理周期数据说明】
     - PeriodRecords 中的 'color' 字段对应以下身体状态：
     ${Object.values(PERIOD_COLORS)
-      .map((c) => `- ${c.code}: ${c.label} (${c.meaning})`)
+      .map(c => `- ${c.code}: ${c.label} (${c.meaning})`)
       .join('\n')}
 
   如果你发现用户最近的记录中出现了 PINK、ORANGE 或 BLACK，请在回答中给予适当的健康提醒，并建议咨询医生。
@@ -226,7 +231,7 @@ router.post('/ask-life/stream', async (req, res) => {
     // ==========================================
     const geminiHistory = [];
     if (history && Array.isArray(history)) {
-      history.slice(-10).forEach((h) => {
+      history.slice(-10).forEach(h => {
         geminiHistory.push({
           role: h.role === 'ai' ? 'model' : 'user',
           parts: [
@@ -242,9 +247,9 @@ router.post('/ask-life/stream', async (req, res) => {
     // 6. 透传 User 对象给工具
     // ==========================================
     const boundFunctions = {};
-    Object.keys(functions).forEach((funcName) => {
+    Object.keys(functions).forEach(funcName => {
       // 将当前用户对象注入到每个工具调用的 context 中
-      boundFunctions[funcName] = (args) =>
+      boundFunctions[funcName] = args =>
         functions[funcName](args, {
           user: currentUser
         });
@@ -257,39 +262,29 @@ router.post('/ask-life/stream', async (req, res) => {
       }
     ];
 
-    // 🔥 修复后的图片处理逻辑
-    if (image) {
-      let imageData = '';
-      let mimeType = 'image/jpeg'; // 默认格式
+    // 4. 处理图片数组 (统一逻辑)
+    if (images && Array.isArray(images)) {
+      images.forEach(imgInput => {
+        if (!imgInput) return;
 
-      // 情况 1: 前端传的是 Data URI 字符串 ("data:image/jpeg;base64,/9j/...")
-      if (typeof image === 'string' && image.startsWith('data:')) {
-        // 使用正则提取 mimeType 和 base64 数据
-        const matches = image.match(/^data:(.+);base64,(.+)$/);
-        if (matches && matches.length === 3) {
-          mimeType = matches[1]; // 例如 "image/png"
-          imageData = matches[2]; // 纯 Base64 字符串
+        // Case A: URL (推荐，走后端下载)
+        if (typeof imgInput === 'string' && imgInput.startsWith('http')) {
+          // 传给 aiProvider.js，让它去下载
+          contentParts.push({ image: imgInput });
         }
-      }
-      // 情况 2: 前端传的是纯 Base64 字符串 (没有前缀)
-      else if (typeof image === 'string') {
-        imageData = image;
-      }
-      // 情况 3: 前端传的是对象结构 (兼容之前的写法)
-      else if (image.inlineData && image.inlineData.data) {
-        imageData = image.inlineData.data;
-        mimeType = image.inlineData.mimeType || mimeType;
-      }
-
-      // 只有解析出数据才推入数组
-      if (imageData) {
-        contentParts.push({
-          inlineData: {
-            data: imageData,
-            mimeType: mimeType
+        // Case B: Data URI (兼容一下前端没传 URL 的情况)
+        else if (typeof imgInput === 'string' && imgInput.startsWith('data:')) {
+          const matches = imgInput.match(/^data:(.+);base64,(.+)$/);
+          if (matches && matches.length === 3) {
+            contentParts.push({
+              inlineData: {
+                mimeType: matches[1],
+                data: matches[2]
+              }
+            });
           }
-        });
-      }
+        }
+      });
     }
 
     // ==========================================
@@ -487,25 +482,25 @@ router.post('/ask-life', async (req, res) => {
         goal: userProfile.fitnessGoal,
         height: userProfile.height
       },
-      FitnessHistory: fitnessRecords.map((r) => ({
+      FitnessHistory: fitnessRecords.map(r => ({
         date: r.dateStr,
         weight: r.body.weight,
         workout: r.workout.types.join(','),
         duration: r.workout.duration,
         diet_mode: r.diet.goalSnapshot
       })),
-      PendingTodos: todos.map((t) => ({
+      PendingTodos: todos.map(t => ({
         task: t.title,
         status: t.isCompleted ? 'Done' : 'Pending',
         deadline: t.dateStr
       })),
-      Projects: projects.map((p) => ({
+      Projects: projects.map(p => ({
         name: p.title,
         desc: p.description,
         tech: p.techStack,
         status: p.status
       })),
-      RecentThoughts: posts.map((p) => ({
+      RecentThoughts: posts.map(p => ({
         date: p.date,
         title: p.title,
         summary: p.content ? p.content.substring(0, 100) + '...' : '' // 截取前100字节省token

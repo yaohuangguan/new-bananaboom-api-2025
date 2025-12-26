@@ -91,7 +91,23 @@ app.set('trust proxy', 1);
 // ==========================================
 // 🛡️ 基础中间件 (Security & Performance)
 // ==========================================
-app.use(compression());
+// 🔥 智能压缩配置
+app.use(compression({
+  filter: (req, res) => {
+    // 1. 如果请求路径包含 'stream' (比如 /api/ai/ask-life/stream)，直接跳过压缩
+    if (req.path.includes('/stream') || req.path.includes('stream')) {
+      return false;
+    }
+
+    // 2. 也可以支持客户端手动禁用 (可选)
+    if (req.headers['x-no-compression']) {
+      return false;
+    }
+
+    // 3. 其他情况走默认逻辑 (只压缩 JSON, HTML, CSS 等)
+    return compression.filter(req, res);
+  }
+}));
 app.use(morgan('tiny'));
 app.use(helmet());
 app.options(/.*/, cors()); // ✅ 修复：把 "*" 改成 "(.*)"
