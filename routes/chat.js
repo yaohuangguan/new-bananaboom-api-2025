@@ -212,11 +212,12 @@ router.get('/ai', async (req, res) => {
   }
 });
 
+
 /**
- * 🚀 接口 3: 保存消息 + 自动维护会话 + 自动生成标题
+ * 🚀 接口: 保存消息 + 自动维护会话 + 自动生成标题
  * ------------------------------------------------------------------
  * @route   POST /api/chat/ai/save
- * @desc    1. 保存消息到 Chat 表
+ * @desc    1. 保存消息到 Chat 表 (只存 R2 URL，拒绝 Base64)
  * 2. 维护 Conversation 表（创建会话、更新活跃时间）
  * 3. (后台异步) 触发 AI 根据上下文生成简短标题
  * @body    { text, role, sessionId, image }
@@ -224,35 +225,54 @@ router.get('/ai', async (req, res) => {
  */
 router.post('/ai/save', async (req, res) => {
   try {
-    const userId = req.user.id;
+    // 确保 req.user 存在 (通常由中间件 auth 设置)
+    const userId = req.user ? req.user.id : null;
+    if (!userId) {
+      return res.status(401).json({ msg: 'Unauthorized' });
+    }
+
     // 参数解构
+    // image 预期是 R2 的 URL 字符串
     const { text, content, role, sessionId, image } = req.body;
-    const msgContent = text || content || '[图片消息]'; // 兼容字段
+    
+    // 兼容 text 和 content 字段，优先取有值的
+    // 如果没有文本但有图片，给个默认提示
+    const msgContent = text || content || (image ? '[图片消息]' : '');
 
     // 1. 基础校验
     if (!sessionId) {
-      return res.status(400).json({
-        msg: '缺少 sessionId，无法保存消息'
-      });
+      return res.status(400).json({ msg: '缺少 sessionId，无法保存消息' });
+    }
+    
+    if (!msgContent && !image) {
+       return res.status(400).json({ msg: '消息内容不能为空' });
     }
 
-    if (AI_USER_ID === '请在这里填入脚本生成的ID') {
-      return res.status(500).json({
-        msg: '后端配置错误：未设置 AI_USER_ID'
-      });
-    }
-
-    // 2. 处理图片存储 (转换为 Base64 Data URI)
+    // 2. 处理图片存储 (只接受 URL)
     const imagesToSave = [];
     if (image) {
       if (typeof image === 'string') {
-        imagesToSave.push(image); // 直接是 Base64 字符串
-      } else if (image.inlineData) {
-        // Gemini 格式对象 -> 还原为 Data URI
-        imagesToSave.push(`data:${image.inlineData.mimeType};base64,${image.inlineData.data}`);
+        if (image.startsWith('http')) {
+          // ✅ 情况 A: 是正常的 URL，保存
+          imagesToSave.push(image);
+        } else if (image.startsWith('data:')) {
+          // ❌ 情况 B: 前端发来了 Base64
+          // 策略：如果太长就拒绝存入，防止数据库爆炸；如果很短(图标)可以存
+          if (image.length > 5000) {
+            console.warn('⚠️ [Chat Save] 拒绝存储过大的 Base64 图片，请前端上传 R2 后传 URL');
+            // 这里选择不存，或者你可以存一个占位符
+          } else {
+             imagesToSave.push(image);
+          }
+        }
+      } else if (image.url) {
+        // ✅ 情况 C: 对象格式 { url: '...' }
+        imagesToSave.push(image.url);
       }
+      // 注意：这里不再处理 Gemini 的 inlineData，因为那个是 Base64，太大了
     }
 
+    // 生成 Room ID
     const aiRoomName = `ai_session_${userId}`;
 
     // 3. 构造发送者对象
@@ -261,11 +281,11 @@ router.post('/ai/save', async (req, res) => {
       userObj = {
         id: userId,
         displayName: req.user.name || '我',
-        photoURL: req.user.photoURL || req.user.avatar
+        photoURL: req.user.photoURL || req.user.avatar || ''
       };
     } else {
       userObj = {
-        id: AI_USER_ID,
+        id: 'ai_assistant', // 固定 ID
         displayName: 'Second Brain',
         photoURL: 'https://cdn-icons-png.flaticon.com/512/4712/4712027.png'
       };
@@ -277,8 +297,8 @@ router.post('/ai/save', async (req, res) => {
       user: userObj,
       content: msgContent,
       toUser: null,
-      sessionId: sessionId, // 🔥 关联会话 ID
-      images: imagesToSave // 🔥 存储图片
+      sessionId: sessionId, // 关联会话 ID
+      images: imagesToSave  // 存入干净的 URL 数组
     });
 
     await newMsg.save();
@@ -288,14 +308,15 @@ router.post('/ai/save', async (req, res) => {
     // ==========================================================
 
     // 5. 查找或创建 Conversation
-    let conversation = await Conversation.findOne({
-      sessionId
-    });
+    let conversation = await Conversation.findOne({ sessionId });
 
     if (!conversation) {
       // 如果是新会话，创建目录记录
-      // 默认标题先取第一句话的前 15 个字作为占位符
-      const initialTitle = role === 'user' ? msgContent.substring(0, 15) : '新对话';
+      // 默认标题先取前 15 个字
+      const initialTitle = role === 'user' 
+        ? (msgContent.substring(0, 15) || '新图片对话')
+        : '新对话';
+
       conversation = new Conversation({
         user: userId,
         sessionId: sessionId,
@@ -306,67 +327,63 @@ router.post('/ai/save', async (req, res) => {
 
     // 6. 更新最后活跃时间 (让该会话跳到列表顶部)
     conversation.lastActiveAt = new Date();
-    await conversation.save(); // 先保存一次，确保时间更新
+    await conversation.save(); 
 
     // ==========================================================
-    // 🤖 AI 自动生成标题逻辑 (异步执行)
+    // 🤖 AI 自动生成标题逻辑 (异步执行，不阻塞响应)
     // ==========================================================
 
-    // 触发条件：
-    // 1. role !== 'user' : 等 AI 回复了再生成，这样上下文才完整（有一问一答）。
-    // 2. !isTitleAutoGenerated : 之前没生成过，避免每次对话都改标题。
+    // 触发条件：AI 回复了消息 (role !== 'user') 且 标题还未自动生成过
     if (role !== 'user' && !conversation.isTitleAutoGenerated) {
-      console.log(`🤖 [AutoTitle] 正在后台为会话 ${sessionId} 生成标题...`);
+      // 使用立即执行函数进行后台处理
+      (async () => {
+        try {
+          console.log(`🤖 [AutoTitle] 正在后台为会话 ${sessionId} 生成标题...`);
 
-      // A. 查出最近的 3 条消息作为上下文给 AI 参考
-      Chat.find({
-        sessionId
-      })
-        .sort({
-          createdDate: 1
-        }) // 按时间正序：问 -> 答
-        .limit(3)
-        .then((recentChats) => {
-          // B. 拼接对话文本
-          const historyText = recentChats.map((m) => `${m.user.displayName}: ${m.content}`).join('\n');
+          // A. 查出最近的 3 条消息作为上下文
+          const recentChats = await Chat.find({ sessionId })
+            .sort({ createdDate: 1 }) // 注意检查你的 Model 是 createdDate 还是 createdAt
+            .limit(3);
 
-          // C. 调用 Gemini 生成标题
-          return generateTitle(historyText);
-        })
-        .then(async (newTitle) => {
-          // D. 更新数据库
-          if (newTitle) {
-            // 重新查一次以防并发冲突
-            const convToUpdate = await Conversation.findOne({
-              sessionId
-            });
-            if (convToUpdate) {
-              convToUpdate.title = newTitle;
-              convToUpdate.isTitleAutoGenerated = true; // ✅ 标记已完成
-              await convToUpdate.save();
+          if (recentChats.length > 0) {
+            // B. 拼接对话文本
+            const historyText = recentChats
+              .map((m) => `${m.user.displayName}: ${m.content}`)
+              .join('\n');
+
+            // C. 调用 Gemini 生成标题 (需确保 generateTitle 已 import)
+            const newTitle = await generateTitle(historyText);
+
+            // D. 更新数据库
+            if (newTitle) {
+              await Conversation.updateOne(
+                { sessionId },
+                { 
+                  title: newTitle, 
+                  isTitleAutoGenerated: true // ✅ 标记已完成，以后不再改
+                }
+              );
               console.log(`✅ [AutoTitle] 标题更新成功: "${newTitle}"`);
             }
           }
-        })
-        .catch((err) => {
-          console.error('❌ [AutoTitle] 标题生成失败:', err);
-          // 失败了没事，下次 AI 回复时会再次尝试，因为 isTitleAutoGenerated 还是 false
-        });
-
-      // 注意：这里没有用 await，代码会继续往下走，立刻返回响应给前端
+        } catch (err) {
+          console.error('❌ [AutoTitle] 标题生成失败:', err.message);
+        }
+      })();
     }
 
     // 7. 返回结果给前端
+    // 为了方便前端使用，把 _id 映射为 id
     const resObj = newMsg.toObject();
-    if (role !== 'user') {
-      resObj.user.id = 'ai_assistant'; // 伪装 ID 以适配前端逻辑
-    }
+    resObj.id = resObj._id.toString();
 
     res.json(resObj);
+
   } catch (err) {
-    console.error('保存AI消息失败:', err);
+    console.error('❌ 保存AI消息失败:', err);
     res.status(500).json({
-      msg: 'Server Error'
+      msg: 'Server Error',
+      error: err.message
     });
   }
 });
