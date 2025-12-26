@@ -4,7 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
 // 引入优化后的 R2 工具函数
 // 注意：listR2Files 现在接受第一个参数 prefix
-import { uploadToR2, getR2PresignedUrl, listR2Files, deleteR2File, R2 } from '../utils/r2.js';
+import { uploadToR2, getPresignedUrl, listR2Files, deleteR2File, R2 } from '../utils/r2.js';
 import { ListObjectsV2Command } from '@aws-sdk/client-s3';
 import logOperation from '../utils/audit.js';
 
@@ -115,70 +115,91 @@ router.post('/', upload.array('files', 10), async (req, res) => {
   }
 });
 
+// 🛠️ 辅助函数：生成紧凑的时间后缀 (YYYYMMDD-HHmmssSSS)
+const getTimeSuffix = () => {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  const h = String(now.getHours()).padStart(2, '0');
+  const min = String(now.getMinutes()).padStart(2, '0');
+  const s = String(now.getSeconds()).padStart(2, '0');
+  const ms = String(now.getMilliseconds()).padStart(3, '0'); 
+  return `${y}${m}${d}-${h}${min}${s}${ms}`; // 示例: 20251225-203005123
+};
+
 /**
  * @route   POST /api/upload/presign
- * @desc    获取通用上传签名 (逻辑统一：强制在 uploads/ 下)
+ * @desc    获取上传签名 (支持前端直传 R2)
+ * @logic   强制存放在 uploads/ 下，文件名默认追加时间戳以防重名
  */
 router.post('/presign', async (req, res) => {
   try {
-    // folder: 前端传来的目标路径，例如 "journal" 或 "project-A"
-    // useOriginalName: Boolean, true=保留原名, false=使用随机UUID
+    // folder: 前端指定的子目录 (e.g., "journal", "works/ui")
+    // useOriginalName: true=完全保留原名(慎用，会覆盖), false=原名+时间戳(默认)
     const { fileName, fileType, folder, useOriginalName } = req.body;
 
-    // 1. 基础校验
+    // 1. 基础参数校验
     if (!fileName || !fileType) {
       return res.status(400).json({ msg: 'Missing fileName or fileType' });
     }
 
     // ============================================================
-    // 2. 核心路径逻辑 (与直传接口保持完全一致)
+    // 2. 路径逻辑 (强制在 uploads/ 下)
     // ============================================================
-    
-    // 根目录固定为 'uploads/'
-    const rootDir = 'uploads/'; 
+    const rootDir = 'uploads/';
     let subDirectory = '';
 
     if (folder) {
       // 🟢 情况 A: 前端指定了文件夹
-      // 只取它的值，去掉开头结尾的斜杠，防止双斜杠
+      // 去掉开头和结尾的斜杠，防止路径出现 //
       subDirectory = folder.replace(/^\/+|\/+$/g, '');
     } else {
-      // 🟠 情况 B: 前端没传，使用日期归档 (例如 "2025/12")
+      // 🟠 情况 B: 前端没传，按日期归档
       const date = new Date();
       const year = date.getFullYear();
       const month = String(date.getMonth() + 1).padStart(2, '0');
       subDirectory = `${year}/${month}`;
     }
-
-    // 最终前缀: uploads/ + 子目录 + /
-    // 结果 A: uploads/journal/
-    // 结果 B: uploads/2025/12/
+    
+    // 组合最终文件夹路径: uploads/journal/
     const targetFolder = `${rootDir}${subDirectory}/`;
 
     // ============================================================
-
-    // 3. 决定最终文件名 (Key)
+    // 3. 文件名逻辑 (默认使用时间戳，拒绝不可读的 UUID)
+    // ============================================================
     let finalKey;
     
     if (useOriginalName) {
-      // 🅰️ 网盘模式：保留原名 -> "uploads/journal/report.pdf"
+      // 🅰️ 强行保留原名 (适合网盘模式，或者你明确想覆盖旧文件)
+      // Key: uploads/journal/report.pdf
       finalKey = `${targetFolder}${fileName}`;
     } else {
-      // 🅱️ 图床模式：使用 UUID -> "uploads/journal/550e8400....png"
-      const ext = path.extname(fileName);
-      finalKey = `${targetFolder}${uuidv4()}${ext || ''}`;
+      // 🅱️ 默认模式：原名 + 时间戳 (推荐)
+      // 既保留了文件名的可读性，又防止了重名覆盖
+      const ext = path.extname(fileName); // .jpg
+      const baseName = path.basename(fileName, ext); // report
+      const timeStr = getTimeSuffix(); // 20251225-203005999
+      
+      // Key: uploads/journal/report-20251225-203005999.jpg
+      finalKey = `${targetFolder}${baseName}-${timeStr}${ext}`;
     }
 
     // 4. 获取 R2 签名
-    // 调用 utils/r2.js 中的 helper
-    const url = await getR2PresignedUrl(finalKey, fileType);
+    // 调用 utils/r2.js 中的 helper，返回 uploadUrl 和 publicUrl
+    const urlData = await getPresignedUrl(finalKey, fileType);
 
-    // 5. 返回结果
+    // 5. 返回结果给前端
     res.json({
       success: true,
-      key: finalKey,  // 存储 Key
-      folder: targetFolder, // 返回实际使用的文件夹路径
-      ...url
+      // 前端用这个 PUT 上传
+      uploadUrl: urlData.uploadUrl, 
+      // 前端存数据库用这个
+      publicUrl: urlData.publicUrl, 
+      // 文件的 Key (路径)
+      key: finalKey,
+      // 告诉前端最终存到哪个文件夹了
+      folder: targetFolder
     });
 
   } catch (error) {
@@ -186,7 +207,6 @@ router.post('/presign', async (req, res) => {
     res.status(500).json({ msg: 'Failed to generate upload signature' });
   }
 });
-
 /**
  * @route   GET /api/upload/list
  * @desc    获取 R2 文件列表 (支持文件夹层级浏览，智能路径修正)
