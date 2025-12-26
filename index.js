@@ -11,7 +11,7 @@ import { Server } from 'socket.io';
 // 📦 引入自定义模块
 // ==========================================
 import permissionService from './services/permissionService.js';
-import corsConfig from './corsConfig.js';
+import corsConfig from './config/corsConfig.js';
 import socketHandler from './socket/socket.js';
 import startScheduler from './utils/scheduler.js';
 

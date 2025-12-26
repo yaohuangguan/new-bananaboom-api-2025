@@ -1,7 +1,4 @@
 const whitelist = [
-  // 本地开发
-  'http://localhost:5173',
-
   // 你的正式域名
   'https://www.ps5.space',
   'https://ps5.space',
