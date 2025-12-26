@@ -55,6 +55,7 @@ const fetchImageAsBase64 = async (url) => {
 
 /**
  * 🔥 核心修复函数：递归清洗内容，兼容 URL 和 Base64
+ * 绝对防止将 URL 传给 inline_data.data
  */
 const prepareContentForGemini = async (contents) => {
   if (!contents) return [];
@@ -68,7 +69,7 @@ const prepareContentForGemini = async (contents) => {
     if (item.parts && Array.isArray(item.parts)) {
       const newParts = await Promise.all(item.parts.map(async (part) => {
         
-        // case 1: 这是一个 URL -> 下载转码
+        // --- Case 1: 前端传来的 { image: "http..." } ---
         if (part.image && part.image.startsWith('http')) {
           const base64 = await fetchImageAsBase64(part.image);
           if (base64) {
@@ -79,10 +80,11 @@ const prepareContentForGemini = async (contents) => {
               }
             };
           }
-          return { text: '[图片下载失败]' };
+          // ⚠️ 关键修复：下载失败转为文本，防止 API 400
+          return { text: '[图片加载失败: 网络错误]' };
         }
 
-        // case 2: 这是一个 Base64 -> 直接使用
+        // --- Case 2: 前端/数据库传来的 { image: "base64..." } ---
         if (part.image && !part.image.startsWith('http')) {
              return {
               inline_data: {
@@ -92,19 +94,31 @@ const prepareContentForGemini = async (contents) => {
             };
         }
 
-        // case 3: 已经是 inline_data 但里面混了 URL -> 修复
-        if (part.inline_data && part.inline_data.data && part.inline_data.data.startsWith('http')) {
-            const base64 = await fetchImageAsBase64(part.inline_data.data);
-            if (base64) {
-                return {
-                    inline_data: {
-                        mime_type: getMimeType(part.inline_data.data),
-                        data: base64
-                    }
-                };
+        // --- Case 3: 历史记录里的 { inline_data: { data: "http..." } } ---
+        // 这是最容易报错的地方，必须拦截！
+        if (part.inline_data && part.inline_data.data) {
+            const potentialUrl = part.inline_data.data;
+            
+            // 如果数据是以 http 开头的，说明它是 URL，必须转换！
+            if (typeof potentialUrl === 'string' && potentialUrl.startsWith('http')) {
+                const base64 = await fetchImageAsBase64(potentialUrl);
+                if (base64) {
+                    return {
+                        inline_data: {
+                            mime_type: getMimeType(potentialUrl),
+                            data: base64
+                        }
+                    };
+                }
+                // ⚠️ 关键修复：绝对不能把 URL 原样扔回去
+                return { text: '[历史图片已过期或无法加载]' };
             }
+            
+            // 如果不是 http，说明已经是 Base64，安全返回
+            return part;
         }
 
+        // 默认直接返回文本
         return part;
       }));
       return { ...item, parts: newParts };
