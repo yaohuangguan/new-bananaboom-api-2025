@@ -39,94 +39,79 @@ const getMimeType = (urlOrBase64) => {
   return 'image/jpeg';
 };
 
-// 辅助函数：将 URL 图片转换为 Base64
+// ==========================================
+// 核心修复：简单的下载转码函数
+// ==========================================
 const fetchImageAsBase64 = async (url) => {
   try {
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(`Failed to fetch image: ${response.statusText}`);
-    
-    const arrayBuffer = await response.arrayBuffer();
-    return Buffer.from(arrayBuffer).toString('base64');
-  } catch (error) {
-    console.error('Image conversion error:', error);
-    return null; 
+    // console.log(`⬇️ 下载图片转换: ${url}`);
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`下载失败 ${res.status}`);
+    const buf = await res.arrayBuffer();
+    return Buffer.from(buf).toString('base64');
+  } catch (e) {
+    console.error(`❌ 图片转码失败: ${url}`, e.message);
+    return null; // 失败返回 null
   }
 };
 
-/**
- * 🔥 核心修复函数：递归清洗内容，兼容 URL 和 Base64
- * 绝对防止将 URL 传给 inline_data.data
- */
+// ==========================================
+// 核心修复：暴力清洗数据 (History & Prompt)
+// ==========================================
 const prepareContentForGemini = async (contents) => {
   if (!contents) return [];
-  if (typeof contents === 'string') return contents;
-  
-  const isArray = Array.isArray(contents);
-  const items = isArray ? contents : [contents];
+  // 统一转成数组处理
+  const items = Array.isArray(contents) ? contents : [contents];
 
-  const processedItems = await Promise.all(items.map(async (item) => {
-    // 处理 { role, parts } 结构
-    if (item.parts && Array.isArray(item.parts)) {
-      const newParts = await Promise.all(item.parts.map(async (part) => {
-        
-        // --- Case 1: 前端传来的 { image: "http..." } ---
-        if (part.image && part.image.startsWith('http')) {
-          const base64 = await fetchImageAsBase64(part.image);
-          if (base64) {
-            return {
-              inline_data: {
-                mime_type: getMimeType(part.image),
-                data: base64
-              }
-            };
-          }
-          // ⚠️ 关键修复：下载失败转为文本，防止 API 400
-          return { text: '[图片加载失败: 网络错误]' };
-        }
+  // 深度遍历每一条消息
+  const processed = await Promise.all(items.map(async (msg) => {
+    // 如果没有 parts，直接返回
+    if (!msg.parts) return msg;
 
-        // --- Case 2: 前端/数据库传来的 { image: "base64..." } ---
-        if (part.image && !part.image.startsWith('http')) {
-             return {
-              inline_data: {
-                mime_type: 'image/jpeg',
-                data: part.image 
-              }
-            };
-        }
+    const newParts = await Promise.all(msg.parts.map(async (part) => {
+      let targetUrl = null;
+      let mimeType = 'image/jpeg';
 
-        // --- Case 3: 历史记录里的 { inline_data: { data: "http..." } } ---
-        // 这是最容易报错的地方，必须拦截！
-        if (part.inline_data && part.inline_data.data) {
-            const potentialUrl = part.inline_data.data;
-            
-            // 如果数据是以 http 开头的，说明它是 URL，必须转换！
-            if (typeof potentialUrl === 'string' && potentialUrl.startsWith('http')) {
-                const base64 = await fetchImageAsBase64(potentialUrl);
-                if (base64) {
-                    return {
-                        inline_data: {
-                            mime_type: getMimeType(potentialUrl),
-                            data: base64
-                        }
-                    };
-                }
-                // ⚠️ 关键修复：绝对不能把 URL 原样扔回去
-                return { text: '[历史图片已过期或无法加载]' };
+      // 🛑 场景 1: 你的历史记录里可能直接存了 { inline_data: { data: 'https://...' } }
+      // 这就是导致你报错的罪魁祸首！
+      if (part.inline_data && part.inline_data.data && part.inline_data.data.startsWith('http')) {
+        targetUrl = part.inline_data.data;
+        // 简单猜一下类型
+        if (targetUrl.endsWith('.png')) mimeType = 'image/png';
+        if (targetUrl.endsWith('.webp')) mimeType = 'image/webp';
+      }
+      
+      // 🛑 场景 2: 前端传来的 { image: 'https://...' } 自定义字段
+      else if (part.image && part.image.startsWith('http')) {
+        targetUrl = part.image;
+        if (targetUrl.endsWith('.png')) mimeType = 'image/png';
+        if (targetUrl.endsWith('.webp')) mimeType = 'image/webp';
+      }
+
+      // ✅ 如果发现是 URL，立即下载转 Base64
+      if (targetUrl) {
+        const base64 = await fetchImageAsBase64(targetUrl);
+        if (base64) {
+          return {
+            inline_data: {
+              mime_type: mimeType,
+              data: base64 // 必须是长字符串，不能是 URL
             }
-            
-            // 如果不是 http，说明已经是 Base64，安全返回
-            return part;
+          };
+        } else {
+          // 下载失败，替换为文本，防止 API 崩溃
+          return { text: '[图片无法加载]' };
         }
+      }
 
-        // 默认直接返回文本
-        return part;
-      }));
-      return { ...item, parts: newParts };
-    }
-    return item;
+      // 如果本来就是 Base64 或者纯文本，原样返回
+      return part;
+    }));
+
+    return { ...msg, parts: newParts };
   }));
 
-  return isArray ? processedItems : processedItems[0];
+  return Array.isArray(contents) ? processed : processed[0];
 };
 
 // ==========================================
@@ -260,8 +245,7 @@ async function generateStream(promptInput) {
 async function* createAgentStream(params) {
   const currentModel = CONFIG.PRIMARY_MODEL;
 
-  // 🔥 修复：预处理 history 和 prompt 中的图片
-  if (params.history && params.history.length > 0) {
+  if (params.history) {
     params.history = await prepareContentForGemini(params.history);
   }
   params.prompt = await prepareContentForGemini(params.prompt);
