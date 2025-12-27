@@ -69,21 +69,64 @@ function calculateNextRun(recurrenceRule, baseTime = new Date(), userTimezone = 
 /**
  * -----------------------------------------------------------------
  * GET /api/todos
- * 获取任务列表
+ * 获取任务列表 (支持筛选、搜索、分页)
  * -----------------------------------------------------------------
+ * 示例: 
+ * GET /api/todos?page=1&limit=10&type=routine&keyword=喝水
  */
 router.get('/', auth, async (req, res) => {
   try {
-    const query = await getQueryForUser(req.user);
+    // 1. 获取分页参数
+    const page = Math.max(1, parseInt(req.query.page) || 1); // 默认为第 1 页，防止负数
+    const limit = Math.max(1, parseInt(req.query.limit) || 20); // 默认每页 20 条
+    const skip = (page - 1) * limit;
 
-    const allTodo = await Todo.find(query)
-      // 🔥 填充创建者信息
-      .populate('user', 'displayName photoURL email')
-      // 🔥 填充通知对象信息 (前端可展示一排小头像)
-      .populate('notifyUsers', 'displayName photoURL')
-      .sort({ order: -1, createdAt: -1 });
+    // 2. 获取筛选参数
+    const { type, keyword } = req.query;
 
-    res.json(allTodo);
+    // 3. 获取用户权限范围 (基础查询条件)
+    const baseQuery = await getQueryForUser(req.user);
+
+    // 4. 构建最终查询对象
+    // 使用 ...baseQuery 继承权限逻辑 (比如只能看自己 or 家庭组)
+    const finalQuery = { ...baseQuery };
+
+    // A. 类型筛选 (wish / routine)
+    if (type) {
+      finalQuery.type = type;
+    }
+
+    // B. 关键词模糊搜索 (搜标题 OR 描述)
+    if (keyword) {
+      finalQuery.$or = [
+        { todo: { $regex: keyword, $options: 'i' } },        // 忽略大小写
+        { description: { $regex: keyword, $options: 'i' } }
+      ];
+    }
+
+    // 5. 并行执行：查数据 + 查总数 (为了计算总页数)
+    const [todos, total] = await Promise.all([
+      Todo.find(finalQuery)
+        .populate('user', 'displayName photoURL email')
+        .populate('notifyUsers', 'displayName photoURL') // 显示通知对象头像
+        .sort({ order: -1, createdAt: -1 }) // 排序：置顶优先 -> 创建时间倒序
+        .skip(skip)
+        .limit(limit),
+      
+      Todo.countDocuments(finalQuery)
+    ]);
+
+    // 6. 返回标准分页结构
+    res.json({
+      data: todos,
+      pagination: {
+        total,          // 总条数
+        page,           // 当前页码
+        limit,          // 每页条数
+        totalPages: Math.ceil(total / limit) // 总页数
+      }
+    });
+
   } catch (err) {
     console.error(err);
     res.status(500).send('Server Error');
