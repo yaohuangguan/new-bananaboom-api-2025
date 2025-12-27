@@ -2,47 +2,44 @@ import { Schema, model } from 'mongoose';
 
 const TodoSchema = new Schema(
   {
-    // --- 基础字段 ---
+    // ... 原有字段 (user, notifyUsers, todo, description, type, recurrence, remindAt, status ...)
     user: { type: Schema.Types.ObjectId, ref: 'users', required: true },
-    todo: { type: String, required: true }, // 任务标题 (例如: "喝水")
-    description: { type: String, default: '' }, // 描述 (例如: "喝一杯温水")
-    
-    // --- 类型区分 ---
-    // wish: 愿望清单 (默认，一次性，完成后进历史)
-    // routine: 例行公事 (定时提醒，可循环，通常不关注"完成"状态，只关注"提醒")
-    type: {
-      type: String,
-      enum: ['wish', 'routine'],
-      default: 'wish'
-    },
-
-    // --- 状态与时间 ---
-    status: {
-      type: String,
-      enum: ['todo', 'in_progress', 'done'],
-      default: 'todo'
-    },
-    done: { type: Boolean, default: false },
-    complete_date: String, // 只有 wish 类型才真正用到这个
-    
-    // --- 提醒核心字段 ---
-    // 下一次触发提醒的时间点。系统只认这个字段来发通知。
-    remindAt: { type: Date }, 
-
-    // 是否已经通知过 (对于单次任务，通知后置为 true；对于循环任务，计算完下次时间后置为 false)
-    isNotified: { type: Boolean, default: false },
-
-    // --- 循环规则 ---
-    // 1. Cron 表达式: "0 * * * *" (每小时)
-    // 2. 简单间隔: "interval:10m" (10分钟后), "interval:2h" (2小时后) -> 方便前端做简单倒计时
+    notifyUsers: [{ type: Schema.Types.ObjectId, ref: 'users' }],
+    todo: { type: String, required: true },
+    description: { type: String, default: '' },
+    type: { type: String, enum: ['wish', 'routine'], default: 'wish' },
     recurrence: { type: String, default: null },
-
-    // --- 辅助字段 ---
+    remindAt: { type: Date },
+    isNotified: { type: Boolean, default: false },
+    status: { type: String, default: 'todo' },
+    done: { type: Boolean, default: false },
     images: [{ type: String }],
     order: { type: Number, default: 0 },
-    timestamp: String, // 兼容旧字段
-    create_date: String,
-    targetDate: { type: Date } // 愿望的目标日期
+    targetDate: { type: Date },
+
+    // 🔥🔥🔥 新增：Bark 高级配置 🔥🔥🔥
+    bark: {
+      // 1. 铃声 (例如: 'minuet', 'birdsong', 'alarm', 'glass')
+      // 默认用 'minuet' (类似于系统提示音)
+      sound: { type: String, default: 'minuet' },
+
+      // 2. 中断级别
+      // 'active': 默认，点亮屏幕
+      // 'timeSensitive': 时效性通知 (可突破勿扰模式，适合紧急任务)
+      // 'passive': 被动通知 (不亮屏，默默加到列表里，适合非紧急的记录)
+      level: {
+        type: String,
+        enum: ['active', 'timeSensitive', 'passive'],
+        default: 'active'
+      },
+
+      // 3. 图标 (如果不填，Scheduler 会用默认的闹钟图标)
+      // 可以是 URL
+      icon: { type: String, default: '' },
+
+      // 4. 跳转 URL (点击通知后跳转哪里，可选)
+      url: { type: String, default: '' }
+    }
   },
   { timestamps: true }
 );

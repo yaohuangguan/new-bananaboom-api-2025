@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import cronParser from 'cron-parser'; // 🔥 用于解析 Cron 表达式，需 npm install cron-parser
+import cronParser from 'cron-parser'; // 🔥 需 npm install cron-parser
 import auth from '../middleware/auth.js';
 import Todo from '../models/Todo.js';
 import User from '../models/User.js';
@@ -9,35 +9,34 @@ const router = Router();
 
 /**
  * =================================================================
- * 辅助函数：获取当前用户的查询范围
+ * 🛠 辅助函数：获取当前用户的查询范围
  * =================================================================
- * 逻辑：
- * 1. 如果是 Super Admin (家庭管理员)，可以看到所有 Super Admin (家庭成员) 的任务。
- * 2. 如果是普通用户，只能看到自己的。
+ * 逻辑：Super Admin 可见家庭所有成员的任务；普通用户仅见自己。
  */
 async function getQueryForUser(user) {
   if (user.role === 'super_admin') {
-    // 找出所有家庭成员 (角色为 super_admin 的人)
     const familyMembers = await User.find({ role: 'super_admin' }).select('_id');
     const familyIds = familyMembers.map((u) => u._id);
     return { user: { $in: familyIds } };
   } else {
-    // 普通用户只能看自己
     return { user: user.id };
   }
 }
 
 /**
  * =================================================================
- * 辅助函数：计算下一次提醒时间
+ * 🛠 辅助函数：计算下一次提醒时间 (带时区感知)
  * =================================================================
- * 用于 Routine 创建时自动计算初始时间，或打卡后计算下一次
+ * @param {string} recurrenceRule - 规则 ("interval:30m" 或 "0 8 * * *")
+ * @param {Date} baseTime - 基础时间 (通常是 now)
+ * @param {string} userTimezone - 用户时区 (如 "Asia/Shanghai")
  */
-function calculateNextRun(recurrenceRule, baseTime = new Date()) {
+function calculateNextRun(recurrenceRule, baseTime = new Date(), userTimezone = 'Asia/Shanghai') {
   if (!recurrenceRule) return null;
 
   try {
-    // 模式 A: 简单间隔 (自定义格式: "interval:30m")
+    // 模式 A: 简单间隔 (绝对时间，不受时区影响)
+    // 格式: "interval:30m", "interval:2h"
     if (recurrenceRule.startsWith('interval:')) {
       const timeStr = recurrenceRule.split(':')[1];
       const unit = timeStr.slice(-1); // 'm', 'h', 'd'
@@ -52,13 +51,15 @@ function calculateNextRun(recurrenceRule, baseTime = new Date()) {
       return new Date(baseTime.getTime() + value * (msMap[unit] || 0));
     }
 
-    // 模式 B: Cron 表达式 (标准格式: "0 9 * * *")
+    // 模式 B: Cron 表达式 (依赖时区)
+    // 格式: "0 9 * * *"
     const interval = cronParser.parseExpression(recurrenceRule, {
-      currentDate: baseTime
+      currentDate: baseTime,
+      tz: userTimezone // 🔥 关键：告诉解析器这是"哪里的"9点
     });
     return interval.next().toDate();
   } catch (err) {
-    console.error('Time calculation error:', err.message);
+    console.error('[TimeCalc] Error:', err.message);
     return null;
   }
 }
@@ -73,9 +74,11 @@ router.get('/', auth, async (req, res) => {
   try {
     const query = await getQueryForUser(req.user);
 
-    // 按置顶降序，然后按创建时间降序
     const allTodo = await Todo.find(query)
+      // 🔥 填充创建者信息
       .populate('user', 'displayName photoURL email')
+      // 🔥 填充通知对象信息 (前端可展示一排小头像)
+      .populate('notifyUsers', 'displayName photoURL')
       .sort({ order: -1, createdAt: -1 });
 
     res.json(allTodo);
@@ -88,7 +91,7 @@ router.get('/', auth, async (req, res) => {
 /**
  * -----------------------------------------------------------------
  * POST /api/todos
- * 创建新任务 (支持 愿望 Wish 和 例行 Routine)
+ * 创建新任务
  * -----------------------------------------------------------------
  */
 router.post('/', auth, async (req, res) => {
@@ -99,25 +102,38 @@ router.post('/', auth, async (req, res) => {
       targetDate, 
       images, 
       order, 
-      // 🔥 新增字段
-      type,         // 'wish' 或 'routine'
-      recurrence,   // 'interval:30m' 或 '0 8 * * *'
-      remindAt      // 指定的首次提醒时间
+      type,       // 'wish' 或 'routine'
+      recurrence, // 'interval:30m' 或 '0 8 * * *'
+      remindAt,   // 指定的首次提醒时间
+      notifyUsers,// ID 数组
+      bark        // 🔥 新增：Bark 高级配置 { sound, level, icon ... }
     } = req.body;
 
     const taskType = type || 'wish';
     let finalRemindAt = remindAt;
 
-    // 🔥 智能时间逻辑：
-    // 如果是 Routine (例行)，且用户没选具体时间，但给了循环规则
-    // 系统自动计算 "下一次" 时间作为初始提醒时间
+    // 1. 处理通知人逻辑
+    // 如果前端传了非空数组，用前端的；否则默认只通知创建者
+    let finalNotifyUsers = [];
+    if (notifyUsers && Array.isArray(notifyUsers) && notifyUsers.length > 0) {
+      finalNotifyUsers = notifyUsers;
+    } else {
+      finalNotifyUsers = [req.user.id];
+    }
+
+    // 2. 智能时间逻辑 (Routine 自动计算初始时间)
+    // 需要用到用户的 timezone
     if (taskType === 'routine' && !finalRemindAt && recurrence) {
-      finalRemindAt = calculateNextRun(recurrence, new Date());
+      const userTZ = req.user.timezone || 'Asia/Shanghai';
+      finalRemindAt = calculateNextRun(recurrence, new Date(), userTZ);
     }
 
     const newTodo = new Todo({
       user: req.user.id,
       
+      // 通知对象
+      notifyUsers: finalNotifyUsers,
+
       // 基础信息
       todo,
       description: description || '',
@@ -130,7 +146,10 @@ router.post('/', auth, async (req, res) => {
 
       // 提醒设置
       remindAt: finalRemindAt || null,
-      isNotified: false, // 新建任务肯定还没通知
+      isNotified: false, 
+
+      // 🔥 Bark 配置 (存入数据库)
+      bark: bark || {},
 
       // 愿望字段
       targetDate: targetDate || null,
@@ -139,7 +158,6 @@ router.post('/', auth, async (req, res) => {
       status: 'todo',
       done: false,
       
-      // 兼容旧字段
       timestamp: Date.now(),
       create_date: new Date().toISOString()
     });
@@ -154,16 +172,18 @@ router.post('/', auth, async (req, res) => {
       details: {
         id: newTodo._id,
         has_remind: !!finalRemindAt,
-        recurrence: recurrence
+        recurrence: recurrence,
+        notify_count: finalNotifyUsers.length
       },
       ip: req.ip,
       io: req.app.get('socketio')
     });
 
-    // 返回最新的完整列表
+    // 返回最新列表
     const query = await getQueryForUser(req.user);
     const allTodo = await Todo.find(query)
       .populate('user', 'displayName photoURL')
+      .populate('notifyUsers', 'displayName photoURL')
       .sort({ order: -1, createdAt: -1 });
 
     res.json(allTodo);
@@ -176,21 +196,20 @@ router.post('/', auth, async (req, res) => {
 /**
  * -----------------------------------------------------------------
  * POST /api/todos/done/:id
- * 更新任务详情 (状态、内容、提醒时间、循环规则)
+ * 更新任务详情
  * -----------------------------------------------------------------
  */
 router.post('/done/:id', auth, async (req, res) => {
   const { 
     done, todo, status, description, images, targetDate, order, 
-    // 🔥 新增
-    remindAt, recurrence, type
+    remindAt, recurrence, type, notifyUsers, bark // 🔥
   } = req.body;
 
   try {
     const todoItem = await Todo.findById(req.params.id);
     if (!todoItem) return res.status(404).send('Todo not found');
 
-    // 权限检查
+    // 权限检查 (自己 OR 家庭管理员)
     const isOwner = todoItem.user.toString() === req.user.id;
     const isFamilyAdmin = req.user.role === 'super_admin';
     if (!isOwner && !isFamilyAdmin) {
@@ -213,15 +232,24 @@ router.post('/done/:id', auth, async (req, res) => {
 
     // 2. --- 提醒与循环更新 ---
     if (recurrence !== undefined) updateFields.recurrence = recurrence;
+    
+    // 更新通知人列表
+    if (notifyUsers !== undefined && Array.isArray(notifyUsers)) {
+      updateFields.notifyUsers = notifyUsers;
+    }
 
-    // 🔥 如果更新了提醒时间
+    // 🔥 更新 Bark 配置 (直接覆盖)
+    if (bark !== undefined) {
+      updateFields.bark = bark;
+    }
+
+    // 如果更新了提醒时间，重置通知状态
     if (remindAt !== undefined) {
       updateFields.remindAt = remindAt;
-      // 只要手动改了时间，就重置通知状态，让 Scheduler 可以再次抓取它
       updateFields.isNotified = false; 
     }
 
-    // 3. --- 状态同步逻辑 (Status vs Done) ---
+    // 3. --- 状态同步逻辑 ---
     if (status !== undefined) {
       updateFields.status = status;
       if (status === 'done') {
@@ -245,9 +273,11 @@ router.post('/done/:id', auth, async (req, res) => {
       req.params.id, 
       { $set: updateFields }, 
       { new: true }
-    ).populate('user', 'displayName photoURL');
+    )
+    .populate('user', 'displayName photoURL')
+    .populate('notifyUsers', 'displayName photoURL'); // 带回最新通知人信息
 
-    // 5. --- 智能日志 ---
+    // 5. --- 日志 ---
     let action = 'UPDATE_TASK';
     if (updatedTodo.status === 'done' && (!status || status === 'done')) {
       action = 'FULFILL_WISH';
@@ -270,6 +300,7 @@ router.post('/done/:id', auth, async (req, res) => {
     const query = await getQueryForUser(req.user);
     const allTodos = await Todo.find(query)
       .populate('user', 'displayName photoURL')
+      .populate('notifyUsers', 'displayName photoURL')
       .sort({ order: -1, createdAt: -1 });
 
     res.json(allTodos);
@@ -284,27 +315,26 @@ router.post('/done/:id', auth, async (req, res) => {
  * POST /api/todos/routine/:id/check
  * Routine 打卡专用接口
  * -----------------------------------------------------------------
- * 场景：提醒喝水，我喝完了，点一下"打卡"。
- * 逻辑：立即计算下一次提醒时间并更新，不改变完成状态（Routine 永远是 todo）。
+ * 逻辑：不完成任务，仅将时间推迟到下一次循环
  */
 router.post('/routine/:id/check', auth, async (req, res) => {
   try {
-    const todo = await Todo.findById(req.params.id);
+    // 🔥 需要 populate user 以获取 timezone
+    const todo = await Todo.findById(req.params.id).populate('user');
+    
     if (!todo) return res.status(404).json({ msg: 'Not found' });
 
-    // 只有 Routine 类型才有意义
     if (todo.type !== 'routine' || !todo.recurrence) {
       return res.status(400).json({ msg: '此任务不是循环例行任务' });
     }
 
-    // 🔥 核心：基于 [当前时间] 重新计算下一次
-    // 比如：原定14:00喝水，我拖到14:15才喝并打卡。
-    // 如果是 interval:1h，下一次应该是 15:15，而不是 15:00。
-    const nextTime = calculateNextRun(todo.recurrence, new Date());
+    // 🔥 核心：基于 [当前时间] + [用户时区] 重新计算下一次
+    const userTZ = todo.user.timezone || 'Asia/Shanghai';
+    const nextTime = calculateNextRun(todo.recurrence, new Date(), userTZ);
 
     if (nextTime) {
       todo.remindAt = nextTime;
-      todo.isNotified = false; // 重置，等待下次通知
+      todo.isNotified = false; // 重置
       await todo.save();
       
       res.json({ success: true, nextRun: nextTime, msg: '打卡成功，下次提醒已更新' });
@@ -326,7 +356,10 @@ router.post('/routine/:id/check', auth, async (req, res) => {
  */
 router.get('/done/:id', async (req, res) => {
   try {
-    const item = await Todo.findById(req.params.id).populate('user', 'displayName photoURL');
+    const item = await Todo.findById(req.params.id)
+      .populate('user', 'displayName photoURL')
+      .populate('notifyUsers', 'displayName photoURL'); // 详情页也要看到通知了谁
+      
     if (!item) return res.status(404).json({ msg: 'Item not found' });
     res.json(item);
   } catch (err) {
