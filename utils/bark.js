@@ -42,7 +42,7 @@ export async function sendBarkNotification (barkUrl, title, body, options = {}) 
       const finalUrl = `${baseUrl}/${encodeURIComponent(title)}/${encodeURIComponent(body)}?${params.toString()}`;
   
       await fetch.get(finalUrl);
-      // console.log(`📱 Bark Params: ${params.toString()}`);
+      console.log(`📱 Bark Params: ${params.toString()}`);
     } catch (e) {
       console.error(`❌ Bark Failed: ${e.message}`);
     }
