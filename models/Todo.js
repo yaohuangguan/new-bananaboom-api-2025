@@ -2,50 +2,47 @@ import { Schema, model } from 'mongoose';
 
 const TodoSchema = new Schema(
   {
-    // 🔥 新增：关联用户 (必须知道任务是谁的)
-    user: {
-      type: Schema.Types.ObjectId,
-      ref: 'users',
-      required: true
+    // --- 基础字段 ---
+    user: { type: Schema.Types.ObjectId, ref: 'users', required: true },
+    todo: { type: String, required: true }, // 任务标题 (例如: "喝水")
+    description: { type: String, default: '' }, // 描述 (例如: "喝一杯温水")
+    
+    // --- 类型区分 ---
+    // wish: 愿望清单 (默认，一次性，完成后进历史)
+    // routine: 例行公事 (定时提醒，可循环，通常不关注"完成"状态，只关注"提醒")
+    type: {
+      type: String,
+      enum: ['wish', 'routine'],
+      default: 'wish'
     },
 
-    // --- 旧字段 ---
-    todo: { type: String, required: true }, // 标题
-    complete_date: String,
-    create_date: String,
-    done: Boolean,
-    timestamp: String,
-
-    // --- 新增字段 (Bucket List) ---
-    description: { type: String, default: '' },
+    // --- 状态与时间 ---
     status: {
       type: String,
       enum: ['todo', 'in_progress', 'done'],
       default: 'todo'
     },
-    images: [{ type: String }],
+    done: { type: Boolean, default: false },
+    complete_date: String, // 只有 wish 类型才真正用到这个
+    
+    // --- 提醒核心字段 ---
+    // 下一次触发提醒的时间点。系统只认这个字段来发通知。
+    remindAt: { type: Date }, 
 
-    // 计划日期 (宽泛的日期，如 2025-12-25)
-    targetDate: { type: Date },
-
-    // 🔥🔥🔥 核心新增：提醒专用字段 🔥🔥🔥
-    // 具体的提醒时间点 (如 2025-12-24 18:00:00)
-    remindAt: { type: Date },
-
-    // 是否已经通知过 (防止重复推送)
+    // 是否已经通知过 (对于单次任务，通知后置为 true；对于循环任务，计算完下次时间后置为 false)
     isNotified: { type: Boolean, default: false },
 
-    order: { type: Number, default: 0 },
-    // 🔥 新增：循环规则 (Cron 格式)
-    // 例如: "0 * * * *" (每小时), "0 9-21 * * *" (早9晚9每小时), "0 8 * * 1" (每周一早8点)
+    // --- 循环规则 ---
+    // 1. Cron 表达式: "0 * * * *" (每小时)
+    // 2. 简单间隔: "interval:10m" (10分钟后), "interval:2h" (2小时后) -> 方便前端做简单倒计时
     recurrence: { type: String, default: null },
 
-    // 🔥 新增：任务类型 (区分 愿望 vs 例行提醒)
-    type: {
-      type: String,
-      enum: ['wish', 'routine'],
-      default: 'wish'
-    }
+    // --- 辅助字段 ---
+    images: [{ type: String }],
+    order: { type: Number, default: 0 },
+    timestamp: String, // 兼容旧字段
+    create_date: String,
+    targetDate: { type: Date } // 愿望的目标日期
   },
   { timestamps: true }
 );

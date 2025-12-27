@@ -85,23 +85,40 @@ router.get('/trigger', async (req, res) => {
       // --- C. 处理循环逻辑 vs 普通逻辑 ---
       try {
         if (task.recurrence) {
-          // === 循环任务 ===
-          // 1. 解析 Cron 表达式，计算下一次时间
-          const interval = cronParser.parseExpression(task.recurrence, {
-            currentDate: now // 基于当前时间往后算
-          });
-          const nextRun = interval.next().toDate();
+          // === 循环任务 (Routine) ===
+          let nextRun;
 
-          console.log(`🔄 循环任务 [${task.todo}] 更新: 下次提醒 -> ${nextRun.toLocaleString()}`);
+          // 1. 判断循环类型
+          if (task.recurrence.startsWith('interval:')) {
+            // 👉 模式 A: 简单间隔 (例如 "interval:60m", "interval:2h")
+            // 逻辑: 基于 [当前时间] + [间隔]
+            const timeStr = task.recurrence.split(':')[1]; // 取出 "60m"
+            const unit = timeStr.slice(-1); // 'm' or 'h'
+            const value = parseInt(timeStr.slice(0, -1));
+            
+            // 计算毫秒数
+            const ms = unit === 'h' ? value * 60 * 60 * 1000 : value * 60 * 1000;
+            nextRun = new Date(now.getTime() + ms);
 
-          // 2. 更新任务：设为新时间 + 重置通知状态 (关键!)
+          } else {
+            // 👉 模式 B: Cron 表达式 (例如 "0 9 * * *")
+            // 逻辑: 使用 cron-parser 计算
+            const interval = cronParser.parseExpression(task.recurrence, {
+              currentDate: now
+            });
+            nextRun = interval.next().toDate();
+          }
+
+          console.log(`🔄 Routine [${task.todo}] 下次提醒: ${nextRun.toLocaleString()}`);
+
+          // 2. 更新任务: 设置新时间 + 重置通知状态
           task.remindAt = nextRun;
-          task.isNotified = false; // 重置为 false，这样 Scheduler 下次还能扫到它
-
+          task.isNotified = false; // 🔥 关键：重置为 false 以便下次被扫到
           await task.save();
+
         } else {
-          // === 普通任务 ===
-          // 标记为已通知 (如果不点击完成，就不再提醒了)
+          // === 普通愿望 (Wish) ===
+          // 标记为已通知，不再打扰
           task.isNotified = true;
           await task.save();
         }
