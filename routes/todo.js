@@ -4,6 +4,8 @@ import auth from '../middleware/auth.js';
 import Todo from '../models/Todo.js';
 import User from '../models/User.js';
 import logOperation from '../utils/audit.js';
+import { NEW_NOTIFICATION } from '../socket/events.js';
+import { sendBarkNotification } from '../utils/bark.js'
 
 const router = Router();
 
@@ -369,6 +371,103 @@ router.get('/done/:id', async (req, res) => {
 
 /**
  * -----------------------------------------------------------------
+ * POST /api/todos/routine/:id/test
+ * 立即测试发送通知 (不修改任务时间)
+ * -----------------------------------------------------------------
+ * 用途：用户配置好 Bark 或 Socket 后，点一下测试看看能不能收到
+ */
+router.post('/routine/:id/test', auth, async (req, res) => {
+  try {
+    const io = req.app.get('socketio');
+
+    // 1. 查任务 (必须 populate notifyUsers 且拿出 barkUrl)
+    const todo = await Todo.findById(req.params.id)
+      .populate('user', 'displayName photoURL')
+      .populate({
+        path: 'notifyUsers',
+        select: 'displayName email +barkUrl' // 🔥 必须显式 +barkUrl
+      });
+
+    if (!todo) return res.status(404).json({ msg: 'Task not found' });
+
+    // 权限检查
+    const isOwner = todo.user._id.toString() === req.user.id;
+    const isFamilyAdmin = req.user.role === 'super_admin';
+    if (!isOwner && !isFamilyAdmin) {
+      return res.status(403).json({ msg: '无权操作' });
+    }
+
+    // 2. 准备推送内容 (加上 [测试] 前缀区分)
+    const title = `🔔 [测试] ${todo.todo}`;
+    const body = todo.description || '这是一条测试推送，请检查铃声和图标配置是否正确。';
+
+    // 3. 确定发送目标
+    // 逻辑：如果任务配置了通知人，就发给这些人；否则只发给当前请求测试的人(防止打扰别人)
+    let targets = [];
+    if (todo.notifyUsers && todo.notifyUsers.length > 0) {
+      targets = todo.notifyUsers;
+    } else {
+      // 兜底：如果没配通知人，尝试发给任务所有者
+      // 但因为上面 populate user 没加 barkUrl，这里其实拿不到。
+      // 所以我们做一个特殊的处理：把当前发起请求的 req.user (带 barkUrl) 临时加进去
+      // 前提是 auth 中间件里 req.user 带了 barkUrl (通常没有 select +barkUrl)
+      // 所以最稳妥的是：只处理 notifyUsers，或者重新查一下当前用户
+      const currentUser = await User.findById(req.user.id).select('+barkUrl');
+      targets = [currentUser];
+    }
+
+    console.log(`🧪 执行测试推送: [${title}] -> ${targets.length} 人`);
+
+    const socketPayload = {
+      type: 'system_reminder',
+      content: `${title}: ${body}`,
+      taskId: todo._id,
+      timestamp: new Date(),
+      fromUser: { displayName: '系统测试', id: 'system' }
+    };
+
+    // 4. 执行发送循环
+    const results = [];
+    for (const target of targets) {
+      const result = { user: target.displayName, bark: false, socket: false };
+
+      // A. Socket
+      if (io && target._id) {
+        io.to(target._id.toString()).emit(NEW_NOTIFICATION, socketPayload);
+        result.socket = true;
+      }
+
+      // B. Bark (复用 Scheduler 里的逻辑)
+      if (target.barkUrl) {
+        await sendBarkNotification(target.barkUrl, title, body, todo.bark);
+        result.bark = true;
+      }
+      
+      results.push(result);
+    }
+
+    // 5. 记录一条测试日志 (可选)
+    /*
+    logOperation({
+      operatorId: req.user.id,
+      action: 'TEST_ROUTINE',
+      target: todo.todo,
+      details: { results },
+      ip: req.ip,
+      io: io
+    });
+    */
+
+    res.json({ success: true, msg: '测试消息已发送', results });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).send('Server Error');
+  }
+});
+
+/**
+ * -----------------------------------------------------------------
  * DELETE /api/todos/:id
  * 删除任务
  * -----------------------------------------------------------------
@@ -401,5 +500,7 @@ router.delete('/:id', auth, async (req, res) => {
     res.status(500).send('Server Error');
   }
 });
+
+
 
 export default router;
