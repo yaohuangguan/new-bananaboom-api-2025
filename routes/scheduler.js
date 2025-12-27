@@ -11,7 +11,7 @@ const CRON_SECRET = process.env.CRON_SECRET || 'my-secret-key';
 // =====================================================================
 // 🛠 工具函数：计算下一次时间 (带时区感知)
 // =====================================================================
-function calculateNextRun(recurrence, baseTime, userTimezone = 'Asia/Shanghai') {
+function calculateNextRun (recurrence, baseTime, userTimezone = 'Asia/Shanghai') {
   if (!recurrence) return null;
   try {
     // 1. 简单间隔 (interval:30m) - 绝对时间，不涉及时区
@@ -55,16 +55,16 @@ router.get('/trigger', async (req, res) => {
       isNotified: false,
       status: { $ne: 'done' }
     })
-    // 🔥 A. 填充任务创建者 (用于获取 timezone 和 记录日志operator)
-    .populate({
-      path: 'user',
-      select: 'displayName timezone photoURL email' 
-    })
-    // 🔥 B. 填充通知对象 (用于发通知 + 存日志快照)
-    .populate({
-      path: 'notifyUsers',
-      select: 'displayName email photoURL +barkUrl' // 🔒 必须显式 +barkUrl
-    });
+      // 🔥 A. 填充任务创建者 (用于获取 timezone 和 记录日志operator)
+      .populate({
+        path: 'user',
+        select: 'displayName timezone photoURL email'
+      })
+      // 🔥 B. 填充通知对象 (用于发通知 + 存日志快照)
+      .populate({
+        path: 'notifyUsers',
+        select: 'displayName email photoURL +barkUrl' // 🔒 必须显式 +barkUrl
+      });
 
     if (tasksToRemind.length === 0) {
       return res.json({ success: true, msg: 'No tasks to remind' });
@@ -118,7 +118,7 @@ router.get('/trigger', async (req, res) => {
           const userTZ = task.user.timezone || 'Asia/Shanghai';
           // 计算下一次
           nextRun = calculateNextRun(task.recurrence, now, userTZ);
-          
+
           if (nextRun) {
             console.log(`🔄 Routine [${task.todo}] 下次: ${nextRun.toLocaleString('zh-CN', { timeZone: userTZ })}`);
             task.remindAt = nextRun;
@@ -154,7 +154,6 @@ router.get('/trigger', async (req, res) => {
           },
           ip: '127.0.0.1'
         });
-
       } catch (err) {
         console.error(`❌ 更新任务/日志失败: ${err.message}`);
         task.isNotified = true; // 容错兜底
@@ -172,13 +171,13 @@ router.get('/trigger', async (req, res) => {
 // =====================================================================
 // 📨 辅助函数：Bark 推送 (增强版 - 支持 Sound/Level/Icon)
 // =====================================================================
-async function sendBarkNotification(barkUrl, title, body, options = {}) {
+async function sendBarkNotification (barkUrl, title, body, options = {}) {
   try {
     if (!barkUrl) return;
-    
+
     // 1. 处理基础 URL
     const baseUrl = barkUrl.endsWith('/') ? barkUrl.slice(0, -1) : barkUrl;
-    
+
     // 2. 准备 URL 参数
     const params = new URLSearchParams({
       // 图标: 如果 task 没配，用默认闹钟图标
@@ -196,15 +195,20 @@ async function sendBarkNotification(barkUrl, title, body, options = {}) {
       params.append('url', options.url);
     }
 
-     // 如果有图片
-     if (options.image) {
+    // 如果有图片
+    if (options.image) {
       params.append('image', options.image);
+    }
+
+    // 如果有持续响铃
+    if (options.call === '1') {
+      params.append('call', options.call);
     }
 
     // 3. 拼接 & 发送
     // 格式: base/title/body?params
     const finalUrl = `${baseUrl}/${encodeURIComponent(title)}/${encodeURIComponent(body)}?${params.toString()}`;
-    
+
     await fetch.get(finalUrl);
     // console.log(`📱 Bark Params: ${params.toString()}`);
   } catch (e) {

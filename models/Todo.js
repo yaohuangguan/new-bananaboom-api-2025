@@ -40,6 +40,8 @@ const TodoSchema = new Schema(
       // 4. 跳转 URL (点击通知后跳转哪里，可选)
       url: { type: String, default: '' },
       image: { type: String, default: '' },
+      // 持续响铃
+      call: { type: String, default: '' },
     }
   },
   { timestamps: true }
