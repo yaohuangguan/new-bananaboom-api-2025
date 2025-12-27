@@ -196,6 +196,11 @@ async function sendBarkNotification(barkUrl, title, body, options = {}) {
       params.append('url', options.url);
     }
 
+     // 如果有图片
+     if (options.image) {
+      params.append('image', options.image);
+    }
+
     // 3. 拼接 & 发送
     // 格式: base/title/body?params
     const finalUrl = `${baseUrl}/${encodeURIComponent(title)}/${encodeURIComponent(body)}?${params.toString()}`;

@@ -38,7 +38,8 @@ const TodoSchema = new Schema(
       icon: { type: String, default: '' },
 
       // 4. 跳转 URL (点击通知后跳转哪里，可选)
-      url: { type: String, default: '' }
+      url: { type: String, default: '' },
+      image: { type: String, default: '' },
     }
   },
   { timestamps: true }
