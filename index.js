@@ -13,7 +13,7 @@ import { Server } from 'socket.io';
 import permissionService from './services/permissionService.js';
 import corsConfig from './config/corsConfig.js';
 import socketHandler from './socket/socket.js';
-import startScheduler from './utils/scheduler.js';
+
 
 // 🔥 引入安检中间件 (核心改动)
 import auth from './middleware/auth.js'; // 身份识别 (温和模式)
