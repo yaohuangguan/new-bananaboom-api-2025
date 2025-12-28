@@ -29,7 +29,7 @@ const TodoSchema = new Schema(
       // 'passive': 被动通知 (不亮屏，默默加到列表里，适合非紧急的记录)
       level: {
         type: String,
-        enum: ['active', 'timeSensitive', 'passive'],
+        enum: ['active', 'timeSensitive', 'passive', 'critical'],
         default: 'active'
       },
 
