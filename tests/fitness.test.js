@@ -166,4 +166,136 @@ describe('🏋️‍♀️ Fitness Module Tests', () => {
     expect(accessRes.body.message || accessRes.body.message_cn).toMatch(/Access Denied|权限不足/i);
     expect(accessRes.body.required).toMatch(/FITNESS:USE/i);
   });
+
+  // ==========================================
+  // 5. 🔥 查看图片墙 (Photos Gallery)
+  // ==========================================
+  it('GET /api/fitness/photos - Regular User should only see own photos', async () => {
+    // 1. 创建全新的独立用户，防止 beforeEach 污染或冲突
+    const resU1 = await request(app).post('/api/users').send({
+      displayName: 'PhotoUser1',
+      email: 'p1@test.com',
+      password: 'Password123',
+      passwordConf: 'Password123'
+    });
+    const token1 = resU1.body.token;
+
+    const resU2 = await request(app).post('/api/users').send({
+      displayName: 'PhotoUser2',
+      email: 'p2@test.com',
+      password: 'Password123',
+      passwordConf: 'Password123'
+    });
+    const token2 = resU2.body.token;
+
+    // 2. 给 U1 造一条带图记录
+    await request(app).post('/api/fitness').set('x-auth-token', token1).send({
+      date: new Date().toISOString(),
+      photos: ['http://img.com/my_abs.jpg']
+    });
+
+    // 3. 给 U2 造一条带图记录
+    await request(app).post('/api/fitness').set('x-auth-token', token2).send({
+      date: new Date().toISOString(),
+      photos: ['http://img.com/others_abs.jpg']
+    });
+
+    // 4. U1 查 -> 只能看自己
+    const res = await request(app).get('/api/fitness/photos').set('x-auth-token', token1);
+
+    expect(res.statusCode).toEqual(200);
+    const allPhotos = res.body.flatMap((r) => r.photos);
+    expect(allPhotos).toContain('http://img.com/my_abs.jpg');
+    expect(allPhotos).not.toContain('http://img.com/others_abs.jpg');
+  });
+
+  it('GET /api/fitness/photos - Super Admin should see ALL photos', async () => {
+    // 1. 创建 Admin 用户
+    const resAdmin = await request(app).post('/api/users').send({
+      displayName: 'PhotoAdmin',
+      email: 'admin@test.com',
+      password: 'Password123',
+      passwordConf: 'Password123'
+    });
+    const adminId = resAdmin.body.user._id;
+
+    // 提权
+    await User.findByIdAndUpdate(adminId, { role: 'super_admin' });
+
+    // 重新登录拿 Token
+    const loginRes = await request(app).post('/api/users/signin').send({
+      email: 'admin@test.com',
+      password: 'Password123'
+    });
+    const adminToken = loginRes.body.token;
+
+    // 2. 还需要制造一些普通用户数据 (或者复用数据库里已有的? 最好新建确保存在)
+    // 创建一个受害者
+    const resVictim = await request(app).post('/api/users').send({
+      displayName: 'Victim',
+      email: 'victim@test.com',
+      password: 'Password123',
+      passwordConf: 'Password123'
+    });
+    await request(app).post('/api/fitness').set('x-auth-token', resVictim.body.token).send({
+      date: new Date().toISOString(),
+      photos: ['http://img.com/victim_abs.jpg']
+    });
+
+    // 3. Admin 查 -> 应该看到所有 (包括 Victim 的)
+    const res = await request(app).get('/api/fitness/photos').set('x-auth-token', adminToken);
+
+    expect(res.statusCode).toEqual(200);
+    const allPhotos = res.body.flatMap((r) => r.photos);
+    expect(allPhotos).toContain('http://img.com/victim_abs.jpg');
+  });
+
+  it('GET /api/fitness/photos - Should filter by date range', async () => {
+    // 1. 创建用户
+    const resUser = await request(app).post('/api/users').send({
+      displayName: 'DateUser',
+      email: 'date@test.com',
+      password: 'Password123',
+      passwordConf: 'Password123'
+    });
+    const token = resUser.body.token;
+
+    // 2. 造数据：昨天 (不在范围内)
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    await request(app).post('/api/fitness').set('x-auth-token', token).send({
+      date: yesterday.toISOString(),
+      photos: ['http://img.com/yesterday.jpg']
+    });
+
+    // 3. 造数据：上个月 (在范围内)
+    // 假设查询范围是 [30天前, 今天] ??
+    // 等等，测试逻辑应该是：
+    // 造一个 2023-01-01 -> 'http://img.com/old.jpg'
+    // 造一个 2023-02-01 -> 'http://img.com/newer.jpg'
+    // 查 2023-01-15 ~ 2023-02-15 -> 应该只有 newer.jpg
+
+    const d1 = new Date('2023-01-01');
+    await request(app).post('/api/fitness').set('x-auth-token', token).send({
+      date: d1.toISOString(),
+      photos: ['http://img.com/old.jpg']
+    });
+
+    const d2 = new Date('2023-02-01');
+    await request(app).post('/api/fitness').set('x-auth-token', token).send({
+      date: d2.toISOString(),
+      photos: ['http://img.com/newer.jpg']
+    });
+
+    // 4. 发起查询 (只查2月份)
+    const res = await request(app)
+      .get('/api/fitness/photos?start=2023-01-15&end=2023-02-15')
+      .set('x-auth-token', token);
+
+    expect(res.statusCode).toEqual(200);
+    const allPhotos = res.body.flatMap((r) => r.photos);
+
+    expect(allPhotos).toContain('http://img.com/newer.jpg');
+    expect(allPhotos).not.toContain('http://img.com/old.jpg');
+  });
 });

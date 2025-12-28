@@ -84,6 +84,57 @@ router.get('/', async (req, res) => {
 });
 
 // =================================================================
+// 1.5 获取所有健身照片 (画廊模式)
+// =================================================================
+// @route   GET api/fitness/photos
+// @desc    看图专用接口
+router.get('/photos', async (req, res) => {
+  try {
+    const { start, end } = req.query;
+    const currentUser = req.user;
+    const allPerms = permissionService.getUserMergedPermissions(currentUser);
+    const canReadAll = allPerms.includes('*') || allPerms.includes(K.FITNESS_READ_ALL);
+
+    const query = {
+      photos: { $exists: true, $not: { $size: 0 } } // 必须有图
+    };
+
+    if (!canReadAll) {
+      // 普通人只能看自己
+      query.user = currentUser.id;
+    }
+
+    // --- 日期筛选 ---
+    if (start && end) {
+      const startDate = new Date(start);
+      const endDate = new Date(end);
+      // 🔥 核心修正：确保 endDate 包含当天的 23:59:59
+      endDate.setHours(23, 59, 59, 999);
+
+      query.date = {
+        $gte: startDate,
+        $lte: endDate
+      };
+    }
+
+    const records = await Fitness.find(query)
+      .sort({ date: -1 })
+      .select('date dateStr photos user') // 只拿图片相关字段
+      .populate('user', 'displayName photoURL')
+      .limit(100); // 画廊模式先限制 100 条，避免太多
+
+    // 拍平结果？或者直接返回记录列表让前端处理？
+
+
+    // 这里保持返回记录列表，每条记录包含当天的 photos 数组
+    res.json(records);
+  } catch (err) {
+    console.error('Get Fitness Photos Error:', err);
+    res.status(500).send('Server Error');
+  }
+});
+
+// =================================================================
 // 2. 提交/更新记录 (自动补全身高 + 帮人打卡权限)
 // =================================================================
 // @route   POST api/fitness
