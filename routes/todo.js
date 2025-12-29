@@ -43,13 +43,13 @@ function calculateNextRun(recurrenceRule, baseTime = new Date(), userTimezone = 
       const timeStr = recurrenceRule.split(':')[1];
       const unit = timeStr.slice(-1); // 'm', 'h', 'd'
       const value = parseInt(timeStr.slice(0, -1));
-      
-      const msMap = { 
-        m: 60 * 1000, 
-        h: 60 * 60 * 1000, 
-        d: 24 * 60 * 60 * 1000 
+
+      const msMap = {
+        m: 60 * 1000,
+        h: 60 * 60 * 1000,
+        d: 24 * 60 * 60 * 1000
       };
-      
+
       return new Date(baseTime.getTime() + value * (msMap[unit] || 0));
     }
 
@@ -82,7 +82,7 @@ router.get('/', auth, async (req, res) => {
     const skip = (page - 1) * limit;
 
     // 2. 获取筛选参数
-    const { type, keyword } = req.query;
+    const { type, keyword, isActive } = req.query;
 
     // 3. 获取用户权限范围 (基础查询条件)
     const baseQuery = await getQueryForUser(req.user);
@@ -104,6 +104,12 @@ router.get('/', auth, async (req, res) => {
       ];
     }
 
+    // C. 状态筛选 (isActive)
+    if (isActive !== undefined) {
+      // 允许传 "true"/"false" 或 boolean
+      finalQuery.isActive = isActive === 'true' || isActive === true;
+    }
+
     // 5. 并行执行：查数据 + 查总数 (为了计算总页数)
     const [todos, total] = await Promise.all([
       Todo.find(finalQuery)
@@ -112,7 +118,7 @@ router.get('/', auth, async (req, res) => {
         .sort({ order: -1, createdAt: -1 }) // 排序：置顶优先 -> 创建时间倒序
         .skip(skip)
         .limit(limit),
-      
+
       Todo.countDocuments(finalQuery)
     ]);
 
@@ -141,17 +147,18 @@ router.get('/', auth, async (req, res) => {
  */
 router.post('/', auth, async (req, res) => {
   try {
-    const { 
-      todo, 
-      description, 
-      targetDate, 
-      images, 
-      order, 
+    const {
+      todo,
+      description,
+      targetDate,
+      images,
+      order,
       type,       // 'wish' 或 'routine'
       recurrence, // 'interval:30m' 或 '0 8 * * *'
       remindAt,   // 指定的首次提醒时间
       notifyUsers,// ID 数组
-      bark        // 🔥 新增：Bark 高级配置 { sound, level, icon ... }
+      bark,       // 🔥 新增：Bark 高级配置 { sound, level, icon ... }
+      isActive    // 🔥 新增：是否启用
     } = req.body;
 
     const taskType = type || 'wish';
@@ -175,7 +182,7 @@ router.post('/', auth, async (req, res) => {
 
     const newTodo = new Todo({
       user: req.user.id,
-      
+
       // 通知对象
       notifyUsers: finalNotifyUsers,
 
@@ -191,18 +198,21 @@ router.post('/', auth, async (req, res) => {
 
       // 提醒设置
       remindAt: finalRemindAt || null,
-      isNotified: false, 
+      isNotified: false,
 
       // 🔥 Bark 配置 (存入数据库)
       bark: bark || {},
 
+      // 🔥 是否启用
+      isActive: isActive !== undefined ? isActive : true,
+
       // 愿望字段
       targetDate: targetDate || null,
-      
+
       // 默认状态
       status: 'todo',
       done: false,
-      
+
       timestamp: Date.now(),
       create_date: new Date().toISOString()
     });
@@ -245,9 +255,9 @@ router.post('/', auth, async (req, res) => {
  * -----------------------------------------------------------------
  */
 router.post('/done/:id', auth, async (req, res) => {
-  const { 
-    done, todo, status, description, images, targetDate, order, 
-    remindAt, recurrence, type, notifyUsers, bark // 🔥
+  const {
+    done, todo, status, description, images, targetDate, order,
+    remindAt, recurrence, type, notifyUsers, bark, isActive // 🔥
   } = req.body;
 
   try {
@@ -277,7 +287,7 @@ router.post('/done/:id', auth, async (req, res) => {
 
     // 2. --- 提醒与循环更新 ---
     if (recurrence !== undefined) updateFields.recurrence = recurrence;
-    
+
     // 更新通知人列表
     if (notifyUsers !== undefined && Array.isArray(notifyUsers)) {
       updateFields.notifyUsers = notifyUsers;
@@ -288,10 +298,15 @@ router.post('/done/:id', auth, async (req, res) => {
       updateFields.bark = bark;
     }
 
+    // 🔥 更新 isActive
+    if (isActive !== undefined) {
+      updateFields.isActive = isActive;
+    }
+
     // 如果更新了提醒时间，重置通知状态
     if (remindAt !== undefined) {
       updateFields.remindAt = remindAt;
-      updateFields.isNotified = false; 
+      updateFields.isNotified = false;
     }
 
     // 3. --- 状态同步逻辑 ---
@@ -315,12 +330,12 @@ router.post('/done/:id', auth, async (req, res) => {
 
     // 4. --- 执行更新 ---
     const updatedTodo = await Todo.findByIdAndUpdate(
-      req.params.id, 
-      { $set: updateFields }, 
+      req.params.id,
+      { $set: updateFields },
       { new: true }
     )
-    .populate('user', 'displayName photoURL')
-    .populate('notifyUsers', 'displayName photoURL'); // 带回最新通知人信息
+      .populate('user', 'displayName photoURL')
+      .populate('notifyUsers', 'displayName photoURL'); // 带回最新通知人信息
 
     // 5. --- 日志 ---
     let action = 'UPDATE_TASK';
@@ -366,7 +381,7 @@ router.post('/routine/:id/check', auth, async (req, res) => {
   try {
     // 🔥 需要 populate user 以获取 timezone
     const todo = await Todo.findById(req.params.id).populate('user');
-    
+
     if (!todo) return res.status(404).json({ msg: 'Not found' });
 
     if (todo.type !== 'routine' || !todo.recurrence) {
@@ -381,7 +396,7 @@ router.post('/routine/:id/check', auth, async (req, res) => {
       todo.remindAt = nextTime;
       todo.isNotified = false; // 重置
       await todo.save();
-      
+
       res.json({ success: true, nextRun: nextTime, msg: '打卡成功，下次提醒已更新' });
     } else {
       res.status(400).json({ msg: '无法计算下一次时间' });
@@ -404,7 +419,7 @@ router.get('/done/:id', async (req, res) => {
     const item = await Todo.findById(req.params.id)
       .populate('user', 'displayName photoURL')
       .populate('notifyUsers', 'displayName photoURL'); // 详情页也要看到通知了谁
-      
+
     if (!item) return res.status(404).json({ msg: 'Item not found' });
     res.json(item);
   } catch (err) {
@@ -485,7 +500,7 @@ router.post('/routine/:id/test', auth, async (req, res) => {
         await sendBarkNotification(target.barkUrl, title, body, todo.bark);
         result.bark = true;
       }
-      
+
       results.push(result);
     }
 

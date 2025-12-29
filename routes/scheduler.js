@@ -11,7 +11,7 @@ const CRON_SECRET = process.env.CRON_SECRET || 'my-secret-key';
 // =====================================================================
 // 🛠 工具函数：计算下一次时间 (带时区感知)
 // =====================================================================
-function calculateNextRun (recurrence, baseTime, userTimezone = 'Asia/Shanghai') {
+function calculateNextRun(recurrence, baseTime, userTimezone = 'Asia/Shanghai') {
   if (!recurrence) return null;
   try {
     // 1. 简单间隔 (interval:30m) - 绝对时间，不涉及时区
@@ -50,10 +50,12 @@ router.get('/trigger', async (req, res) => {
     const now = new Date(); // 服务器 UTC 时间
 
     // 2. 查库：找 [到期] 且 [未通知] 且 [未完成] 的任务
+    // 🔥 新增条件：必须是激活状态 (isActive != false)
     const tasksToRemind = await Todo.find({
       remindAt: { $exists: true, $lte: now },
       isNotified: false,
-      status: { $ne: 'done' }
+      status: { $ne: 'done' },
+      isActive: { $ne: false } // 兼容旧数据 (undefined 视为 true)
     })
       // 🔥 A. 填充任务创建者 (用于获取 timezone 和 记录日志operator)
       .populate({

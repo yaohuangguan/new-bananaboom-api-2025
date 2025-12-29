@@ -17,6 +17,9 @@ const TodoSchema = new Schema(
     order: { type: Number, default: 0 },
     targetDate: { type: Date },
 
+    // 🔥🔥🔥 新增：是否启用 (Routine 专用) 🔥🔥🔥
+    isActive: { type: Boolean, default: true },
+
     // 🔥🔥🔥 新增：Bark 高级配置 🔥🔥🔥
     bark: {
       // 1. 铃声 (例如: 'minuet', 'birdsong', 'alarm', 'glass')
