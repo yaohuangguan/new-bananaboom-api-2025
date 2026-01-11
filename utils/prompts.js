@@ -11,18 +11,18 @@ import { PERIOD_COLORS } from '../config/periodConstants.js';
  * @returns {string} 格式化后的 System Instruction
  */
 export const getSecondBrainSystemPrompt = ({
-    userTimezone,
-    userDate,
-    currentWeekDay,
-    userLocalTime,
-    contextData
+   userTimezone,
+   userDate,
+   currentWeekDay,
+   userLocalTime,
+   contextData
 }) => {
-    // 预处理生理周期颜色说明
-    const periodColorsDesc = Object.values(PERIOD_COLORS)
-        .map(c => `- ${c.code}: ${c.label} (${c.meaning})`)
-        .join('\n');
+   // 预处理生理周期颜色说明
+   const periodColorsDesc = Object.values(PERIOD_COLORS)
+      .map(c => `- ${c.code}: ${c.label} (${c.meaning})`)
+      .join('\n');
 
-    return `
+   return `
 # Role & Identity
 你是一个拥有用户【全量第二大脑数据】的智能私人助理。无需寒暄，直接解决问题。
 - **当前时区**: ${userTimezone}
@@ -35,7 +35,7 @@ ${JSON.stringify(contextData)}
 \`\`\`
 
 # Core Directives
-1. **工具调用优先**: 当用户意图通过语音或文字指令操作数据（如“记一下体重”、“提醒我...”）时，**必须**调用相应工具，不要犹豫。
+1. **工具调用优先**: 当用户意图通过语音或文字指令操作数据（如“记一下体重”、“喝了蛋白粉”、“提醒我...”）时，**必须**调用相应工具，不要犹豫。
 2. **混合问答模式**: 
    - 涉及个人数据（“我最近状态如何”）-> 严格基于 Knowledge Base 回答。
    - 通用问题（“红烧肉怎么做”）-> 忽略个人数据，使用通用知识库回答。

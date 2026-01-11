@@ -175,6 +175,35 @@ const toolsSchema = [
         }
       },
       // -----------------------------------------------------
+      // 💊 工具 F: 记录营养补剂 (蛋白粉/维生素)
+      // -----------------------------------------------------
+      {
+        name: 'log_supplement',
+        description: "记录用户摄入的营养补剂，如蛋白粉、维生素。当用户说'喝了蛋白粉'、'吃维生素了'时调用。",
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            protein: {
+              type: 'BOOLEAN',
+              description: '是否摄入蛋白粉'
+            },
+            vitamins: {
+              type: 'BOOLEAN',
+              description: '是否摄入维生素'
+            },
+            details: {
+              type: 'STRING',
+              description: '备注详情 (如口味、品牌等)'
+            },
+            dateStr: {
+              type: 'STRING',
+              description: '日期 (YYYY-MM-DD)。'
+            }
+          },
+          required: ['dateStr']
+        }
+      },
+      // -----------------------------------------------------
       // ✅ 工具 E: 更新用户设置 (换时区/改称呼等)
       // -----------------------------------------------------
       {
@@ -437,6 +466,46 @@ const functions = {
       return {
         success: false,
         message: '记录心情失败: ' + e.message
+      };
+    }
+  },
+
+  /**
+   * 记录营养补剂
+   */
+  async log_supplement({ protein, vitamins, details, dateStr }, { user }) {
+    try {
+      if (!user?._id) throw new Error('缺少用户 ID');
+      const userId = user._id;
+
+      let record = await Fitness.findOne({ user: userId, dateStr });
+      if (!record) {
+        record = new Fitness({
+          user: userId,
+          date: new Date(dateStr),
+          dateStr
+        });
+      }
+
+      if (!record.supplements) record.supplements = {};
+
+      // 仅当传入了 true/false 时才更新，undefined 不覆盖
+      if (typeof protein === 'boolean') record.supplements.protein = protein;
+      if (typeof vitamins === 'boolean') record.supplements.vitamins = vitamins;
+      if (details) record.supplements.details = details;
+
+      record.markModified('supplements');
+      await record.save();
+
+      return {
+        success: true,
+        message: `补剂记录成功！(蛋白粉: ${record.supplements.protein ? '✅' : '❌'}, 维生素: ${record.supplements.vitamins ? '✅' : '❌'
+          })`
+      };
+    } catch (e) {
+      return {
+        success: false,
+        message: '记录补剂失败: ' + e.message
       };
     }
   },

@@ -141,7 +141,7 @@ router.get('/photos', async (req, res) => {
 // @desc    创建或更新记录
 router.post('/', async (req, res) => {
   try {
-    const { date, targetUserEmail, body, workout, diet, status, photos } = req.body;
+    const { date, targetUserEmail, body, workout, diet, supplements, status, photos } = req.body;
 
     if (!date) {
       return res.status(400).json({ msg: 'Date is required' });
@@ -199,6 +199,7 @@ router.post('/', async (req, res) => {
       record.body = { ...record.body, ...finalBody };
       if (workout) record.workout = workout;
       if (diet) record.diet = diet;
+      if (supplements) record.supplements = supplements;
       if (status) record.status = status;
       if (photos) record.photos = photos;
     } else {
@@ -210,6 +211,7 @@ router.post('/', async (req, res) => {
         body: finalBody,
         workout: workout || {},
         diet: diet || {},
+        supplements: supplements || {},
         status: status || {},
         photos: photos || []
       });

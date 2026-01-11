@@ -46,6 +46,13 @@ const FitnessSchema = new Schema(
       // 去掉了热量、蛋白质、碳水、脂肪计算
     },
 
+    // --- 3.5 营养补剂 (新增) ---
+    supplements: {
+      protein: { type: Boolean, default: false }, // 蛋白粉
+      vitamins: { type: Boolean, default: false }, // 维生素
+      details: { type: String, maxlength: 200 } // 备注
+    },
+
     // --- 4. 状态 (保留，很有用) ---
     status: {
       mood: {
