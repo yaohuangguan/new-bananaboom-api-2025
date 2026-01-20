@@ -51,7 +51,9 @@ const ResumeSchema = new Schema(
         endDate: String,
         // 工作亮点/职责 (数组)
         highlights_zh: [String],
-        highlights_en: [String]
+        highlights_en: [String],
+        location_zh: String,
+        location_en: String
       }
     ],
 
