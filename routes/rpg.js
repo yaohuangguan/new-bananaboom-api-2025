@@ -142,20 +142,17 @@ router.post('/initialize', async (req, res) => {
   const systemInstruction = getSystemInstruction(config);
   
   try {
-    const model = ai.getGenerativeModel({ 
+    const chat = ai.chats.create({
       model: CONFIG.PRIMARY_MODEL,
-      systemInstruction: systemInstruction 
-    });
-
-    const chat = model.startChat({
-      generationConfig: {
+      config: {
+        systemInstruction: systemInstruction,
         responseMimeType: "application/json",
         responseSchema: gameResponseSchema
       }
     });
 
-    const result = await chat.sendMessage("Start Game");
-    const text = result.response.text();
+    const result = await chat.sendMessage({ message: "Start Game" });
+    const text = result.text;
     if (!text) throw new Error("Empty response from AI");
     
     const parsed = JSON.parse(text);
@@ -178,21 +175,18 @@ router.post('/action', async (req, res) => {
   const systemInstruction = getSystemInstruction(config);
 
   try {
-    const model = ai.getGenerativeModel({ 
+    const chat = ai.chats.create({
       model: CONFIG.PRIMARY_MODEL,
-      systemInstruction: systemInstruction 
-    });
-
-    const chat = model.startChat({
-      history: history,
-      generationConfig: {
+      config: {
+        systemInstruction: systemInstruction,
         responseMimeType: "application/json",
         responseSchema: gameResponseSchema
-      }
+      },
+      history: history
     });
 
-    const result = await chat.sendMessage(action);
-    const text = result.response.text();
+    const result = await chat.sendMessage({ message: action });
+    const text = result.text;
     if (!text) throw new Error("Empty response from AI");
     
     const parsed = JSON.parse(text);
