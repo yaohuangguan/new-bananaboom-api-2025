@@ -234,14 +234,13 @@ router.post('/generate-turn', async (req, res) => {
   const ai = getAiClient('default');
 
   try {
-    const response = await ai.models.generateContent({
+    const model = ai.getGenerativeModel({ 
       model: CONFIG.PRIMARY_MODEL,
-      contents: prompt,
-      config: {
-        systemInstruction: getDebaterInstruction(config)
-      }
+      systemInstruction: getDebaterInstruction(config)
     });
-    res.json({ success: true, text: response.text || "..." });
+
+    const response = await model.generateContent(prompt);
+    res.json({ success: true, text: response.response.text() || "..." });
   } catch (error) {
     console.error("Error generating turn:", error);
     res.status(500).json({ success: false, msg: "Failed to generate debate turn." });
@@ -259,10 +258,10 @@ router.post('/generate-speech', async (req, res) => {
   const ai = getAiClient('default');
 
   try {
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash-preview-tts",
-      contents: [{ parts: [{ text }] }],
-      config: {
+    const model = ai.getGenerativeModel({ model: "gemini-2.5-flash-preview-tts" });
+    const response = await model.generateContent({
+      contents: [{ role: 'user', parts: [{ text }] }],
+      generationConfig: {
         responseModalities: [Modality.AUDIO],
         speechConfig: {
           voiceConfig: {
@@ -271,7 +270,7 @@ router.post('/generate-speech', async (req, res) => {
         },
       },
     });
-    const audioContent = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data || null;
+    const audioContent = response.response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data || null;
     res.json({ success: true, audioBase64: audioContent });
   } catch (e) {
     console.error("TTS generation failed", e);
@@ -355,13 +354,11 @@ router.post('/audience-comment', async (req, res) => {
   const langContext = lang === 'zh' ? "in Chinese (Simplified)" : "in English";
 
   try {
-     const response = await ai.models.generateContent({
-      model: CONFIG.PRIMARY_MODEL,
-      contents: `Context: A debate about "${topic}". Last argument: "${lastMessage}". 
+     const model = ai.getGenerativeModel({ model: CONFIG.PRIMARY_MODEL });
+     const response = await model.generateContent(`Context: A debate about "${topic}". Last argument: "${lastMessage}". 
       Generate a very short (1-5 words) audience reaction ${langContext}. 
-      Examples: "Agreed!", "What?", "No evidence!", "Exactly.", "Boo!", "Compelling point."`,
-    });
-    res.json({ success: true, text: response.text?.trim() || "..." });
+      Examples: "Agreed!", "What?", "No evidence!", "Exactly.", "Boo!", "Compelling point."`);
+    res.json({ success: true, text: response.response.text()?.trim() || "..." });
   } catch (error) {
     res.status(500).json({ success: false, msg: "Comment failed" });
   }
