@@ -40,11 +40,14 @@ router.post('/generate', async (req, res) => {
   `;
 
   try {
-    const response = await ai.models.generateContent({
+    const model = ai.getGenerativeModel({ 
       model: CONFIG.PRIMARY_MODEL,
-      contents: fullPrompt,
-      config: {
-        systemInstruction: SYSTEM_INSTRUCTION,
+      systemInstruction: SYSTEM_INSTRUCTION 
+    });
+
+    const response = await model.generateContent({
+      contents: [{ role: 'user', parts: [{ text: fullPrompt }] }],
+      generationConfig: {
         // High thinking budget for complex visual reasoning, even on Flash models
         thinkingConfig: {
             thinkingBudget: 32768, 
@@ -52,10 +55,11 @@ router.post('/generate', async (req, res) => {
       }
     });
 
-    if (response.text) {
+    const text = response.response.text();
+    if (text) {
         // AI may still accidentally output markdown backticks occasionally despite instruction
         // We clean it just to be safe
-        let svgCode = response.text.trim();
+        let svgCode = text.trim();
         if (svgCode.startsWith('```')) {
             svgCode = svgCode.replace(/^```[a-z]*\n/i, '').replace(/\n```$/m, '');
         }

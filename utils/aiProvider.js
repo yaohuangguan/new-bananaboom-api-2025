@@ -172,22 +172,26 @@ async function generateJSON(prompt, modelName = CONFIG.PRIMARY_MODEL, schema = n
   let attempts = 0;
   const processedPrompt = await prepareContentForGemini(prompt);
 
+  // 包装成标准 contents 格式
+  const contents = Array.isArray(processedPrompt) ? processedPrompt : [{ role: 'user', parts: [processedPrompt] }];
+
   while (attempts <= 1) {
     attempts++;
-    console.log(`🤖 [AI JSON] Model: ${currentModel}`);
+    console.log(`🤖 [AI JSON] Model: ${currentModel} (App: ${appKey})`);
     try {
-      const config = { responseMimeType: 'application/json' };
-      if (schema) config.responseSchema = schema;
+      const generationConfig = { responseMimeType: 'application/json' };
+      if (schema) generationConfig.responseSchema = schema;
 
+      const model = ai.getGenerativeModel({ model: currentModel });
       const response = await withTimeout(
-        ai.models.generateContent({
-          model: currentModel,
-          contents: processedPrompt,
-          config
+        model.generateContent({
+          contents: contents,
+          generationConfig
         }),
         CONFIG.TIMEOUT_MS
       );
-      const rawText = response.text || JSON.stringify(response);
+      
+      const rawText = response.response.text();
       return JSON.parse(cleanJSONString(rawText));
     } catch (err) {
       console.error(`⚠️ [AI Error] ${currentModel}:`, err.message);
@@ -208,11 +212,15 @@ async function generateStream(promptInput, appKey = 'default') {
   let formattedContents = typeof promptInput === 'string' ? [{ role: 'user', parts: [{ text: promptInput }] }] : promptInput;
   formattedContents = await prepareContentForGemini(formattedContents);
 
+  const model = ai.getGenerativeModel({ model: currentModel });
   try {
-    return await ai.models.generateContentStream({ model: currentModel, contents: formattedContents });
+    const result = await model.generateContentStream({ contents: formattedContents });
+    return result.stream;
   } catch (err) {
     try {
-      return await ai.models.generateContentStream({ model: CONFIG.FALLBACK_MODEL, contents: formattedContents });
+      const fallbackModel = ai.getGenerativeModel({ model: CONFIG.FALLBACK_MODEL });
+      const result = await fallbackModel.generateContentStream({ contents: formattedContents });
+      return result.stream;
     } catch (e) { throw err; }
   }
 }
@@ -246,24 +254,30 @@ async function* _runAgentLoop(modelName, { systemInstruction, history, prompt, t
         : [{ functionDeclarations: toolsSchema }];
   }
 
-  const chat = ai.chats.create({
+  const model = ai.getGenerativeModel({ 
     model: modelName,
+    systemInstruction: systemInstruction 
+  });
+  
+  const chat = model.startChat({
     history: history || [],
-    config: { systemInstruction, tools: finalTools }
+    generationConfig: { tools: finalTools }
   });
 
-  const resultStream = await chat.sendMessageStream({ message: prompt });
+  const messageParts = Array.isArray(prompt) ? prompt : [prompt];
+  const result = await chat.sendMessageStream(messageParts);
+
   let functionCallFound = false;
   const functionCallsToExecute = [];
 
-  for await (const chunk of resultStream) {
-    const calls = chunk.functionCalls;
+  for await (const chunk of result.stream) {
+    const calls = chunk.functionCalls();
     if (calls && calls.length > 0) {
       functionCallFound = true;
       functionCallsToExecute.push(...calls);
       continue;
     }
-    if (!functionCallFound && chunk.text) yield chunk.text;
+    if (!functionCallFound && chunk.text()) yield chunk.text();
   }
 
   if (functionCallFound && functionCallsToExecute.length > 0) {
@@ -278,8 +292,8 @@ async function* _runAgentLoop(modelName, { systemInstruction, history, prompt, t
       } else { toolResult = { error: 'Function not found' }; }
       functionResponsesParts.push({ functionResponse: { name: funcName, response: { content: toolResult } } });
     }
-    const result2 = await chat.sendMessageStream({ message: functionResponsesParts });
-    for await (const chunk2 of result2) { if (chunk2.text) yield chunk2.text; }
+    const result2 = await chat.sendMessageStream(functionResponsesParts);
+    for await (const chunk2 of result2.stream) { if (chunk2.text()) yield chunk2.text(); }
   }
 }
 
@@ -287,8 +301,10 @@ async function generateTitle(historyText, appKey = 'default') {
   const ai = getAiClient(appKey);
   try {
     const prompt = `生成一个5-10字的纯文本标题: ${historyText.substring(0, 500)}`;
-    const result = await ai.models.generateContent(prompt);
-    return result.text ? result.text.trim() : '新对话';
+    const model = ai.getGenerativeModel({ model: CONFIG.PRIMARY_MODEL });
+    const result = await model.generateContent(prompt);
+    const text = result.response.text();
+    return text ? text.trim() : '新对话';
   } catch (e) { return '新对话'; }
 }
 

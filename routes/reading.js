@@ -268,14 +268,17 @@ router.post('/chat', async (req, res) => {
 
   try {
     const readingAi = getAiClient('reading');
-    const chat = readingAi.chats.create({
-        model: CONFIG.PRIMARY_MODEL,
-        config: { systemInstruction },
-        history: history
+    const model = readingAi.getGenerativeModel({ 
+      model: CONFIG.PRIMARY_MODEL,
+      systemInstruction: systemInstruction 
+    });
+
+    const chat = model.startChat({
+      history: history
     });
     
     const result = await chat.sendMessage(message);
-    res.json({ success: true, text: result.text });
+    res.json({ success: true, text: result.response.text() });
   } catch (error) {
     console.error("Error in chatWithCharacter:", error);
     res.status(500).json({ success: false, msg: "Chat failed", error: error.message });
@@ -295,11 +298,9 @@ router.post('/summary', async (req, res) => {
   
   try {
     const readingAi = getAiClient('reading');
-    const response = await readingAi.models.generateContent({
-        model: CONFIG.PRIMARY_MODEL,
-        contents: prompt
-    });
-    res.json({ success: true, text: response.text || "Could not generate summary." });
+    const model = readingAi.getGenerativeModel({ model: CONFIG.PRIMARY_MODEL });
+    const response = await model.generateContent(prompt);
+    res.json({ success: true, text: response.response.text() || "Could not generate summary." });
   } catch (error) {
     console.error("Error generating summary:", error);
     res.status(500).json({ success: false, msg: "Failed to generate summary", error: error.message });
