@@ -50,6 +50,7 @@ import cloudinaryRoutes from './routes/cloudinary.js';
 import externalRoutes from './routes/external.js';
 import aiRoutes from './routes/ai.js';
 import readingRoutes from './routes/reading.js';
+import voice2mapRoutes from './routes/voice2map.js';
 import uploadRoutes from './routes/upload.js';
 
 // 👇👇👇【新增】全局代理配置 (仅开发环境生效) 👇👇👇
@@ -185,6 +186,7 @@ app.use('/api/cloudinary', cloudinaryRoutes);
 app.use('/api/external', externalRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/reading', readingRoutes);
+app.use('/api/voice2map', voice2mapRoutes);
 app.use('/api/upload', uploadRoutes);
 
 // ==========================================
