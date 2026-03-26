@@ -51,31 +51,33 @@ router.post('/generate', async (req, res) => {
   };
 
   try {
-    const model = ai.getGenerativeModel({ 
+    const chat = ai.chats.create({
       model: CONFIG.PRIMARY_MODEL,
-      systemInstruction: SYSTEM_PROMPT 
-    });
-
-    const chat = model.startChat({
-      generationConfig: {
+      config: {
+        systemInstruction: SYSTEM_PROMPT,
         responseMimeType: 'application/json',
         responseSchema: responseSchema,
+        thinkingConfig: {
+          thinkingBudget: 32768 
+        }
       }
     });
 
-    const result = await chat.sendMessage([
-      {
-        inlineData: {
-          mimeType: 'audio/mp3', 
-          data: audioBase64
+    const result = await chat.sendMessage({
+      message: [
+        {
+          inlineData: {
+            mimeType: 'audio/mp3', 
+            data: audioBase64
+          }
+        },
+        {
+          text: "Listen to this audio. Structurally organize these thoughts into a Mind Map JSON with a 'root' object containing 'id', 'label', 'details', 'category', and 'children' array."
         }
-      },
-      {
-        text: "Listen to this audio. Structurally organize these thoughts into a Mind Map JSON with a 'root' object containing 'id', 'label', 'details', 'category', and 'children' array."
-      }
-    ]);
+      ]
+    });
 
-    const jsonText = result.response.text();
+    const jsonText = result.text;
     if (!jsonText) throw new Error("No text response from Gemini");
 
     // Re-use current backend cleaning logic just in case
@@ -113,14 +115,16 @@ router.post('/enrich-search', async (req, res) => {
   const ai = getAiClient('default');
 
   try {
-    const model = ai.getGenerativeModel({ model: CONFIG.PRIMARY_MODEL });
-    const response = await model.generateContent({
-      contents: [{ role: 'user', parts: [{ text: `Search for "${query}". Provide a 1-sentence summary of key facts.` }] }],
-      tools: [{ googleSearch: {} }]
+    const response = await ai.models.generateContent({
+      model: CONFIG.PRIMARY_MODEL,
+      contents: `Search for "${query}". Provide a 1-sentence summary of key facts.`,
+      config: {
+        tools: [{ googleSearch: {} }]
+      }
     });
 
-    const text = response.response.text() || "";
-    const chunks = response.response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+    const text = response.text || "";
+    const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
     const links = chunks
       .filter((c) => c.web?.uri)
       .map((c) => ({ 
@@ -161,14 +165,14 @@ router.post('/enrich-maps', async (req, res) => {
         };
     }
 
-    const model = ai.getGenerativeModel({ model: CONFIG.PRIMARY_MODEL });
-    const response = await model.generateContent({
-      contents: [{ role: 'user', parts: [{ text: `Find "${query}". Provide the address, rating, and a brief review snippet if available.` }] }],
-      ...config
+    const response = await ai.models.generateContent({
+      model: CONFIG.PRIMARY_MODEL,
+      contents: `Find "${query}". Provide the address, rating, and a brief review snippet if available.`,
+      config: config
     });
 
-    const text = response.response.text() || "";
-    const chunks = response.response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+    const text = response.text || "";
+    const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
     
     // Maps grounding chunks structure
     const links = [];
