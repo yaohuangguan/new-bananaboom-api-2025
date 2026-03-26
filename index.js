@@ -49,6 +49,7 @@ import schedulerRoutes from './routes/scheduler.js';
 import cloudinaryRoutes from './routes/cloudinary.js';
 import externalRoutes from './routes/external.js';
 import aiRoutes from './routes/ai.js';
+import readingRoutes from './routes/reading.js';
 import uploadRoutes from './routes/upload.js';
 
 // 👇👇👇【新增】全局代理配置 (仅开发环境生效) 👇👇👇
@@ -183,6 +184,7 @@ app.use('/api/cron', schedulerRoutes);
 app.use('/api/cloudinary', cloudinaryRoutes);
 app.use('/api/external', externalRoutes);
 app.use('/api/ai', aiRoutes);
+app.use('/api/reading', readingRoutes);
 app.use('/api/upload', uploadRoutes);
 
 // ==========================================

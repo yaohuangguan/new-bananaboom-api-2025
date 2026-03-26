@@ -1,6 +1,7 @@
 import { Router } from 'express';
 const router = Router();
 import { createAgentStream, generateJSON } from '../utils/aiProvider.js';
+import { Type } from '@google/genai';
 import { toolsSchema, functions } from '../utils/aiTools.js';
 import { getSecondBrainSystemPrompt } from '../utils/prompts.js';
 
@@ -470,6 +471,90 @@ router.post('/ask-life', async (req, res) => {
     console.error('Second Brain Error:', err);
     res.status(500).json({
       msg: '大脑过载了，请稍后再试'
+    });
+  }
+});
+
+/**
+ * =================================================================
+ * 🗣️ 接口4：生成英语学习句子对话
+ * =================================================================
+ * @route   POST /api/ai/generate-sentences
+ * @desc    根据级别、偏好、场景生成英语句子/对话，包含详细的词汇解析
+ * @body    { "config": { "level": string, "preference": string, "scenario": string, "isConversation": boolean } }
+ */
+router.post('/generate-sentences', async (req, res) => {
+  const config = req.body.config || req.body || {};
+  const level = config.level || "TOEFL or GRE";
+  const preference = config.preference || "general";
+  const scenario = config.scenario || "various contexts";
+  const isConversation = config.isConversation ?? true;
+
+  const prompt = isConversation 
+    ? `Generate a continuous 10-turn English conversation for language learning. 
+      Level/Vocabulary: ${level}
+      Preference/Topic: ${preference}
+      Scenario/Context: ${scenario}
+      
+      The 10 sentences MUST form a coherent, back-and-forth dialogue or a continuous narrative in the given scenario.
+      Each sentence MUST contain at least one vocabulary word appropriate for the specified level. 
+      Provide the English sentence, its Chinese translation, the specific target vocabulary word used, and a detailed breakdown of every single word in the English sentence (including phonetic transcription, part of speech in Chinese, and meaning in Chinese).`
+    : `Generate 10 independent English sentences for language learning. 
+      Level/Vocabulary: ${level}
+      Preference/Topic: ${preference}
+      Scenario/Context: ${scenario}
+      
+      Each sentence MUST contain at least one vocabulary word appropriate for the specified level. 
+      Provide the English sentence, its Chinese translation, the specific target vocabulary word used, and a detailed breakdown of every single word in the English sentence (including phonetic transcription, part of speech in Chinese, and meaning in Chinese).`;
+
+  const responseSchema = {
+    type: Type.ARRAY,
+    items: {
+      type: Type.OBJECT,
+      properties: {
+        english: {
+          type: Type.STRING,
+          description: "The English sentence containing the vocabulary word."
+        },
+        chinese: {
+          type: Type.STRING,
+          description: "The Chinese translation of the sentence."
+        },
+        word: {
+          type: Type.STRING,
+          description: "The specific TOEFL or GRE vocabulary word used in the sentence."
+        },
+        details: {
+          type: Type.ARRAY,
+          description: "A detailed breakdown of EVERY word in the English sentence, in order.",
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              word: { type: Type.STRING, description: "The English word." },
+              phonetic: { type: Type.STRING, description: "The phonetic transcription (e.g., /laɪk/)." },
+              pos: { type: Type.STRING, description: "The part of speech in Chinese (e.g., 动词, 名词)." },
+              meaning: { type: Type.STRING, description: "The meaning of the word in Chinese." }
+            },
+            required: ["word", "phonetic", "pos", "meaning"]
+          }
+        }
+      },
+      required: ["english", "chinese", "word", "details"]
+    }
+  };
+
+  try {
+    const data = await generateJSON(prompt, "gemini-3-flash-preview", responseSchema, 'orion-english');
+    res.json({
+      success: true,
+      data: data
+    });
+  } catch (error) {
+    console.error("Error generating sentences:", error);
+    res.status(500).json({
+      success: false,
+      msg: "Failed to generate language learning sentences.",
+      error: error.message
     });
   }
 });

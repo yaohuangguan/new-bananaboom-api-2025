@@ -7,9 +7,15 @@ if (!process.env.GEMINI_API_KEY) {
   throw new Error('❌ [Fatal] 缺少环境变量 GEMINI_API_KEY');
 }
 
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY
-});
+const clients = {
+  default: new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY }),
+  'orion-english': process.env.GEMINI_ORION_ENGLISH_API_KEY ? new GoogleGenAI({ apiKey: process.env.GEMINI_ORION_ENGLISH_API_KEY }) : null,
+  reading: process.env.GEMINI_READING_APP_API_KEY ? new GoogleGenAI({ apiKey: process.env.GEMINI_READING_APP_API_KEY }) : null,
+};
+
+const getAiClient = (appKey = 'default') => {
+  return clients[appKey] || clients.default;
+};
 
 // 生产级配置
 const CONFIG = {
@@ -153,7 +159,8 @@ function withTimeout(promise, ms) {
   return Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), ms))]);
 }
 
-async function generateJSON(prompt, modelName = CONFIG.PRIMARY_MODEL) {
+async function generateJSON(prompt, modelName = CONFIG.PRIMARY_MODEL, schema = null, appKey = 'default') {
+  const ai = getAiClient(appKey);
   let currentModel = modelName;
   let attempts = 0;
   const processedPrompt = await prepareContentForGemini(prompt);
@@ -162,11 +169,14 @@ async function generateJSON(prompt, modelName = CONFIG.PRIMARY_MODEL) {
     attempts++;
     console.log(`🤖 [AI JSON] Model: ${currentModel}`);
     try {
+      const config = { responseMimeType: 'application/json' };
+      if (schema) config.responseSchema = schema;
+
       const response = await withTimeout(
         ai.models.generateContent({
           model: currentModel,
           contents: processedPrompt,
-          config: { responseMimeType: 'application/json' }
+          config
         }),
         CONFIG.TIMEOUT_MS
       );
@@ -185,7 +195,8 @@ async function generateJSON(prompt, modelName = CONFIG.PRIMARY_MODEL) {
   }
 }
 
-async function generateStream(promptInput) {
+async function generateStream(promptInput, appKey = 'default') {
+  const ai = getAiClient(appKey);
   const currentModel = CONFIG.PRIMARY_MODEL;
   let formattedContents = typeof promptInput === 'string' ? [{ role: 'user', parts: [{ text: promptInput }] }] : promptInput;
   formattedContents = await prepareContentForGemini(formattedContents);
@@ -199,27 +210,28 @@ async function generateStream(promptInput) {
   }
 }
 
-async function* createAgentStream(params) {
+async function* createAgentStream(params, appKey = 'default') {
   const currentModel = CONFIG.PRIMARY_MODEL;
   
   if (params.history) params.history = await prepareContentForGemini(params.history);
   params.prompt = await prepareContentForGemini(params.prompt);
 
   try {
-    console.log(`🌊 [Agent Stream] Start: ${currentModel}`);
-    yield* _runAgentLoop(currentModel, params);
+    console.log(`🌊 [Agent Stream] Start: ${currentModel} (App: ${appKey})`);
+    yield* _runAgentLoop(currentModel, params, appKey);
   } catch (err) {
     console.warn(`⚠️ [Agent Warning] ${currentModel} failed: ${err.message}`);
     if (currentModel !== CONFIG.FALLBACK_MODEL) {
       console.log(`🔄 [Agent Fallback] Switching to ${CONFIG.FALLBACK_MODEL}`);
       try {
-        yield* _runAgentLoop(CONFIG.FALLBACK_MODEL, params);
+        yield* _runAgentLoop(CONFIG.FALLBACK_MODEL, params, appKey);
       } catch (fallbackErr) { throw new Error(`Agent failed: ${fallbackErr.message}`); }
     } else { throw err; }
   }
 }
 
-async function* _runAgentLoop(modelName, { systemInstruction, history, prompt, toolsSchema, functionsMap }) {
+async function* _runAgentLoop(modelName, { systemInstruction, history, prompt, toolsSchema, functionsMap }, appKey = 'default') {
+  const ai = getAiClient(appKey);
   let finalTools = undefined;
   if (toolsSchema) {
     finalTools = Array.isArray(toolsSchema) && toolsSchema[0]?.functionDeclarations 
@@ -264,7 +276,8 @@ async function* _runAgentLoop(modelName, { systemInstruction, history, prompt, t
   }
 }
 
-async function generateTitle(historyText) {
+async function generateTitle(historyText, appKey = 'default') {
+  const ai = getAiClient(appKey);
   try {
     const prompt = `生成一个5-10字的纯文本标题: ${historyText.substring(0, 500)}`;
     const result = await ai.models.generateContent(prompt);
@@ -272,4 +285,4 @@ async function generateTitle(historyText) {
   } catch (e) { return '新对话'; }
 }
 
-export { generateJSON, generateStream, createAgentStream, generateTitle };
+export { getAiClient, CONFIG, generateJSON, generateStream, createAgentStream, generateTitle };
