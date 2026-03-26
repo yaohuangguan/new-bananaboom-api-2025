@@ -53,6 +53,7 @@ import readingRoutes from './routes/reading.js';
 import voice2mapRoutes from './routes/voice2map.js';
 import debaterRoutes from './routes/debater.js';
 import rpgRoutes from './routes/rpg.js';
+import drawingRoutes from './routes/drawing.js';
 import uploadRoutes from './routes/upload.js';
 
 // 👇👇👇【新增】全局代理配置 (仅开发环境生效) 👇👇👇
@@ -191,6 +192,7 @@ app.use('/api/reading', readingRoutes);
 app.use('/api/voice2map', voice2mapRoutes);
 app.use('/api/debater', debaterRoutes);
 app.use('/api/rpg', rpgRoutes);
+app.use('/api/drawing', drawingRoutes);
 app.use('/api/upload', uploadRoutes);
 
 // ==========================================
