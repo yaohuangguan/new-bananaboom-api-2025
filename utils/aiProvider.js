@@ -20,7 +20,7 @@ const getAiClient = (appKey = 'default') => {
 // 生产级配置
 const CONFIG = {
   PRIMARY_MODEL: 'gemini-3-flash-preview',
-  FALLBACK_MODEL: 'gemini-2.0-flash-exp',
+  FALLBACK_MODEL: 'gemini-3-flash-preview',
   MAX_RETRIES: 1,
   TIMEOUT_MS: 120000 // 2分钟超时
 };
@@ -149,9 +149,16 @@ const prepareContentForGemini = async (contents) => {
 function cleanJSONString(text) {
   if (!text) return '{}';
   let clean = text.replace(/```json|```/g, '').trim();
-  const firstOpen = clean.indexOf('{');
-  const lastClose = clean.lastIndexOf('}');
-  if (firstOpen !== -1 && lastClose !== -1) clean = clean.substring(firstOpen, lastClose + 1);
+  
+  // 支持对象 {} 和数组 []
+  const startIdx = clean.search(/[\[\{]/);
+  const endBrace = clean.lastIndexOf('}');
+  const endBracket = clean.lastIndexOf(']');
+  const endIdx = Math.max(endBrace, endBracket);
+
+  if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+    clean = clean.substring(startIdx, endIdx + 1);
+  }
   return clean;
 }
 
