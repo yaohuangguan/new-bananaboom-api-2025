@@ -16,15 +16,12 @@ const router = Router();
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 5 * 1024 * 1024 // 单个文件限制 5MB (如果是 Cloud Run，注意总内存别爆了)
+    fileSize: 10 * 1024 * 1024 // 单个文件限制 10MB (放宽限制，以支持更多资源类型)
   },
   fileFilter: (req, file, cb) => {
-    // 允许图片
-    if (file.mimetype.startsWith('image/')) {
-      cb(null, true);
-    } else {
-      cb(new Error('Only images are allowed!'), false);
-    }
+    // 概念已升级为 Resources，不再限制仅图片
+    // 如果需要限制特定黑名单后缀，可以在这里处理
+    cb(null, true);
   }
 });
 
@@ -34,7 +31,7 @@ const upload = multer({
 
 /**
  * @route   POST /api/upload
- * @desc    上传图片到 R2 (强制在 uploads/ 下，支持自定义子目录)
+ * @desc    上传资源到 R2 (强制在 uploads/ 下，支持自定义子目录)
  */
 router.post('/', upload.array('files', 10), async (req, res) => {
   try {
@@ -83,7 +80,7 @@ router.post('/', upload.array('files', 10), async (req, res) => {
       // 记录日志
       logOperation({
         operatorId: req.user?.id || 'anonymous',
-        action: 'UPLOAD_IMAGE',
+        action: 'UPLOAD_RESOURCE',
         target: fileName,
         details: { size: file.size, originalName: file.originalname, folder: finalFolderPrefix },
         ip: req.ip
@@ -101,7 +98,7 @@ router.post('/', upload.array('files', 10), async (req, res) => {
 
     res.json({
       success: true,
-      msg: `Successfully uploaded ${results.length} images`,
+      msg: `Successfully uploaded ${results.length} resources`,
       folder: finalFolderPrefix, // 返回给前端看一眼最终存哪了
       data: results
     });
@@ -216,10 +213,10 @@ router.get('/list', async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 50;
     const cursor = req.query.cursor || undefined;
-    const type = req.query.type || 'image';
+    const type = req.query.type || 'resource';
 
     // 1. 确定根仓库目录 (Root Prefix)
-    let rootPrefix = 'uploads/'; // 默认图片库
+    let rootPrefix = 'uploads/'; // 默认资源库
     if (type === 'backup') {
       rootPrefix = 'db-backups/';
     }
@@ -355,7 +352,7 @@ router.get('/r2/usage', async (req, res) => {
     // 统计数据结构
     const stats = {
       total: { count: 0, size: 0, sizeFormatted: '' },
-      images: { count: 0, size: 0, sizeFormatted: '' }, // uploads/
+      resources: { count: 0, size: 0, sizeFormatted: '' }, // uploads/
       backups: { count: 0, size: 0, sizeFormatted: '' }, // db-backups/
       others: { count: 0, size: 0, sizeFormatted: '' }
     };
@@ -380,8 +377,8 @@ router.get('/r2/usage', async (req, res) => {
 
         // 分类统计
         if (key.startsWith('uploads/')) {
-          stats.images.count++;
-          stats.images.size += size;
+          stats.resources.count++;
+          stats.resources.size += size;
         } else if (key.startsWith('db-backups/')) {
           stats.backups.count++;
           stats.backups.size += size;
@@ -397,7 +394,7 @@ router.get('/r2/usage', async (req, res) => {
 
     // 格式化大小
     stats.total.sizeFormatted = formatBytes(stats.total.size);
-    stats.images.sizeFormatted = formatBytes(stats.images.size);
+    stats.resources.sizeFormatted = formatBytes(stats.resources.size);
     stats.backups.sizeFormatted = formatBytes(stats.backups.size);
     stats.others.sizeFormatted = formatBytes(stats.others.size);
 
@@ -406,7 +403,7 @@ router.get('/r2/usage', async (req, res) => {
     const usage = {
       ...stats,
       percentages: {
-        images: ((stats.images.size / totalSize) * 100).toFixed(1),
+        resources: ((stats.resources.size / totalSize) * 100).toFixed(1),
         backups: ((stats.backups.size / totalSize) * 100).toFixed(1),
         others: ((stats.others.size / totalSize) * 100).toFixed(1)
       }
