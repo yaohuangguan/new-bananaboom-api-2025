@@ -123,8 +123,16 @@ const ROUTE_MAP = [
   { path: '/api/fitness', method: 'ALL', permission: K.FITNESS_USE },
   { path: '/api/period', method: 'ALL', permission: K.PERIOD_USE },
   { path: '/api/footprints', method: 'ALL', permission: K.FOOTPRINT_USE },
-  { path: '/api/ai', method: 'ALL', permission: K.BRAIN_USE },
   { path: '/api/chat', method: 'ALL', permission: K.BRAIN_USE },
+  { path: '/api/ai/generate-sentences', method: 'POST', permission: null },
+  { path: '/api/ai', method: 'ALL', permission: K.BRAIN_USE },
+  
+  // --- 迁移后的 AI 应用 (Login Required, No Specific Permission) ---
+  { path: '/api/reading', method: 'ALL', permission: null },
+  { path: '/api/voice2map', method: 'ALL', permission: null },
+  { path: '/api/debater', method: 'ALL', permission: null },
+  { path: '/api/rpg', method: 'ALL', permission: null },
+  { path: '/api/drawing', method: 'ALL', permission: null },
 
   // ============================================================
   // Level 9: 系统核心管理 (High Risk)
