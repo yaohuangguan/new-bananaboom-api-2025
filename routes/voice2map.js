@@ -81,7 +81,7 @@ router.post('/generate', async (req, res) => {
     if (!jsonText) throw new Error("No text response from Gemini");
 
     // Re-use current backend cleaning logic just in case
-    let parsedData = JSON.parse(jsonText);
+    const parsedData = JSON.parse(jsonText);
     
     if (!parsedData.root) {
       throw new Error("Invalid JSON structure: missing root");

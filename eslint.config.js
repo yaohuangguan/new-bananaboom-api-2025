@@ -21,6 +21,7 @@ export default [
       // 1. 关掉路径检查 (pnpm 下不准)
       'import/no-unresolved': 'off',
       'node/no-missing-import': 'off',
+      'no-useless-escape': 'off',
 
       // 2. 允许 console (后端常用于打日志)
       'no-console': 'off',
