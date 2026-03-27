@@ -59,17 +59,12 @@ export const aiGuard = (projectId) => {
       let userAiServicesMap = systemCache.get(userCacheKey);
 
       if (!userAiServicesMap) {
-        const user = await User.findById(userId).select('aiServices');
+        const user = await User.findById(userId).select('aiServices').lean();
         if (!user) {
           return res.status(404).json({ msg: '用户不存在' });
         }
         
-        userAiServicesMap = {};
-        if (user.aiServices && typeof user.aiServices.forEach === 'function') {
-           user.aiServices.forEach((value, key) => {
-              userAiServicesMap[key] = value;
-           });
-        }
+        userAiServicesMap = user.aiServices || {};
         // 缓存 60秒
         systemCache.set(userCacheKey, userAiServicesMap, 60);
       }

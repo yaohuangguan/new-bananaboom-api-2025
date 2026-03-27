@@ -62,23 +62,15 @@ router.get('/profile', async (req, res) => {
 router.get('/ai-status', async (req, res) => {
   try {
     const { id } = req.user;
-    const user = await User.findById(id).select('aiServices');
+    const user = await User.findById(id).select('aiServices').lean();
 
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    // 将 Mongoose Map 转换为普通对象发给前端
-    const aiServicesObj = {};
-    if (user.aiServices && typeof user.aiServices.forEach === 'function') {
-      user.aiServices.forEach((value, key) => {
-        aiServicesObj[key] = value;
-      });
-    }
-
     return res.json({
        success: true,
-       data: aiServicesObj
+       data: user.aiServices || {}
     });
   } catch (err) {
     console.error('[AI Status Error]:', err);
