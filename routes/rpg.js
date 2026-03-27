@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { Type } from '@google/genai';
 import { getAiClient, CONFIG, generateJSON } from '../utils/aiProvider.js';
+import { aiGuard } from '../middleware/aiGuard.js';
+import { deductQuota } from '../utils/quotaHelper.js';
 
 const router = Router();
 
@@ -134,7 +136,7 @@ const getSystemInstruction = (config) => {
  * 1. 初始化游戏
  * @route POST /api/rpg/initialize
  */
-router.post('/initialize', async (req, res) => {
+router.post('/initialize', aiGuard('ai_rpg'), async (req, res) => {
   const { config } = req.body;
   if (!config) return res.status(400).json({ msg: "Missing game config" });
 
@@ -156,6 +158,7 @@ router.post('/initialize', async (req, res) => {
     if (!text) throw new Error("Empty response from AI");
     
     const parsed = JSON.parse(text);
+    await deductQuota(req.user.id, 'ai_rpg');
     res.json({ success: true, data: parsed });
   } catch (error) {
     console.error("Failed to initialize game:", error);
@@ -167,7 +170,7 @@ router.post('/initialize', async (req, res) => {
  * 2. 处理玩家动作 (无状态 Action)
  * @route POST /api/rpg/action
  */
-router.post('/action', async (req, res) => {
+router.post('/action', aiGuard('ai_rpg'), async (req, res) => {
   const { action, config, history = [] } = req.body;
   if (!action || !config) return res.status(400).json({ msg: "Missing action or config" });
 
@@ -190,6 +193,7 @@ router.post('/action', async (req, res) => {
     if (!text) throw new Error("Empty response from AI");
     
     const parsed = JSON.parse(text);
+    await deductQuota(req.user.id, 'ai_rpg');
     res.json({ success: true, data: parsed });
   } catch (error) {
     console.error("RPG Turn Error:", error);

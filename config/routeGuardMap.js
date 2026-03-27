@@ -20,6 +20,8 @@ const ROUTE_MAP = [
   { path: '/api/users/signin', method: 'POST', public: true },
   { path: '/api/users/reset-by-secret', method: 'POST', public: true },
   { path: '/api/users', method: 'POST', public: true }, // 注册
+  { path: '/api/payments/webhook', method: 'POST', public: true },
+  { path: '/api/payments', method: 'ALL', permission: null },
 
   // ============================================================
   // Level 3: CMS 内容展示 (读公开 / 写鉴权)

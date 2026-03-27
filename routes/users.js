@@ -53,6 +53,39 @@ router.get('/profile', async (req, res) => {
   }
 });
 
+// ==========================================
+// 🤖 获取当前用户的所有 AI 额度及会员状态
+// ==========================================
+// @route   GET api/users/ai-status
+// @desc    获取 AI Projects (Orion, RPG, Debater) quotas & membership
+// @access  Private
+router.get('/ai-status', async (req, res) => {
+  try {
+    const { id } = req.user;
+    const user = await User.findById(id).select('aiServices');
+
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // 将 Mongoose Map 转换为普通对象发给前端
+    const aiServicesObj = {};
+    if (user.aiServices && typeof user.aiServices.forEach === 'function') {
+      user.aiServices.forEach((value, key) => {
+        aiServicesObj[key] = value;
+      });
+    }
+
+    return res.json({
+       success: true,
+       data: aiServicesObj
+    });
+  } catch (err) {
+    console.error('[AI Status Error]:', err);
+    res.status(500).json({ msg: '获取 AI 额度状态失败' });
+  }
+});
+
 // @route   GET api/users
 // @desc    获取所有用户 (支持分页、搜索、自定义权重排序)
 // @access  Private

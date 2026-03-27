@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { Type, Modality } from '@google/genai';
 import { getAiClient, CONFIG, generateJSON } from '../utils/aiProvider.js';
+import { aiGuard } from '../middleware/aiGuard.js';
+import { deductQuota } from '../utils/quotaHelper.js';
 
 const router = Router();
 
@@ -90,7 +92,7 @@ Provide a one-sentence critique for each.
  * 1. 生成辩论角色
  * @route POST /api/debater/generate-personas
  */
-router.post('/generate-personas', async (req, res) => {
+router.post('/generate-personas', aiGuard('debater'), async (req, res) => {
   const { topic, lang = 'zh' } = req.body;
   if (!topic) return res.status(400).json({ msg: "Missing topic" });
 
@@ -170,6 +172,7 @@ router.post('/generate-personas', async (req, res) => {
 
   try {
     const data = await generateJSON(prompt, CONFIG.PRIMARY_MODEL, schema);
+    await deductQuota(req.user.id, 'debater');
     res.json({
       success: true,
       data: {
@@ -187,7 +190,7 @@ router.post('/generate-personas', async (req, res) => {
  * 2. 生成辩论回合 (Turn Generation)
  * @route POST /api/debater/generate-turn
  */
-router.post('/generate-turn', async (req, res) => {
+router.post('/generate-turn', aiGuard('debater'), async (req, res) => {
   const { topic, currentPersona, opponentPersona, history = [], lang = 'zh', config = {}, modifier } = req.body;
   if (!topic || !currentPersona || !opponentPersona) return res.status(400).json({ msg: "Missing required fields" });
 
@@ -241,6 +244,7 @@ router.post('/generate-turn', async (req, res) => {
         systemInstruction: getDebaterInstruction(config)
       }
     });
+    await deductQuota(req.user.id, 'debater');
     res.json({ success: true, text: response.text || "..." });
   } catch (error) {
     console.error("Error generating turn:", error);
@@ -252,7 +256,7 @@ router.post('/generate-turn', async (req, res) => {
  * 3. 语音合成 (TTS)
  * @route POST /api/debater/generate-speech
  */
-router.post('/generate-speech', async (req, res) => {
+router.post('/generate-speech', aiGuard('debater'), async (req, res) => {
   const { text, voiceName = 'Aoide' } = req.body;
   if (!text) return res.status(400).json({ msg: "Missing text" });
 
@@ -272,6 +276,7 @@ router.post('/generate-speech', async (req, res) => {
       },
     });
     const audioContent = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data || null;
+    await deductQuota(req.user.id, 'debater');
     res.json({ success: true, audioBase64: audioContent });
   } catch (e) {
     console.error("TTS generation failed", e);
@@ -283,7 +288,7 @@ router.post('/generate-speech', async (req, res) => {
  * 4. 辩论评估 (Judge Evaluation)
  * @route POST /api/debater/evaluate
  */
-router.post('/evaluate', async (req, res) => {
+router.post('/evaluate', aiGuard('debater'), async (req, res) => {
   const { topic, history = [], lang = 'zh', config = {} } = req.body;
   
   const conversationLog = history
@@ -336,6 +341,7 @@ router.post('/evaluate', async (req, res) => {
 
   try {
     const data = await generateJSON(prompt, CONFIG.PRIMARY_MODEL, schema);
+    await deductQuota(req.user.id, 'debater');
     res.json({ success: true, data });
   } catch (e) {
     console.error("Evaluation failed", e);
@@ -347,7 +353,7 @@ router.post('/evaluate', async (req, res) => {
  * 5. 观众评论 (Audience Commentary)
  * @route POST /api/debater/audience-comment
  */
-router.post('/audience-comment', async (req, res) => {
+router.post('/audience-comment', aiGuard('debater'), async (req, res) => {
   const { topic, lastMessage, lang = 'zh' } = req.body;
   if (!topic || !lastMessage) return res.status(400).json({ msg: "Missing fields" });
 
@@ -361,6 +367,7 @@ router.post('/audience-comment', async (req, res) => {
       Generate a very short (1-5 words) audience reaction ${langContext}. 
       Examples: "Agreed!", "What?", "No evidence!", "Exactly.", "Boo!", "Compelling point."`,
     });
+    await deductQuota(req.user.id, 'debater');
     res.json({ success: true, text: response.text?.trim() || "..." });
   } catch (error) {
     res.status(500).json({ success: false, msg: "Comment failed" });

@@ -4,6 +4,8 @@ import { createAgentStream, generateJSON } from '../utils/aiProvider.js';
 import { Type } from '@google/genai';
 import { toolsSchema, functions } from '../utils/aiTools.js';
 import { getSecondBrainSystemPrompt } from '../utils/prompts.js';
+import { aiGuard } from '../middleware/aiGuard.js';
+import { deductQuota } from '../utils/quotaHelper.js';
 
 
 // 引入所有数据模型 (根据你实际的文件路径调整)
@@ -483,7 +485,7 @@ router.post('/ask-life', async (req, res) => {
  * @desc    根据级别、偏好、场景生成英语句子/对话，包含详细的词汇解析
  * @body    { "config": { "level": string, "preference": string, "scenario": string, "isConversation": boolean } }
  */
-router.post('/generate-sentences', async (req, res) => {
+router.post('/generate-sentences', aiGuard('orion_english'), async (req, res) => {
   const config = req.body.config || req.body || {};
   const level = config.level || "TOEFL or GRE";
   const preference = config.preference || "general";
@@ -545,6 +547,7 @@ router.post('/generate-sentences', async (req, res) => {
 
   try {
     const data = await generateJSON(prompt, "gemini-3-flash-preview", responseSchema, 'orion-english');
+    await deductQuota(req.user.id, 'orion_english');
     res.json({
       success: true,
       data: data

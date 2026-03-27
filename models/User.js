@@ -51,6 +51,30 @@ const UserSchema = Schema({
     default: 'maintain'
   },
 
+  // --- AI 服务权限与计费策略 ---
+  aiServices: {
+    type: Map,
+    of: new Schema({
+      quota: { type: Number, default: 1 },         // 免费试用次数 (默认1次)
+      isMember: { type: Boolean, default: false }, // 是否为有效会员（代码逻辑：当前时间是否小于 subscriptionEnd）
+      subscriptionTier: {                          // 订阅方案类型
+        type: String, 
+        enum: ['none', 'monthly', 'quarterly', 'yearly'], 
+        default: 'none' 
+      },
+      subscriptionEnd: { type: Date, default: null }, // 会员到期时间
+      stripeSubscriptionId: { type: String },         // 用于关联 Stripe 上的连续包月账单
+      enabled: { type: Boolean, default: true }       // 单用户维度的封禁开关 (置为 false 则无法使用)
+    }, { _id: false }),
+    default: () => ({
+      orion_english: { quota: 1, isMember: false, subscriptionTier: 'none', enabled: true },
+      ai_rpg: { quota: 1, isMember: false, subscriptionTier: 'none', enabled: true },
+      debater: { quota: 1, isMember: false, subscriptionTier: 'none', enabled: true },
+      drawing: { quota: 1, isMember: false, subscriptionTier: 'none', enabled: true },
+      voice2map: { quota: 1, isMember: false, subscriptionTier: 'none', enabled: true }
+    })
+  },
+
   // --- 权限控制 ---
   role: {
     type: String,

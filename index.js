@@ -55,6 +55,7 @@ import debaterRoutes from './routes/debater.js';
 import rpgRoutes from './routes/rpg.js';
 import drawingRoutes from './routes/drawing.js';
 import uploadRoutes from './routes/upload.js';
+import paymentsRoutes from './routes/payments.js';
 
 // 👇👇👇【新增】全局代理配置 (仅开发环境生效) 👇👇👇
 import { setGlobalDispatcher, ProxyAgent } from 'undici';
@@ -117,6 +118,9 @@ app.use(morgan('tiny'));
 app.use(helmet());
 app.options(/.*/, cors()); // ✅ 修复：把 "*" 改成 "(.*)"
 app.use(cors(corsConfig));
+
+// 🛡️ Stripe Webhook 专属通道 (必须在 bodyParser 和 auth 网关前解析出原始 Buffer 数据)
+app.use('/api/payments/webhook', express.raw({ type: 'application/json' }));
 
 // Body 解析 (支持大文件上传)
 app.use(json({ limit: '50mb' }));
@@ -194,6 +198,7 @@ app.use('/api/debater', debaterRoutes);
 app.use('/api/rpg', rpgRoutes);
 app.use('/api/drawing', drawingRoutes);
 app.use('/api/upload', uploadRoutes);
+app.use('/api/payments', paymentsRoutes);
 
 // ==========================================
 // 🏁 启动服务器
