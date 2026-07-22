@@ -20,6 +20,8 @@ const ResumeSchema = new Schema(
       phone: String,
       location_zh: String,
       location_en: String,
+      visaStatus_zh: String,
+      visaStatus_en: String,
       summary_zh: String, // 个人简介
       summary_en: String
     },
@@ -53,7 +55,9 @@ const ResumeSchema = new Schema(
         highlights_zh: [String],
         highlights_en: [String],
         location_zh: String,
-        location_en: String
+        location_en: String,
+        weight: Number,
+        isProject: Boolean
       }
     ],
 
