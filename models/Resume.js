@@ -10,6 +10,16 @@ const ResumeSchema = new Schema(
       unique: true,
       default: 'sam'
     },
+    user: {
+      type: String,
+      required: true,
+      default: 'sam'
+    },
+    title: {
+      type: String,
+      required: true,
+      default: '默认简历'
+    },
     // 1. 基础信息
     basics: {
       name_zh: String,

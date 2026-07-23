@@ -6,15 +6,32 @@ import Resume from '../models/Resume.js';
 import validate from '../middleware/validate.js'; // 你的通用校验中间件
 
 // ==========================================
-// 1. 获取简历 (公开接口)
+// 1. 获取简历列表 (公开接口)
+// ==========================================
+// @route   GET api/resumes/list
+// @desc    获取指定用户的所有简历版本列表
+// @param   user (可选): "sam" | "jenny"。默认 "sam"
+// @access  Public
+router.get('/list', async (req, res) => {
+  try {
+    const targetUser = req.query.user || 'sam';
+    const resumes = await Resume.find({ user: targetUser }, 'slug title user createdAt').sort({ createdAt: 1 });
+    res.json(resumes);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send('Server Error');
+  }
+});
+
+// ==========================================
+// 2. 获取简历 (公开接口)
 // ==========================================
 // @route   GET api/resumes
-// @desc    获取简历数据
-// @param   user (可选): "sam" | "jenny"。默认 "sam"
+// @desc    获取指定版本的简历数据
+// @param   user (可选): 简历 slug，如 "sam" | "sam-parttime"。默认 "sam"
 // @access  Public
 router.get('/', async (req, res) => {
   try {
-    // 🔥 核心逻辑：前端不传参默认找 "sam"
     const targetSlug = req.query.user || 'sam';
 
     const resume = await Resume.findOne({ slug: targetSlug });
@@ -31,11 +48,11 @@ router.get('/', async (req, res) => {
 });
 
 // ==========================================
-// 2. 更新简历 (管理接口)
+// 3. 更新简历 (管理接口)
 // ==========================================
 // @route   PUT api/resumes
-// @desc    更新指定用户的简历
-// @param   user (可选): 要更新谁？默认 "sam"
+// @desc    更新/创建指定版本的简历
+// @param   user (可选): 简历 slug，如 "sam" | "sam-parttime"。默认 "sam"
 // @access  Private
 router.put(
   '/',
@@ -64,22 +81,31 @@ router.put(
   ],
   async (req, res) => {
     try {
-      // 🔥 核心逻辑：确定要更新谁的简历
-      // 如果前端想更新 Jenny 的，必须发 PUT /api/resume?user=jenny
       const targetSlug = req.query.user || 'sam';
 
       // 执行更新
-      // $set: req.body 会智能合并。
-      // 注意：对于数组字段（如 work），Mongoose 会直接覆盖整个数组（符合前端表单提交习惯）
       const resume = await Resume.findOneAndUpdate(
         { slug: targetSlug },
         { $set: req.body },
-        { new: true, upsert: true, setDefaultsOnInsert: true } // 如果不存在则创建
+        { new: true, upsert: true, setDefaultsOnInsert: true }
       );
 
-      // 如果是第一次创建，且没传 slug，强制补上 slug 防止数据错乱
+      let needsSave = false;
       if (!resume.slug) {
         resume.slug = targetSlug;
+        needsSave = true;
+      }
+      if (!resume.user) {
+        const parts = targetSlug.split('-');
+        resume.user = parts[0] || 'sam';
+        needsSave = true;
+      }
+      if (req.body.title && resume.title !== req.body.title) {
+        resume.title = req.body.title;
+        needsSave = true;
+      }
+
+      if (needsSave) {
         await resume.save();
       }
 
@@ -91,5 +117,32 @@ router.put(
     }
   }
 );
+
+// ==========================================
+// 4. 删除简历 (管理接口)
+// ==========================================
+// @route   DELETE api/resumes
+// @desc    删除指定简历版本
+// @param   user (可选): 简历 slug，如 "sam-parttime"。默认 "sam"
+// @access  Private
+router.delete('/', async (req, res) => {
+  try {
+    const targetSlug = req.query.user || 'sam';
+    if (targetSlug === 'sam' || targetSlug === 'jenny') {
+      return res.status(400).json({ msg: 'Cannot delete the main resume version' });
+    }
+
+    const resume = await Resume.findOneAndDelete({ slug: targetSlug });
+    if (!resume) {
+      return res.status(404).json({ msg: `Resume for slug '${targetSlug}' not found` });
+    }
+
+    console.log(`✅ Deleted resume: ${targetSlug}`);
+    res.json({ msg: 'Resume deleted successfully' });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send('Server Error');
+  }
+});
 
 export default router;
