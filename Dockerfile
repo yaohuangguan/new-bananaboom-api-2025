@@ -19,8 +19,7 @@ ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
     PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 
 # 2. 启用 pnpm (关键步骤)
-# Corepack 是 Node 自带的工具，能直接激活 pnpm
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN npm install -g pnpm@latest
 
 # 3. 工作目录
 WORKDIR /app
