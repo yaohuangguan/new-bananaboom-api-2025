@@ -204,8 +204,21 @@ router.get('/export-pdf', async (req, res) => {
 
     const page = await browser.newPage();
 
-    const frontendHost = process.env.FRONTEND_URL || (req.headers.referer ? req.headers.referer.split('/portfolio')[0] : 'http://localhost:3000');
-    const targetUrl = `${frontendHost}/portfolio?user=${targetSlug}&lang=${lang}&print=true`;
+    let frontendHost = process.env.FRONTEND_URL;
+    if (req.headers.referer) {
+      try {
+        const origin = new URL(req.headers.referer).origin;
+        // 如果后端部署在云端 (Cloud Run)，而请求来自本地 localhost，需优先使用环境变量中的线上前端地址
+        if (!origin.includes('localhost') || !process.env.FRONTEND_URL) {
+          frontendHost = origin;
+        }
+      } catch (e) {}
+    }
+    if (!frontendHost) {
+      frontendHost = 'http://localhost:5173';
+    }
+
+    const targetUrl = `${frontendHost}/profile?tab=resume&user=${targetSlug}&lang=${lang}&print=true`;
 
     await page.goto(targetUrl, { waitUntil: 'networkidle0', timeout: 30000 });
 
