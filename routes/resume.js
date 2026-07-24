@@ -158,4 +158,73 @@ router.get('/users', async (req, res) => {
   }
 });
 
+// ==========================================
+// 6. 导出 ATS 兼容可选文本 PDF (Puppeteer 单页长图/A4适应)
+// ==========================================
+// @route   GET api/resumes/export-pdf
+// @desc    使用无头浏览器渲染无断页单页矢量 PDF
+// @access  Public
+router.get('/export-pdf', async (req, res) => {
+  try {
+    const targetSlug = req.query.user || req.query.slug || 'sam';
+    const lang = req.query.lang || 'zh';
+
+    let puppeteer;
+    try {
+      puppeteer = (await import('puppeteer')).default;
+    } catch (e) {
+      return res.status(500).json({
+        msg: 'Puppeteer is not installed on backend. Please run `npm install puppeteer`.'
+      });
+    }
+
+    const browser = await puppeteer.launch({
+      headless: 'new',
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+    const page = await browser.newPage();
+
+    const frontendHost = process.env.FRONTEND_URL || (req.headers.referer ? req.headers.referer.split('/portfolio')[0] : 'http://localhost:3000');
+    const targetUrl = `${frontendHost}/portfolio?user=${targetSlug}&lang=${lang}&print=true`;
+
+    await page.goto(targetUrl, { waitUntil: 'networkidle0', timeout: 30000 });
+
+    // 🔥 核心 DOM 纯化隔离 + 动态单页高度计算（保证 100% 单页输出，绝不发生跨页切字/断裂）
+    const elementHeightPx = await page.evaluate(() => {
+      const paper = document.getElementById('resume-paper-sheet') || document.querySelector('.resume-paper-sheet');
+      if (paper) {
+        document.body.innerHTML = paper.outerHTML;
+        document.body.style.background = '#ffffff';
+        document.body.style.margin = '0';
+        document.body.style.padding = '0';
+        return paper.offsetHeight || document.body.scrollHeight;
+      }
+      return document.body.scrollHeight;
+    });
+
+    // 计算精确定高，确保整体完整合并在单页 PDF 中（至少 297mm A4 标准高度，超长按内容动态等比展高）
+    const pageHeightMm = Math.max(297, Math.ceil((elementHeightPx * 210) / 794) + 16);
+
+    const pdfBuffer = await page.pdf({
+      width: '210mm',
+      height: `${pageHeightMm}mm`,
+      printBackground: true,
+      margin: { top: '8mm', right: '10mm', bottom: '8mm', left: '10mm' }
+    });
+
+    await browser.close();
+
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="Resume_${targetSlug}_${lang}.pdf"`,
+      'Content-Length': pdfBuffer.length
+    });
+
+    res.send(pdfBuffer);
+  } catch (err) {
+    console.error('PDF Generation Error:', err.message);
+    res.status(500).send('Failed to generate PDF: ' + err.message);
+  }
+});
+
 export default router;
