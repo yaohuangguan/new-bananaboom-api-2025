@@ -2,11 +2,21 @@
 FROM node:22-alpine
 
 # ==========================================
-# 🔥 新增：安装 MongoDB Tools
+# 🔥 新增：安装 Chromium、中文字体与 MongoDB Tools (支持 GCP Cloud Run PDF 导出)
 # ==========================================
-# Alpine 下包名叫 mongodb-tools，包含了 mongodump 和 mongorestore
-# --no-cache 表示安装完不保留缓存，保持镜像体积小
-RUN apk add --no-cache mongodb-tools
+RUN apk add --no-cache \
+    chromium \
+    nss \
+    freetype \
+    harfbuzz \
+    ca-certificates \
+    ttf-freefont \
+    font-noto-cjk \
+    mongodb-tools
+
+# 设置 Puppeteer 跳过重复下载，直接使用 Alpine 系统原生 Chromium
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 
 # 2. 启用 pnpm (关键步骤)
 # Corepack 是 Node 自带的工具，能直接激活 pnpm

@@ -178,10 +178,30 @@ router.get('/export-pdf', async (req, res) => {
       });
     }
 
-    const browser = await puppeteer.launch({
+    let launchOptions = {
       headless: 'new',
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
-    });
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+    };
+
+    if (process.env.PUPPETEER_EXECUTABLE_PATH) {
+      launchOptions.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
+    }
+
+    let browser;
+    try {
+      // 1. 尝试启动 Puppeteer 自带的 Chromium
+      browser = await puppeteer.launch(launchOptions);
+    } catch (err1) {
+      try {
+        // 2. 尝试备选：启动系统安装的 Google Chrome
+        browser = await puppeteer.launch({ ...launchOptions, channel: 'chrome' });
+      } catch (err2) {
+        return res.status(500).json({
+          msg: 'Puppeteer 找不到 Chrome 浏览器二进制文件。请在终端运行: npx puppeteer browsers install chrome'
+        });
+      }
+    }
+
     const page = await browser.newPage();
 
     const frontendHost = process.env.FRONTEND_URL || (req.headers.referer ? req.headers.referer.split('/portfolio')[0] : 'http://localhost:3000');
