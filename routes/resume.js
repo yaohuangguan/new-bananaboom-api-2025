@@ -128,9 +128,6 @@ router.put(
 router.delete('/', async (req, res) => {
   try {
     const targetSlug = req.query.user || 'sam';
-    if (targetSlug === 'sam' || targetSlug === 'jenny') {
-      return res.status(400).json({ msg: 'Cannot delete the main resume version' });
-    }
 
     const resume = await Resume.findOneAndDelete({ slug: targetSlug });
     if (!resume) {
@@ -139,6 +136,22 @@ router.delete('/', async (req, res) => {
 
     console.log(`✅ Deleted resume: ${targetSlug}`);
     res.json({ msg: 'Resume deleted successfully' });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send('Server Error');
+  }
+});
+
+// ==========================================
+// 5. 获取所有有简历的账号列表
+// ==========================================
+// @route   GET api/resumes/users
+// @desc    获取拥有简历的账号用户名列表
+// @access  Public
+router.get('/users', async (req, res) => {
+  try {
+    const users = await Resume.distinct('user');
+    res.json(users);
   } catch (err) {
     console.error(err.message);
     res.status(500).send('Server Error');
