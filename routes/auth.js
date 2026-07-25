@@ -127,7 +127,7 @@ router.post('/send-otp', otpLimiter, async (req, res) => {
 
     // 3. Dev mode terminal fallback printing
     const isEmail = cleanIdentifier.includes('@');
-    if (process.env.NODE_ENV !== 'production' || !process.env.RESEND_API_KEY) {
+    if (!process.env.RESEND_API_KEY) {
       console.log(`\n🔥 [OTP Verification Code Bypass]\nTo: ${cleanIdentifier}\nCode: ${code}\n`);
       return res.json({ success: true, message: 'Verification code sent (printed in terminal console) / 验证码已发送（本地终端控制台已打印）' });
     }

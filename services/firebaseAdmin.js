@@ -5,7 +5,23 @@ let isFirebaseAdminInitialized = false;
 const initFirebase = () => {
   if (process.env.FIREBASE_SERVICE_ACCOUNT) {
     try {
-      const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+      let rawConfig = process.env.FIREBASE_SERVICE_ACCOUNT.trim();
+      
+      // Strip potential single or double quote wrappers from env manager
+      if (rawConfig.startsWith("'") && rawConfig.endsWith("'")) {
+        rawConfig = rawConfig.slice(1, -1).trim();
+      }
+      if (rawConfig.startsWith('"') && rawConfig.endsWith('"')) {
+        rawConfig = rawConfig.slice(1, -1).trim();
+      }
+
+      const serviceAccount = JSON.parse(rawConfig);
+      
+      // Repair escaped newlines in private key if present
+      if (serviceAccount.private_key) {
+        serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
+      }
+
       admin.initializeApp({
         credential: admin.credential.cert(serviceAccount)
       });
