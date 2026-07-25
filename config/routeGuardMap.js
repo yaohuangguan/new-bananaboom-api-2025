@@ -32,6 +32,10 @@ const ROUTE_MAP = [
   { path: '/api/projects', method: 'GET', public: true },
   { path: '/api/projects', method: 'ALL', permission: K.SUPER_ADMIN },
 
+  { regex: /^\/api\/homepage\/likes\/[a-f\d]{24}\/add$/, method: 'POST', public: true },
+  { regex: /^\/api\/homepage\/likes\/[a-f\d]{24}\/batch-add$/, method: 'POST', public: true },
+  { regex: /^\/api\/homepage\/likes\/[a-f\d]{24}\/remove$/, method: 'POST', public: true },
+  { path: '/api/homepage/likes', method: 'GET', public: true },
   { path: '/api/homepage', method: 'GET', public: true },
   { path: '/api/homepage', method: 'ALL', permission: K.SUPER_ADMIN },
 

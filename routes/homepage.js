@@ -75,8 +75,7 @@ router.get('/likes', readLimiter, async (req, res) => {
  * @desc    点赞 (+1)
  * @access  Public (每个人都能点)
  */
-// ✅ 🔥 应用严格限流 (防刷核心)
-router.post('/likes/:id/add', likeLimiter, async (req, res) => {
+router.post('/likes/:id/add', async (req, res) => {
   try {
     // 使用原子操作 $inc 确保并发安全
     const updatedDoc = await Homepage.findByIdAndUpdate(
@@ -96,12 +95,40 @@ router.post('/likes/:id/add', likeLimiter, async (req, res) => {
 });
 
 /**
+ * @route   POST /api/homepage/likes/:id/batch-add
+ * @desc    批量点赞 (+N)
+ * @access  Public
+ */
+router.post('/likes/:id/batch-add', async (req, res) => {
+  try {
+    const count = parseInt(req.body.count, 10) || 1;
+    if (count <= 0) {
+      return res.status(400).json({ message: '点赞数必须大于0' });
+    }
+    const safeCount = Math.min(count, 1000); // 限制单次最高累加数
+
+    const updatedDoc = await Homepage.findByIdAndUpdate(
+      req.params.id,
+      { $inc: { likes: safeCount } },
+      { new: true, select: 'likes' }
+    );
+
+    if (!updatedDoc) {
+      return res.status(404).json({ message: '未找到对应的首页记录' });
+    }
+
+    res.status(200).json(updatedDoc);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+/**
  * @route   POST /api/homepage/likes/:id/remove
  * @desc    取消点赞 (-1)
  * @access  Public
  */
-// ✅ 应用严格限流
-router.post('/likes/:id/remove', likeLimiter, async (req, res) => {
+router.post('/likes/:id/remove', async (req, res) => {
   try {
     const updatedDoc = await Homepage.findByIdAndUpdate(
       req.params.id,
