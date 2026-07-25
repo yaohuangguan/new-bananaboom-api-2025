@@ -223,7 +223,7 @@ router.get('/export-pdf', async (req, res) => {
 
     await page.goto(targetUrl, { waitUntil: 'networkidle0', timeout: 30000 });
 
-    // 🔥 核心 DOM 纯化隔离 + 动态单页高度计算（保证 100% 单页输出，绝不发生跨页切字/断裂）
+    // 🔥 核心 DOM 纯化隔离 + 动态单页高度计算（强效锁定 1 页 PDF，绝不发生 2 页拆分）
     const elementHeightPx = await page.evaluate(() => {
       const paper = document.getElementById('resume-paper-sheet') || document.querySelector('.resume-paper-sheet');
       if (paper) {
@@ -231,13 +231,38 @@ router.get('/export-pdf', async (req, res) => {
         document.body.style.background = '#ffffff';
         document.body.style.margin = '0';
         document.body.style.padding = '0';
-        return paper.offsetHeight || document.body.scrollHeight;
+        return Math.ceil(paper.getBoundingClientRect().height);
       }
       return document.body.scrollHeight;
     });
 
-    // 计算精确定高，保持标准 A4 比例宽度 (210mm)，高度根据实际内容自适应展高（无断页单页 PDF）
-    const pageHeightMm = Math.max(297, Math.ceil((elementHeightPx * 210) / 794) + 12);
+    // 换算精确 mm 高度（加上 6mm 微留白，刚好抵到 Skills 底部，绝对不会有下方大片留白）
+    const exactHeightMm = Math.max(297, Math.ceil(elementHeightPx * 0.264583) + 6);
+
+    // 强效注入针对 PDF 打印引擎的 @page 规则，锁定为唯一一张页面
+    await page.addStyleTag({
+      content: `
+        @page {
+          size: 210mm ${exactHeightMm}mm !important;
+          margin: 0 !important;
+        }
+        html, body {
+          margin: 0 !important;
+          padding: 0 !important;
+          width: 210mm !important;
+          height: ${exactHeightMm}mm !important;
+          overflow: visible !important;
+        }
+        .resume-paper-sheet {
+          box-shadow: none !important;
+          border: none !important;
+          border-radius: 0 !important;
+          width: 100% !important;
+          max-width: 100% !important;
+          margin: 0 !important;
+        }
+      `
+    });
 
     const pdfBuffer = await page.pdf({
       width: '230mm',
