@@ -33,7 +33,8 @@ const ResumeSchema = new Schema(
       visaStatus_zh: String,
       visaStatus_en: String,
       summary_zh: String, // 个人简介
-      summary_en: String
+      summary_en: String,
+      website: String
     },
 
     // 2. 教育经历

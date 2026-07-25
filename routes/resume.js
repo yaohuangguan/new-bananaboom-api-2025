@@ -203,7 +203,7 @@ router.get('/export-pdf', async (req, res) => {
     }
 
     const page = await browser.newPage();
-    await page.setViewport({ width: 1024, height: 1400, deviceScaleFactor: 2 });
+    await page.setViewport({ width: 1280, height: 1400, deviceScaleFactor: 2 });
 
     let frontendHost = process.env.FRONTEND_URL;
     if (req.headers.referer) {
@@ -240,10 +240,10 @@ router.get('/export-pdf', async (req, res) => {
     const pageHeightMm = Math.max(297, Math.ceil((elementHeightPx * 210) / 794) + 12);
 
     const pdfBuffer = await page.pdf({
-      width: '210mm',
+      width: '230mm',
       height: `${pageHeightMm}mm`,
       printBackground: true,
-      margin: { top: '8mm', right: '8mm', bottom: '8mm', left: '8mm' }
+      margin: { top: '8mm', right: '4mm', bottom: '8mm', left: '6mm' }
     });
 
     await browser.close();

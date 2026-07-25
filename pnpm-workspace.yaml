@@ -1,5 +1,5 @@
 allowBuilds:
-  mongodb-memory-server: set this to true or false
-  puppeteer: set this to true or false
-  sharp: set this to true or false
-  unrs-resolver: set this to true or false
+  mongodb-memory-server: true
+  puppeteer: true
+  sharp: true
+  unrs-resolver: true

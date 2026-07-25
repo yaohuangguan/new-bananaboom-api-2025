@@ -5,7 +5,8 @@ const whitelist = [
   'http://ps6.space', // 兼容 http
 
   // Vercel 前端部署地址
-  'https://bananaboom-frontend.vercel.app'
+  'https://bananaboom-frontend.vercel.app',
+  "http://localhost:5173"
 ];
 
 // 需要模糊匹配的域名后缀 (专门针对 AI Studio 预览地址)
