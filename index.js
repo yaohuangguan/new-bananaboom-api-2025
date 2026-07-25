@@ -1,5 +1,6 @@
 import express, { json, urlencoded } from 'express';
 import connectDB from './config/db.js';
+import { initFirebase } from './services/firebaseAdmin.js';
 import { createServer } from 'http';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -209,6 +210,9 @@ const startServer = async () => {
   try {
     // 1. 连接数据库
     await connectDB();
+
+    // 1.5 Initialize Firebase Admin SDK
+    initFirebase();
 
     // 2. 🔥 加载权限配置到内存 (确保 Guard 能立刻工作)
     await permissionService.load();

@@ -715,6 +715,48 @@ router.put('/revoke-vip', async (req, res) => {
   }
 });
 
+// ==========================================
+// 👤 完善个人资料 (Complete Profile)
+// ==========================================
+// @route   PUT api/users/complete-profile
+// @desc    填写个人姓名与资料以完成初始化注册流程
+// @access  Private
+router.put('/complete-profile', async (req, res) => {
+  try {
+    const { id } = req.user;
+    const { displayName, email, phone } = req.body;
+
+    if (!displayName?.trim()) {
+      return res.status(400).json({ message: 'DisplayName is required' });
+    }
+
+    const user = await User.findById(id);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    user.displayName = displayName.trim();
+    if (email && !user.email) {
+      user.email = email.toLowerCase().trim();
+    }
+    if (phone && !user.phone) {
+      user.phone = phone.trim();
+    }
+    user.isProfileCompleted = true;
+
+    await user.save();
+
+    const userPayload = permissionService.buildUserPayload(user);
+    res.json({
+      success: true,
+      user: userPayload
+    });
+  } catch (err) {
+    console.error('[Complete Profile Error]:', err);
+    res.status(500).json({ message: 'Server Error' });
+  }
+});
+
 // @route   PUT /api/users/:id
 // @desc    修改个人资料 (名字、头像、身高、健身目标, 时区，barkUrl)
 router.put('/:id', async (req, res) => {

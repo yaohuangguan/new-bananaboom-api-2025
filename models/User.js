@@ -12,12 +12,13 @@ const UserSchema = Schema({
   },
   email: {
     type: String,
-    required: true,
-    unique: true
+    required: false,
+    unique: true,
+    sparse: true
   },
   password: {
     type: String,
-    required: true
+    required: false
   },
   // 🔥🔥🔥 新增：手机号 🔥🔥🔥
   phone: {
@@ -25,6 +26,10 @@ const UserSchema = Schema({
     unique: true, // 保证手机号不重复
     sparse: true, // 关键：允许这个字段不存在 (即允许很多人都没有手机号)
     trim: true // 自动去掉前后的空格
+  },
+  isProfileCompleted: {
+    type: Boolean,
+    default: false
   },
   date: {
     type: Date, // 建议用 Date 类型方便排序
