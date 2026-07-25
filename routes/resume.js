@@ -203,6 +203,7 @@ router.get('/export-pdf', async (req, res) => {
     }
 
     const page = await browser.newPage();
+    await page.setViewport({ width: 1024, height: 1400, deviceScaleFactor: 2 });
 
     let frontendHost = process.env.FRONTEND_URL;
     if (req.headers.referer) {
@@ -235,14 +236,14 @@ router.get('/export-pdf', async (req, res) => {
       return document.body.scrollHeight;
     });
 
-    // 计算精确定高，确保整体完整合并在单页 PDF 中（至少 297mm A4 标准高度，超长按内容动态等比展高）
-    const pageHeightMm = Math.max(297, Math.ceil((elementHeightPx * 210) / 794) + 16);
+    // 计算精确定高，保持标准 A4 比例宽度 (210mm)，高度根据实际内容自适应展高（无断页单页 PDF）
+    const pageHeightMm = Math.max(297, Math.ceil((elementHeightPx * 210) / 794) + 12);
 
     const pdfBuffer = await page.pdf({
       width: '210mm',
       height: `${pageHeightMm}mm`,
       printBackground: true,
-      margin: { top: '8mm', right: '10mm', bottom: '8mm', left: '10mm' }
+      margin: { top: '8mm', right: '8mm', bottom: '8mm', left: '8mm' }
     });
 
     await browser.close();
