@@ -14,7 +14,7 @@ import validate from '../middleware/validate.js'; // 你的通用校验中间件
 // @access  Public
 router.get('/list', async (req, res) => {
   try {
-    const targetUser = req.query.user || 'sam';
+    const targetUser = (req.query.user || 'sam').split('-')[0];
     const resumes = await Resume.find({ user: targetUser }, 'slug title user createdAt').sort({ createdAt: 1 });
     res.json(resumes);
   } catch (err) {
