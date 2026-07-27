@@ -20,6 +20,11 @@ const ResumeSchema = new Schema(
       required: true,
       default: '默认简历'
     },
+    // 🔥 Custom section ordering
+    sectionOrder: {
+      type: [String],
+      default: ['profile', 'work', 'projects', 'education', 'skills']
+    },
     // 1. 基础信息
     basics: {
       name_zh: String,
@@ -49,7 +54,11 @@ const ResumeSchema = new Schema(
         startDate: String,
         endDate: String,
         score_zh: String, // 荣誉/成绩
-        score_en: String
+        score_en: String,
+        pageBreakBefore: {
+          type: Boolean,
+          default: false
+        }
       }
     ],
 
@@ -68,7 +77,11 @@ const ResumeSchema = new Schema(
         location_zh: String,
         location_en: String,
         weight: Number,
-        isProject: Boolean
+        isProject: Boolean,
+        pageBreakBefore: {
+          type: Boolean,
+          default: false
+        }
       }
     ],
 
@@ -77,7 +90,11 @@ const ResumeSchema = new Schema(
       {
         name_zh: String, // 技能分类 (如: 前端)
         name_en: String, // (Frontend)
-        keywords: [String] // 具体技能 (React, Vue...)
+        keywords: [String], // 具体技能 (React, Vue...)
+        pageBreakBefore: {
+          type: Boolean,
+          default: false
+        }
       }
     ],
 
@@ -89,7 +106,34 @@ const ResumeSchema = new Schema(
         fluency_zh: String, // 母语/流利
         fluency_en: String
       }
-    ]
+    ],
+    // 🔥 Styling Settings & Page limits
+    styleSettings: {
+      fontSize: { type: String, default: 'normal' },
+      lineHeight: { type: String, default: 'normal' },
+      themeColor: { type: String, default: 'slate' },
+      margin: { type: String, default: 'normal' },
+      sectionGap: { type: String, default: 'normal' },
+      pdfMode: { type: String, default: 'single-page' },
+      paperSize: { type: String, default: 'a4' },
+      customStyles: { type: Map, of: Schema.Types.Mixed, default: {} }
+    },
+    pageLimit: {
+      type: Number,
+      default: 0 // 0 means no limit
+    },
+    sectionTitles: {
+      profile_zh: { type: String, default: '个人简介' },
+      profile_en: { type: String, default: 'Profile' },
+      work_zh: { type: String, default: '工作经历' },
+      work_en: { type: String, default: 'Work Experience' },
+      projects_zh: { type: String, default: '作品项目' },
+      projects_en: { type: String, default: 'Featured Projects' },
+      education_zh: { type: String, default: '教育经历' },
+      education_en: { type: String, default: 'Education' },
+      skills_zh: { type: String, default: '专业技能' },
+      skills_en: { type: String, default: 'Skills' }
+    }
   },
   { timestamps: true }
 );

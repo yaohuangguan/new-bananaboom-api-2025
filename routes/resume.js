@@ -168,6 +168,9 @@ router.get('/export-pdf', async (req, res) => {
   try {
     const targetSlug = req.query.user || req.query.slug || 'sam';
     const lang = req.query.lang || 'zh';
+    const pdfMode = req.query.pdfMode || 'single-page'; // 'single-page' | 'multi-page'
+    const paperSize = (req.query.paperSize || 'a4').toLowerCase(); // 'a4' | 'a3' | 'a5'
+    const pageLimit = parseInt(req.query.pageLimit, 10) || 0;
 
     let puppeteer;
     try {
@@ -193,7 +196,7 @@ router.get('/export-pdf', async (req, res) => {
       browser = await puppeteer.launch(launchOptions);
     } catch (err1) {
       try {
-        // 2. 尝试备选：启动系统安装的 Google Chrome
+        // 2. 尝试备选：启动系统安装 of Google Chrome
         browser = await puppeteer.launch({ ...launchOptions, channel: 'chrome' });
       } catch (err2) {
         return res.status(500).json({
@@ -219,7 +222,7 @@ router.get('/export-pdf', async (req, res) => {
       frontendHost = 'http://localhost:5173';
     }
 
-    const targetUrl = `${frontendHost}/profile?tab=resume&user=${targetSlug}&lang=${lang}&print=true`;
+    const targetUrl = `${frontendHost}/profile?tab=resume&user=${targetSlug}&lang=${lang}&print=true&pdfMode=${pdfMode}&paperSize=${paperSize}${pageLimit ? `&pageLimit=${pageLimit}` : ''}`;
 
     await page.goto(targetUrl, { waitUntil: 'networkidle0', timeout: 30000 });
 
@@ -236,15 +239,29 @@ router.get('/export-pdf', async (req, res) => {
       return document.body.scrollHeight;
     });
 
-    // 计算精确定高，保持标准 A4 比例宽度 (210mm)，高度根据实际内容自适应展高（无断页单页 PDF）
-    const pageHeightMm = Math.max(297, Math.ceil((elementHeightPx * 210) / 794) + 12);
+    let pdfBuffer;
+    if (pdfMode === 'multi-page') {
+      const pdfOptions = {
+        format: paperSize.toUpperCase(),
+        printBackground: true,
+        margin: { top: '0', right: '0', bottom: '0', left: '0' }
+      };
 
-    const pdfBuffer = await page.pdf({
-      width: '230mm',
-      height: `${pageHeightMm}mm`,
-      printBackground: true,
-      margin: { top: '8mm', right: '4mm', bottom: '8mm', left: '6mm' }
-    });
+      if (pageLimit > 0) {
+        pdfOptions.pageRanges = `1-${pageLimit}`;
+      }
+
+      pdfBuffer = await page.pdf(pdfOptions);
+    } else {
+      // 计算精确定高，保持标准 A4 比例宽度 (210mm)，高度根据实际内容自适应展高（无断页单页 PDF）
+      const pageHeightMm = Math.max(297, Math.ceil((elementHeightPx * 210) / 794) + 12);
+      pdfBuffer = await page.pdf({
+        width: '230mm',
+        height: `${pageHeightMm}mm`,
+        printBackground: true,
+        margin: { top: '8mm', right: '4mm', bottom: '8mm', left: '6mm' }
+      });
+    }
 
     await browser.close();
 
