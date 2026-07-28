@@ -23,7 +23,7 @@ const ResumeSchema = new Schema(
     // 🔥 Custom section ordering
     sectionOrder: {
       type: [String],
-      default: ['profile', 'work', 'projects', 'education', 'skills']
+      default: ['profile', 'work', 'projects', 'education', 'skills', 'volunteer', 'interest']
     },
     // 1. 基础信息
     basics: {
@@ -39,7 +39,8 @@ const ResumeSchema = new Schema(
       visaStatus_en: String,
       summary_zh: String, // 个人简介
       summary_en: String,
-      website: String
+      website: String,
+      linkedin: String
     },
 
     // 2. 教育经历
@@ -98,7 +99,38 @@ const ResumeSchema = new Schema(
       }
     ],
 
-    // 5. 语言能力
+    // 5. 志愿活动
+    volunteer: [
+      {
+        organization_zh: String,
+        organization_en: String,
+        position_zh: String,
+        position_en: String,
+        startDate: String,
+        endDate: String,
+        highlights_zh: [String],
+        highlights_en: [String],
+        pageBreakBefore: {
+          type: Boolean,
+          default: false
+        }
+      }
+    ],
+
+    // 6. 兴趣爱好
+    interest: [
+      {
+        name_zh: String,
+        name_en: String,
+        keywords: [String],
+        pageBreakBefore: {
+          type: Boolean,
+          default: false
+        }
+      }
+    ],
+
+    // 7. 语言能力
     languages: [
       {
         language_zh: String,
@@ -132,7 +164,11 @@ const ResumeSchema = new Schema(
       education_zh: { type: String, default: '教育经历' },
       education_en: { type: String, default: 'Education' },
       skills_zh: { type: String, default: '专业技能' },
-      skills_en: { type: String, default: 'Skills' }
+      skills_en: { type: String, default: 'Skills' },
+      volunteer_zh: { type: String, default: '志愿活动' },
+      volunteer_en: { type: String, default: 'Volunteer' },
+      interest_zh: { type: String, default: '兴趣爱好' },
+      interest_en: { type: String, default: 'Interests' }
     }
   },
   { timestamps: true }

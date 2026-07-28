@@ -70,7 +70,6 @@ router.put(
 
     // 3. 工作经历校验
     body('work').optional().isArray().withMessage('工作经历必须是数组'),
-    body('work.*.company_zh').optional().notEmpty().withMessage('公司中文名不能为空'),
 
     // 4. 技能与语言
     body('skills').optional().isArray(),
