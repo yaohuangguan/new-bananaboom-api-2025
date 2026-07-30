@@ -15,7 +15,7 @@ import validate from '../middleware/validate.js'; // 你的通用校验中间件
 router.get('/list', async (req, res) => {
   try {
     const targetUser = (req.query.user || 'sam').split('-')[0];
-    const resumes = await Resume.find({ user: targetUser }, 'slug title user createdAt').sort({ createdAt: 1 });
+    const resumes = await Resume.find({ user: targetUser }, 'slug title user isHomepage createdAt').sort({ createdAt: 1 });
     res.json(resumes);
   } catch (err) {
     console.error(err.message);
@@ -34,7 +34,16 @@ router.get('/', async (req, res) => {
   try {
     const targetSlug = req.query.user || 'sam';
 
-    const resume = await Resume.findOne({ slug: targetSlug });
+    let resume;
+    // 优先根据 user 和 isHomepage === true 寻找默认首页简历
+    // 如果没有，或者查询的不是 user 原名本身，则回退到通过 slug 直接查找
+    if (targetSlug === 'sam' || targetSlug === 'jenny') {
+      resume = await Resume.findOne({ user: targetSlug, isHomepage: true });
+    }
+    
+    if (!resume) {
+      resume = await Resume.findOne({ slug: targetSlug });
+    }
 
     if (!resume) {
       return res.status(404).json({ msg: `Resume for user '${targetSlug}' not found` });
@@ -274,6 +283,43 @@ router.get('/export-pdf', async (req, res) => {
   } catch (err) {
     console.error('PDF Generation Error:', err.message);
     res.status(500).send('Failed to generate PDF: ' + err.message);
+  }
+});
+
+// ==========================================
+// 6. 设置默认首页展示简历
+// ==========================================
+// @route   POST api/resumes/set-default
+// @desc    将指定 slug 的简历设为默认首页展示简历 (即将其 slug 设为 'sam'，并与原 'sam' 的简历互换 slug)
+// @access  Private
+router.post('/set-default', async (req, res) => {
+  try {
+    const { slug } = req.body;
+    if (!slug) {
+      return res.status(400).json({ msg: 'Slug is required / 必须指定 slug' });
+    }
+
+    // 1. 查找目标简历
+    const targetResume = await Resume.findOne({ slug });
+    if (!targetResume) {
+      return res.status(404).json({ msg: `Target resume with slug '${slug}' not found / 找不到目标简历` });
+    }
+
+    // 2. 将该用户的所有其他简历的 isHomepage 设为 false
+    await Resume.updateMany({ user: targetResume.user }, { $set: { isHomepage: false } });
+
+    // 3. 将目标简历的 isHomepage 设为 true
+    targetResume.isHomepage = true;
+    await targetResume.save();
+
+    console.log(`✅ Default homepage resume set: '${slug}' is now the default for user '${targetResume.user}'`);
+    res.json({
+      msg: 'Default homepage resume set successfully / 默认简历设置成功',
+      defaultSlug: slug
+    });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send('Server Error / 服务器错误: ' + err.message);
   }
 });
 

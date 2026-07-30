@@ -20,6 +20,10 @@ const ResumeSchema = new Schema(
       required: true,
       default: '默认简历'
     },
+    isHomepage: {
+      type: Boolean,
+      default: false
+    },
     // 🔥 Custom section ordering
     sectionOrder: {
       type: [String],
