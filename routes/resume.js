@@ -1,9 +1,35 @@
 import { Router } from 'express';
 const router = Router();
+import mongoose from 'mongoose';
 import { body } from 'express-validator'; // 引入校验规则
 import Resume from '../models/Resume.js';
-
+import User from '../models/User.js';
 import validate from '../middleware/validate.js'; // 你的通用校验中间件
+
+const resolveUserId = async (userQuery) => {
+  if (!userQuery) return null;
+  
+  if (mongoose.Types.ObjectId.isValid(userQuery) && userQuery.length === 24) {
+    return new mongoose.Types.ObjectId(userQuery);
+  }
+  
+  let email = userQuery;
+  const atIndex = email.indexOf('@');
+  if (atIndex !== -1) {
+    const hyphenIndex = email.indexOf('-', atIndex);
+    email = hyphenIndex !== -1 ? email.substring(0, hyphenIndex) : email;
+  } else {
+    email = email.split('-')[0];
+  }
+  
+  const user = await User.findOne({ 
+    $or: [
+      { email: { $regex: new RegExp(`^${email}$`, 'i') } },
+      { phone: email }
+    ]
+  });
+  return user ? user._id : null;
+};
 
 // ==========================================
 // 1. 获取简历列表 (公开接口)
@@ -14,9 +40,29 @@ import validate from '../middleware/validate.js'; // 你的通用校验中间件
 // @access  Public
 router.get('/list', async (req, res) => {
   try {
-    const targetUser = (req.query.user || 'sam').split('-')[0];
-    const resumes = await Resume.find({ user: targetUser }, 'slug title user isHomepage createdAt').sort({ createdAt: 1 });
-    res.json(resumes);
+    let targetUser = req.query.user;
+    let userId;
+    if (!targetUser) {
+      const defaultHomepage = await Resume.findOne({ isHomepage: true });
+      userId = defaultHomepage ? defaultHomepage.user : await resolveUserId('yaob@miamioh.edu');
+    } else {
+      userId = await resolveUserId(targetUser);
+    }
+
+    if (!userId) {
+      return res.json([]);
+    }
+
+    const resumes = await Resume.find({ user: userId }, 'slug title user isHomepage createdAt')
+      .populate('user', 'email')
+      .sort({ createdAt: 1 });
+
+    const mappedResumes = resumes.map(r => ({
+      ...r.toObject(),
+      user: r.user?.email || r.user
+    }));
+
+    res.json(mappedResumes);
   } catch (err) {
     console.error(err.message);
     res.status(500).send('Server Error');
@@ -28,28 +74,35 @@ router.get('/list', async (req, res) => {
 // ==========================================
 // @route   GET api/resumes
 // @desc    获取指定版本的简历数据
-// @param   user (可选): 简历 slug，如 "sam" | "sam-parttime"。默认 "sam"
+// @param   user (可选): 简历 slug，如 "yaob@miamioh.edu" | "yaob@miamioh.edu-parttime"
 // @access  Public
 router.get('/', async (req, res) => {
   try {
-    const targetSlug = req.query.user || 'sam';
-
-    let resume;
-    // 优先根据 user 和 isHomepage === true 寻找默认首页简历
-    // 如果没有，或者查询的不是 user 原名本身，则回退到通过 slug 直接查找
-    if (targetSlug === 'sam' || targetSlug === 'jenny') {
-      resume = await Resume.findOne({ user: targetSlug, isHomepage: true });
+    let targetSlug = req.query.user;
+    if (!targetSlug) {
+      const defaultHomepage = await Resume.findOne({ isHomepage: true });
+      targetSlug = defaultHomepage ? defaultHomepage.slug : 'yaob@miamioh.edu';
     }
+
+    let resume = await Resume.findOne({ slug: targetSlug }).populate('user', 'email');
     
     if (!resume) {
-      resume = await Resume.findOne({ slug: targetSlug });
+      const userId = await resolveUserId(targetSlug);
+      if (userId) {
+        resume = await Resume.findOne({ user: userId, isHomepage: true }).populate('user', 'email');
+      }
     }
 
     if (!resume) {
       return res.status(404).json({ msg: `Resume for user '${targetSlug}' not found` });
     }
 
-    res.json(resume);
+    const mappedResume = {
+      ...resume.toObject(),
+      user: resume.user?.email || resume.user
+    };
+
+    res.json(mappedResume);
   } catch (err) {
     console.error(err.message);
     res.status(500).send('Server Error');
@@ -89,14 +142,21 @@ router.put(
   ],
   async (req, res) => {
     try {
-      const targetSlug = req.query.user || 'sam';
+      const targetSlug = req.query.user || 'yaob@miamioh.edu';
+
+      const userId = await resolveUserId(targetSlug);
+      if (!userId) {
+        return res.status(400).json({ msg: 'Cannot resolve user account for this slug / 无法解析此 slug 的对应账号' });
+      }
+
+      const updateData = { ...req.body, user: userId };
 
       // 执行更新
       const resume = await Resume.findOneAndUpdate(
         { slug: targetSlug },
-        { $set: req.body },
+        { $set: updateData },
         { new: true, upsert: true, setDefaultsOnInsert: true }
-      );
+      ).populate('user', 'email');
 
       let needsSave = false;
       if (!resume.slug) {
@@ -104,8 +164,7 @@ router.put(
         needsSave = true;
       }
       if (!resume.user) {
-        const parts = targetSlug.split('-');
-        resume.user = parts[0] || 'sam';
+        resume.user = userId;
         needsSave = true;
       }
       if (req.body.title && resume.title !== req.body.title) {
@@ -117,8 +176,21 @@ router.put(
         await resume.save();
       }
 
+      // Ensure that if this resume is marked as homepage, all other resumes for this user are unset
+      if (resume.isHomepage === true) {
+        await Resume.updateMany(
+          { user: userId, _id: { $ne: resume._id } },
+          { $set: { isHomepage: false } }
+        );
+      }
+
       console.log(`✅ Updated resume for: ${targetSlug}`);
-      res.json(resume);
+
+      const mappedResume = {
+        ...resume.toObject(),
+        user: resume.user?.email || resume.user
+      };
+      res.json(mappedResume);
     } catch (err) {
       console.error(err.message);
       res.status(500).send('Server Error');
@@ -131,11 +203,11 @@ router.put(
 // ==========================================
 // @route   DELETE api/resumes
 // @desc    删除指定简历版本
-// @param   user (可选): 简历 slug，如 "sam-parttime"。默认 "sam"
+// @param   user (可选): 简历 slug，如 "yaob@miamioh.edu-parttime"。默认 "yaob@miamioh.edu"
 // @access  Private
 router.delete('/', async (req, res) => {
   try {
-    const targetSlug = req.query.user || 'sam';
+    const targetSlug = req.query.user || 'yaob@miamioh.edu';
 
     const resume = await Resume.findOneAndDelete({ slug: targetSlug });
     if (!resume) {
@@ -154,12 +226,14 @@ router.delete('/', async (req, res) => {
 // 5. 获取所有有简历的账号列表
 // ==========================================
 // @route   GET api/resumes/users
-// @desc    获取拥有简历的账号用户名列表
+// @desc    获取拥有简历 of 账号用户名列表
 // @access  Public
 router.get('/users', async (req, res) => {
   try {
-    const users = await Resume.distinct('user');
-    res.json(users);
+    const userIds = await Resume.distinct('user');
+    const users = await User.find({ _id: { $in: userIds } }, 'email');
+    const emails = users.map(u => u.email).filter(Boolean);
+    res.json(emails);
   } catch (err) {
     console.error(err.message);
     res.status(500).send('Server Error');
@@ -174,7 +248,7 @@ router.get('/users', async (req, res) => {
 // @access  Public
 router.get('/export-pdf', async (req, res) => {
   try {
-    const targetSlug = req.query.user || req.query.slug || 'sam';
+    const targetSlug = req.query.user || req.query.slug || 'yaob@miamioh.edu';
     const lang = req.query.lang || 'zh';
     const pdfMode = req.query.pdfMode || 'single-page'; // 'single-page' | 'multi-page'
     const paperSize = (req.query.paperSize || 'a4').toLowerCase(); // 'a4' | 'a3' | 'a5'

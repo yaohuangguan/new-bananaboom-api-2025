@@ -11,9 +11,9 @@ const ResumeSchema = new Schema(
       default: 'sam'
     },
     user: {
-      type: String,
-      required: true,
-      default: 'sam'
+      type: Schema.Types.ObjectId,
+      ref: 'users',
+      required: true
     },
     title: {
       type: String,
