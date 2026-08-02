@@ -1,6 +1,6 @@
 {
   "name": "backend",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "banana backend",
   "main": "index.js",
   "type": "module",
@@ -50,7 +50,8 @@
     "husky": "^9.1.7",
     "jest": "^30.2.0",
     "mongodb-memory-server": "^11.0.0",
-    "supertest": "^7.1.4"
+    "supertest": "^7.1.4",
+    "standard-version": "^9.5.0"
   },
   "scripts": {
     "start": "node index.js",
@@ -58,7 +59,8 @@
     "test": "node --experimental-vm-modules --env-file=.env.test node_modules/jest/bin/jest.js --detectOpenHandles --forceExit",
     "bark": "node --env-file=.env ./utils/updateBark.js",
     "prepare": "husky install",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "release": "standard-version -m \"chore(release): v%s [skip ci]\""
   },
   "author": "samyao",
   "license": "ISC"
