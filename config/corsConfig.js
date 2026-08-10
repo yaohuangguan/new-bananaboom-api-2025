@@ -3,6 +3,8 @@ const whitelist = [
   'https://www.ps6.space',
   'https://ps6.space',
   'http://ps6.space', // 兼容 http
+  'https://samyao.me',
+  'https://www.samyao.me',
 
   // Vercel 前端部署地址
   'https://bananaboom-frontend.vercel.app',
@@ -13,6 +15,7 @@ const whitelist = [
 const allowedSuffixes = [
   '.scf.usercontent.goog',
   '.ps6.space',
+  '.samyao.me',
   '.vercel.app',
   '.run.app' // 兼容 Cloud Run 的自动域名
 ];
