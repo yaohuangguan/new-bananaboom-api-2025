@@ -56,12 +56,13 @@
   "scripts": {
     "start": "node index.js",
     "dev": "node --watch --env-file=.env index.js",
-    "test": "node --experimental-vm-modules --env-file=.env.test node_modules/jest/bin/jest.js --detectOpenHandles --forceExit",
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --detectOpenHandles",
     "bark": "node --env-file=.env ./utils/updateBark.js",
     "prepare": "husky install",
     "format": "prettier --write .",
     "release": "standard-version -m \"chore(release): v%s [skip ci]\"",
-    "test:journal": "node --test tests/postAccess.node.mjs"
+    "test:journal": "node --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand tests/postAccess.test.js",
+    "lint": "eslint ."
   },
   "author": "samyao",
   "license": "ISC"

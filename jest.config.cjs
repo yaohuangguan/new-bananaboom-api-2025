@@ -19,5 +19,7 @@ module.exports = {
     verbose: true,
     testTimeout: 10000,
     // ✅ 确保这里指向了你的 setup.js
+    setupFiles: ['<rootDir>/tests/env.js'],
+    maxWorkers: 1,
     setupFilesAfterEnv: ['<rootDir>/tests/setup.js'],
 };

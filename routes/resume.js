@@ -40,7 +40,7 @@ const resolveUserId = async (userQuery) => {
 // @access  Public
 router.get('/list', async (req, res) => {
   try {
-    let targetUser = req.query.user;
+    const targetUser = req.query.user;
     let userId;
     if (!targetUser) {
       const defaultHomepage = await Resume.findOne({ isHomepage: true });
@@ -263,7 +263,7 @@ router.get('/export-pdf', async (req, res) => {
       });
     }
 
-    let launchOptions = {
+    const launchOptions = {
       headless: 'new',
       args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
     };
@@ -298,7 +298,9 @@ router.get('/export-pdf', async (req, res) => {
         if (!origin.includes('localhost') || !process.env.FRONTEND_URL) {
           frontendHost = origin;
         }
-      } catch (e) {}
+      } catch {
+        // Keep the configured frontend host when Referer is malformed.
+      }
     }
     if (!frontendHost) {
       frontendHost = 'http://localhost:5173';
@@ -310,6 +312,7 @@ router.get('/export-pdf', async (req, res) => {
 
     // 🔥 核心 DOM 纯化隔离 + 动态单页高度计算（保证 100% 单页输出，绝不发生跨页切字/断裂）
     const elementHeightPx = await page.evaluate(() => {
+      /* global document -- This callback executes inside Chromium. */
       const paper = document.getElementById('resume-paper-sheet') || document.querySelector('.resume-paper-sheet');
       if (paper) {
         document.body.innerHTML = paper.outerHTML;

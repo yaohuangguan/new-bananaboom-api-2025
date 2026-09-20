@@ -1,3 +1,5 @@
 node_modules
 ./privateKey.key
 .env
+*.log
+coverage/

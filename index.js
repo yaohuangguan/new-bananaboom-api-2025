@@ -65,7 +65,7 @@ import { setGlobalDispatcher, ProxyAgent } from 'undici';
 const PROXY_URL = process.env.PROXY_URL;
 
 // 只有在非生产环境才挂载代理
-if (process.env.NODE_ENV !== 'production') {
+if (process.env.NODE_ENV !== 'production' && PROXY_URL) {
   try {
     const dispatcher = new ProxyAgent(PROXY_URL);
     setGlobalDispatcher(dispatcher);
