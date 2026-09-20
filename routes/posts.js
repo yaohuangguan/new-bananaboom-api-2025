@@ -10,6 +10,7 @@ const router = Router();
 
 // 引入依赖
 import Post from '../models/Post.js';
+import { canReadPost } from '../utils/postAccess.js';
 import logOperation from '../utils/audit.js'; // 审计日志工具
 
 // =================================================================
@@ -154,7 +155,7 @@ router.get('/likes/:id', async (req, res) => await getLikes(req, res));
 router.get('/:id', async (req, res) => {
   try {
     const post = await Post.findById(req.params.id).populate('user', '-password');
-    if (!post) {
+    if (!post || !canReadPost(post, req.user)) {
       return res.status(404).json({ message: 'Post not found' });
     }
     res.json(post);

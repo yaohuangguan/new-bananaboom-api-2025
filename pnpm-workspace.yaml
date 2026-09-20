@@ -1,5 +1,6 @@
 allowBuilds:
   mongodb-memory-server: true
+  protobufjs: false
   puppeteer: true
   sharp: true
   unrs-resolver: true

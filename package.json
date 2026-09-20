@@ -60,7 +60,8 @@
     "bark": "node --env-file=.env ./utils/updateBark.js",
     "prepare": "husky install",
     "format": "prettier --write .",
-    "release": "standard-version -m \"chore(release): v%s [skip ci]\""
+    "release": "standard-version -m \"chore(release): v%s [skip ci]\"",
+    "test:journal": "node --test tests/postAccess.node.mjs"
   },
   "author": "samyao",
   "license": "ISC"
