@@ -20,6 +20,12 @@ const ProjectSchema = new Schema(
     repoUrl: { type: String }, // GitHub 仓库链接
     demoUrl: { type: String }, // 演示/上线链接
     coverImage: { type: String }, // 封面图 URL
+    category: {
+      type: String,
+      enum: ['web', 'fullstack', 'mobile'],
+      default: 'web',
+      index: true
+    },
 
     // --- 管理字段 ---
     order: { type: Number, default: 0 }, // 排序权重 (数字越大越靠前)

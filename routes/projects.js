@@ -45,6 +45,10 @@ router.post(
     body('order').optional().isInt().withMessage('排序权重必须是整数'),
     body('isVisible').optional().isBoolean().withMessage('可见性必须是布尔值'),
     body('techStack').optional().isArray().withMessage('技术栈必须是数组'),
+    body('category')
+      .optional()
+      .isIn(['web', 'fullstack', 'mobile'])
+      .withMessage('项目分类必须是 web、fullstack 或 mobile'),
     // --- 校验规则结束 ---
 
     validate // 挂载校验处理函数
@@ -75,6 +79,7 @@ router.put(
     body('demoUrl').optional({ checkFalsy: true }).isURL().withMessage('演示链接格式错误'),
     body('order').optional().isInt(),
     body('techStack').optional().isArray(),
+    body('category').optional().isIn(['web', 'fullstack', 'mobile']),
 
     validate
   ],
