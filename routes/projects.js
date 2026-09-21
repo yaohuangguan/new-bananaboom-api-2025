@@ -50,14 +50,22 @@ router.post(
     body('techStack').optional().isArray().withMessage('技术栈必须是数组'),
     body('category')
       .optional()
-      .isIn(['web', 'fullstack', 'mobile'])
-      .withMessage('项目分类必须是 web、fullstack 或 mobile'),
+      .isIn(['web', 'fullstack', 'mobile', 'tools'])
+      .withMessage('项目分类必须是 web、fullstack、mobile 或 tools'),
+    body('categories').optional().isArray().withMessage('项目分类必须是数组'),
+    body('categories.*')
+      .optional()
+      .isIn(['web', 'fullstack', 'mobile', 'tools'])
+      .withMessage('项目分类包含不支持的值'),
     // --- 校验规则结束 ---
 
     validate // 挂载校验处理函数
   ],
   async (req, res) => {
     try {
+      if (Array.isArray(req.body.categories) && req.body.categories.length > 0) {
+        req.body.category = req.body.categories[0];
+      }
       const newProject = new Project(req.body);
       const project = await newProject.save();
       res.json(project);
@@ -82,12 +90,17 @@ router.put(
     body('demoUrl').optional({ checkFalsy: true }).isURL().withMessage('演示链接格式错误'),
     body('order').optional().isInt(),
     body('techStack').optional().isArray(),
-    body('category').optional().isIn(['web', 'fullstack', 'mobile']),
+    body('category').optional().isIn(['web', 'fullstack', 'mobile', 'tools']),
+    body('categories').optional().isArray(),
+    body('categories.*').optional().isIn(['web', 'fullstack', 'mobile', 'tools']),
 
     validate
   ],
   async (req, res) => {
     try {
+      if (Array.isArray(req.body.categories) && req.body.categories.length > 0) {
+        req.body.category = req.body.categories[0];
+      }
       const project = await Project.findByIdAndUpdate(req.params.id, { $set: req.body }, { new: true });
       if (!project) return res.status(404).json({ msg: 'Project not found' });
       res.json(project);
