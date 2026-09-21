@@ -19,6 +19,10 @@ import socketHandler from './socket/socket.js';
 // 🔥 引入安检中间件 (核心改动)
 import auth from './middleware/auth.js'; // 身份识别 (温和模式)
 import globalGuard from './middleware/globalGuard.js'; // 权限门卫 (查表执法)
+import {
+  normalizeR2RequestReferences,
+  hydrateR2ResponseReferences
+} from './middleware/r2References.js';
 // --- CMS 内容类 ---
 import resumeRoutes from './routes/resume.js';
 import projectRoutes from './routes/projects.js';
@@ -126,6 +130,12 @@ app.use('/api/payments/webhook', express.raw({ type: 'application/json' }));
 // Body 解析 (支持大文件上传)
 app.use(json({ limit: '50mb' }));
 app.use(urlencoded({ limit: '50mb', extended: true }));
+
+// R2 compatibility layer:
+// - write known R2 URLs to MongoDB as stable object keys
+// - expose those keys back to clients through the currently configured delivery domain
+app.use('/api', normalizeR2RequestReferences);
+app.use('/api', hydrateR2ResponseReferences);
 
 // 自定义安全头 (增强安全性)
 app.use((_req, res, next) => {
