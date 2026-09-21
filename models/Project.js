@@ -20,12 +20,20 @@ const ProjectSchema = new Schema(
     repoUrl: { type: String }, // GitHub 仓库链接
     demoUrl: { type: String }, // 演示/上线链接
     coverImage: { type: String }, // 封面图 URL
+    // Legacy single category kept for backwards compatibility.
     category: {
       type: String,
-      enum: ['web', 'fullstack', 'mobile'],
+      enum: ['web', 'fullstack', 'mobile', 'tools'],
       default: 'web',
       index: true
     },
+    // New multi-category field. Existing records can continue using category only.
+    categories: [
+      {
+        type: String,
+        enum: ['web', 'fullstack', 'mobile', 'tools']
+      }
+    ],
 
     // --- 管理字段 ---
     order: { type: Number, default: 0 }, // 排序权重 (数字越大越靠前)
