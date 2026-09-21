@@ -1,7 +1,30 @@
 import { hydrateR2References, normalizeR2References } from '../utils/r2Reference.js';
 
+const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH']);
+
+const PERSISTENCE_PREFIXES = [
+  '/projects',
+  '/posts',
+  '/photos',
+  '/todo',
+  '/fitness',
+  '/footprints',
+  '/menu',
+  '/comments',
+  '/users',
+  '/chat/ai/save'
+];
+
+const shouldNormalizeRequest = (req) => {
+  if (!WRITE_METHODS.has(req.method)) return false;
+  return PERSISTENCE_PREFIXES.some(
+    (prefix) => req.path === prefix || req.path.startsWith(`${prefix}/`)
+  );
+};
+
 export const normalizeR2RequestReferences = (req, _res, next) => {
   if (
+    shouldNormalizeRequest(req) &&
     req.body &&
     typeof req.body === 'object' &&
     !Buffer.isBuffer(req.body)
