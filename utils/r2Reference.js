@@ -69,6 +69,24 @@ export const getR2DeliveryUrl = (key) => {
   return domain ? `${domain}/${key}` : key;
 };
 
+const normalizeEmbeddedR2References = (value) => {
+  if (typeof value !== 'string' || !value.includes('uploads/')) return value;
+
+  return value.replace(
+    /(https?:\/\/[^\\s"'<>)]*\/uploads\/[^\\s"'<>)]*)/gi,
+    (url) => getR2KeyFromReference(url) || url
+  );
+};
+
+const hydrateEmbeddedR2References = (value) => {
+  if (typeof value !== 'string' || !value.includes('uploads/')) return value;
+
+  return value.replace(
+    /(?<![\\w/:.-])(uploads\/[^\\s"'<>)]*)/gi,
+    (key) => getR2DeliveryUrl(key)
+  );
+};
+
 export const normalizeR2References = (value) => {
   if (Array.isArray(value)) {
     return value.map((item) => normalizeR2References(item));
@@ -76,7 +94,7 @@ export const normalizeR2References = (value) => {
 
   if (!value || typeof value !== 'object') {
     if (typeof value !== 'string') return value;
-    return getR2KeyFromReference(value) || value;
+    return getR2KeyFromReference(value) || normalizeEmbeddedR2References(value);
   }
 
   return Object.fromEntries(
@@ -95,7 +113,7 @@ export const hydrateR2References = (value, fieldName = '') => {
   if (!value || typeof value !== 'object') {
     if (typeof value !== 'string' || RAW_REFERENCE_FIELDS.has(fieldName)) return value;
     const key = getR2KeyFromReference(value);
-    return key ? getR2DeliveryUrl(key) : value;
+    return key ? getR2DeliveryUrl(key) : hydrateEmbeddedR2References(value);
   }
 
   return Object.fromEntries(
