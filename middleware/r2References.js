@@ -35,25 +35,24 @@ export const normalizeR2RequestReferences = (req, _res, next) => {
   next();
 };
 
-const toPlainJson = (payload) => {
-  if (payload === null || payload === undefined) return payload;
-
-  try {
-    // Let Mongoose Documents/arrays apply their own toJSON transforms first.
-    // This avoids traversing internal $__ / _doc state and preserves the API shape.
-    return JSON.parse(JSON.stringify(payload));
-  } catch (error) {
-    console.error('[R2 References] Failed to serialize response payload:', error);
-    return payload;
-  }
-};
-
 export const hydrateR2ResponseReferences = (_req, res, next) => {
   const originalJson = res.json.bind(res);
 
   res.json = (payload) => {
-    const plainPayload = toPlainJson(payload);
-    return originalJson(hydrateR2References(plainPayload));
+    try {
+      // Let Mongoose Documents/arrays apply their own toJSON transforms first.
+      // This avoids traversing internal $__ / _doc state and preserves the API shape.
+      const plainPayload =
+        payload === null || payload === undefined
+          ? payload
+          : JSON.parse(JSON.stringify(payload));
+
+      return originalJson(hydrateR2References(plainPayload));
+    } catch (error) {
+      // R2 compatibility must never make a healthy business response fail.
+      console.error('[R2 References] Response hydration skipped:', error);
+      return originalJson(payload);
+    }
   };
 
   next();
