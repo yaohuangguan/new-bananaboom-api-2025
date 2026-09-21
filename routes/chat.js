@@ -251,8 +251,8 @@ router.post('/ai/save', async (req, res) => {
     const imagesToSave = [];
     if (image) {
       if (typeof image === 'string') {
-        if (image.startsWith('http')) {
-          // ✅ 正常 URL
+        if (image.startsWith('http') || image.startsWith('uploads/')) {
+          // ✅ Normal URL or normalized R2 object key
           imagesToSave.push(image);
         } else if (image.startsWith('data:')) {
           // ⚠️ Base64：为了数据库健康，建议拦截，或者只存极小的图
@@ -262,8 +262,8 @@ router.post('/ai/save', async (req, res) => {
              console.warn('⚠️ [Chat] 忽略过大的 Base64 图片存储');
           }
         }
-      } else if (image.url) {
-        imagesToSave.push(image.url);
+      } else if (image.url || image.key) {
+        imagesToSave.push(image.key || image.url);
       }
     }
 
