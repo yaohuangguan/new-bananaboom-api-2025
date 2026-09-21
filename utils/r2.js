@@ -20,11 +20,30 @@ export const R2 = new S3Client({
   }
 });
 
-// 🛠️ 内部辅助函数：安全拼接域名和文件路径
-const getPublicUrl = (key) => {
-  const domain = (process.env.R2_PUBLIC_DOMAIN || '').replace(/\/$/, '');
-  return `${domain}/${key}`;
+// 🛠️ Public URL helpers.
+// R2_PUBLIC_DOMAIN is the production custom domain (for example https://assets.samyao.me).
+// R2_NATIVE_PUBLIC_DOMAIN is Cloudflare's optional Public Development URL
+// (for example https://pub-xxxxxxxx.r2.dev). The S3 API endpoint is not a public asset URL.
+const buildPublicUrl = (domain, key) => {
+  const normalizedDomain = (domain || '').trim().replace(/\/$/, '');
+  return normalizedDomain ? `${normalizedDomain}/${key}` : null;
 };
+
+export const getR2ObjectUrls = (key) => {
+  const customUrl = buildPublicUrl(process.env.R2_PUBLIC_DOMAIN, key);
+  const r2Url = buildPublicUrl(process.env.R2_NATIVE_PUBLIC_DOMAIN, key);
+  const publicUrl = customUrl || r2Url;
+
+  return {
+    key,
+    url: publicUrl,
+    publicUrl,
+    customUrl,
+    r2Url
+  };
+};
+
+const getPublicUrl = (key) => getR2ObjectUrls(key).publicUrl;
 
 // ---------------------------------------------------------
 // 2. 核心功能函数
@@ -70,12 +89,10 @@ export const getPresignedUrl = async (fileName, mimeType) => {
 
     // 生成有效期为 1 小时 (3600秒) 的临时上传链接
     const uploadUrl = await getSignedUrl(R2, command, { expiresIn: 3600 });
-    const publicUrl = getPublicUrl(fileName);
+    const objectUrls = getR2ObjectUrls(fileName);
 
-    // 返回两个地址：
-    // uploadUrl: 给前端 PUT 用 (带签名)
-    // publicUrl: 给前端存数据库用 (干净链接)
-    return { uploadUrl, publicUrl };
+    // uploadUrl is signed and temporary; the other URLs are read URLs.
+    return { uploadUrl, ...objectUrls };
   } catch (error) {
     console.error('❌ Generate Presigned URL Error:', error);
     throw error;
@@ -115,7 +132,7 @@ export const listR2Files = async (prefix = 'uploads/', cursor, limit = 50, delim
       const fileName = item.Key.split('/').pop();
       return {
         id: item.Key,
-        url: getPublicUrl(item.Key),
+        ...getR2ObjectUrls(item.Key),
         name: fileName,
         path: item.Key,
         size: item.Size,
