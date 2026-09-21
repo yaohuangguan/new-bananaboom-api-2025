@@ -73,7 +73,7 @@ const normalizeEmbeddedR2References = (value) => {
   if (typeof value !== 'string' || !value.includes('uploads/')) return value;
 
   return value.replace(
-    /(https?:\/\/[^\\s"'<>)]*\/uploads\/[^\\s"'<>)]*)/gi,
+    /(https?:\/\/[^\s"'<>)]*\/uploads\/[^\s"'<>)]*)/gi,
     (url) => getR2KeyFromReference(url) || url
   );
 };
@@ -82,7 +82,7 @@ const hydrateEmbeddedR2References = (value) => {
   if (typeof value !== 'string' || !value.includes('uploads/')) return value;
 
   return value.replace(
-    /(?<![\\w/:.-])(uploads\/[^\\s"'<>)]*)/gi,
+    /(?<![\w/:.-])(uploads\/[^\s"'<>)]*)/gi,
     (key) => getR2DeliveryUrl(key)
   );
 };
