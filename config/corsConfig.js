@@ -1,7 +1,10 @@
 const whitelist = [
-  // 你的正式域名
+  // 正式域名：旧域名继续兼容到下线，新域名并行使用
   'https://samyao.me',
   'https://www.samyao.me',
+  'https://ps6.space',
+  'https://www.ps6.space',
+  'http://ps6.space',
 
   // Vercel 前端部署地址
   'https://bananaboom-frontend.vercel.app',
@@ -12,6 +15,7 @@ const whitelist = [
 const allowedSuffixes = [
   '.scf.usercontent.goog',
   '.samyao.me',
+  '.ps6.space',
   '.vercel.app',
   '.run.app' // 兼容 Cloud Run 的自动域名
 ];
