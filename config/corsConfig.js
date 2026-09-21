@@ -1,8 +1,5 @@
 const whitelist = [
   // 你的正式域名
-  'https://www.ps6.space',
-  'https://ps6.space',
-  'http://ps6.space', // 兼容 http
   'https://samyao.me',
   'https://www.samyao.me',
 
@@ -14,7 +11,6 @@ const whitelist = [
 // 需要模糊匹配的域名后缀 (专门针对 AI Studio 预览地址)
 const allowedSuffixes = [
   '.scf.usercontent.goog',
-  '.ps6.space',
   '.samyao.me',
   '.vercel.app',
   '.run.app' // 兼容 Cloud Run 的自动域名
