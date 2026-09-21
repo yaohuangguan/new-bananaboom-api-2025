@@ -1,4 +1,5 @@
 import fetch from './http.js'
+import { getR2DeliveryUrl, getR2KeyFromReference } from './r2Reference.js'
 
 // =====================================================================
 // 📨 辅助函数：Bark 推送 (增强版 - 支持 Sound/Level/Icon)
@@ -10,10 +11,15 @@ export async function sendBarkNotification (barkUrl, title, body, options = {}) 
       // 1. 处理基础 URL
       const baseUrl = barkUrl.endsWith('/') ? barkUrl.slice(0, -1) : barkUrl;
   
+      const resolveMediaUrl = (value) => {
+        const key = getR2KeyFromReference(value);
+        return key ? getR2DeliveryUrl(key) : value;
+      };
+
       // 2. 准备 URL 参数
       const params = new URLSearchParams({
         // 图标: 如果 task 没配，用默认闹钟图标
-        icon: options.icon || 'https://cdn-icons-png.flaticon.com/512/3602/3602145.png',
+        icon: resolveMediaUrl(options.icon) || 'https://cdn-icons-png.flaticon.com/512/3602/3602145.png',
         // 铃声: 默认 minuet
         sound: options.sound || 'minuet',
         // 中断级别: 默认 active
@@ -29,7 +35,7 @@ export async function sendBarkNotification (barkUrl, title, body, options = {}) 
   
       // 如果有图片
       if (options.image) {
-        params.append('image', options.image);
+        params.append('image', resolveMediaUrl(options.image));
       }
   
       // 如果有持续响铃
