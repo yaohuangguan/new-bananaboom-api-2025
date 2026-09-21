@@ -19,6 +19,7 @@ import socketHandler from './socket/socket.js';
 // 🔥 引入安检中间件 (核心改动)
 import auth from './middleware/auth.js'; // 身份识别 (温和模式)
 import globalGuard from './middleware/globalGuard.js'; // 权限门卫 (查表执法)
+import { seedPortfolioProjects } from './bootstrap/seedPortfolioProjects.js';
 import {
   normalizeR2RequestReferences,
   hydrateR2ResponseReferences
@@ -220,6 +221,9 @@ const startServer = async () => {
   try {
     // 1. 连接数据库
     await connectDB();
+
+    // 1.1 Insert system-owned portfolio seeds once. Existing DB records are never overwritten.
+    await seedPortfolioProjects();
 
     // 1.5 Initialize Firebase Admin SDK
     initFirebase();
