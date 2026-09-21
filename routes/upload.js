@@ -4,7 +4,14 @@ import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
 // 引入优化后的 R2 工具函数
 // 注意：listR2Files 现在接受第一个参数 prefix
-import { uploadToR2, getPresignedUrl, listR2Files, deleteR2File, R2 } from '../utils/r2.js';
+import {
+  uploadToR2,
+  getPresignedUrl,
+  listR2Files,
+  deleteR2File,
+  getR2ObjectUrls,
+  R2
+} from '../utils/r2.js';
 import { ListObjectsV2Command } from '@aws-sdk/client-s3';
 import logOperation from '../utils/audit.js';
 
@@ -75,7 +82,8 @@ router.post('/', upload.array('files', 10), async (req, res) => {
       const fileName = `${finalFolderPrefix}${uuidv4()}${fileExt}`;
 
       // 执行上传
-      const url = await uploadToR2(file.buffer, fileName, file.mimetype);
+      await uploadToR2(file.buffer, fileName, file.mimetype);
+      const objectUrls = getR2ObjectUrls(fileName);
 
       // 记录日志
       logOperation({
@@ -87,9 +95,8 @@ router.post('/', upload.array('files', 10), async (req, res) => {
       });
 
       return {
-        url,
-        name: file.originalname,
-        key: fileName
+        ...objectUrls,
+        name: file.originalname
       };
     });
 
@@ -190,9 +197,12 @@ router.post('/presign', async (req, res) => {
     res.json({
       success: true,
       // 前端用这个 PUT 上传
-      uploadUrl: urlData.uploadUrl, 
-      // 前端存数据库用这个
-      publicUrl: urlData.publicUrl, 
+      uploadUrl: urlData.uploadUrl,
+      // Stable object metadata. r2Url is Cloudflare's native public development URL.
+      url: urlData.url,
+      publicUrl: urlData.publicUrl,
+      customUrl: urlData.customUrl,
+      r2Url: urlData.r2Url,
       // 文件的 Key (路径)
       key: finalKey,
       // 告诉前端最终存到哪个文件夹了
