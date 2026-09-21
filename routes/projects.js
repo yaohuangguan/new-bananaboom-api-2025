@@ -40,7 +40,10 @@ router.post(
 
     body('demoUrl').optional({ checkFalsy: true }).isURL().withMessage('演示链接必须是有效的 URL'),
     body('repoUrl').optional({ checkFalsy: true }).isURL().withMessage('仓库链接必须是有效的 URL'),
-    body('coverImage').optional({ checkFalsy: true }).isURL().withMessage('封面图必须是有效的 URL'),
+    body('coverImage')
+      .optional({ checkFalsy: true })
+      .custom((value) => /^uploads\/\S+$/.test(value) || /^https?:\/\//i.test(value))
+      .withMessage('封面图必须是有效的 URL 或 R2 key'),
 
     body('order').optional().isInt().withMessage('排序权重必须是整数'),
     body('isVisible').optional().isBoolean().withMessage('可见性必须是布尔值'),
