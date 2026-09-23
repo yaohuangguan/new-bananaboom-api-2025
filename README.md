@@ -68,9 +68,12 @@ R2_PUBLIC_DOMAIN=https://assets.samyao.me
 R2_NATIVE_PUBLIC_DOMAIN=https://pub-xxxxxxxx.r2.dev
 # Optional: GitHub → Portfolio import (private repos)
 GITHUB_PORTFOLIO_TOKEN=github_pat_read_only_metadata_contents
-# Optional: opt-in AI cover generation via Cloudflare Workers AI.
-# R2_ACCOUNT_ID is reused as the Cloudflare account id.
-CLOUDFLARE_WORKERS_AI_TOKEN=cloudflare_workers_ai_token
+# GitHub → Portfolio AI analysis + optional cover generation.
+# Uses Workers AI free allocation first; R2_ACCOUNT_ID is reused as the Cloudflare account id.
+CLOUDFLARE_AI_TOKEN=cloudflare_workers_ai_token
+# Optional model overrides
+CLOUDFLARE_PORTFOLIO_TEXT_MODEL=@cf/zai-org/glm-4.7-flash
+CLOUDFLARE_PORTFOLIO_IMAGE_MODEL=@cf/black-forest-labs/flux-1-schnell
 RESEND_API_KEY=...
 EMAIL_FROM=...
 GEMINI_API_KEY=...
