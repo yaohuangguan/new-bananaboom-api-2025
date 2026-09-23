@@ -1,0 +1,130 @@
+import { fetch } from 'undici';
+
+export const CLOUDFLARE_TEXT_MODEL =
+  process.env.CLOUDFLARE_PORTFOLIO_TEXT_MODEL || '@cf/zai-org/glm-4.7-flash';
+
+export const CLOUDFLARE_IMAGE_MODEL =
+  process.env.CLOUDFLARE_PORTFOLIO_IMAGE_MODEL || '@cf/black-forest-labs/flux-1-schnell';
+
+function getCloudflareAiConfig(explicitToken) {
+  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID || process.env.R2_ACCOUNT_ID;
+  const apiToken =
+    explicitToken ||
+    process.env.CLOUDFLARE_AI_TOKEN ||
+    process.env.CLOUDFLARE_WORKERS_AI_TOKEN;
+
+  if (!accountId || !apiToken) {
+    const error = new Error(
+      'Cloudflare Workers AI is not configured. Set CLOUDFLARE_AI_TOKEN; R2_ACCOUNT_ID can be reused as the Cloudflare account ID.'
+    );
+    error.code = 'CLOUDFLARE_AI_NOT_CONFIGURED';
+    throw error;
+  }
+
+  return { accountId, apiToken };
+}
+
+function extractJsonObject(value) {
+  const text = String(value || '').trim();
+  if (!text) throw new Error('Cloudflare AI returned an empty response');
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    const fenced = text.match(/\`\`\`(?:json)?\s*([\s\S]*?)\`\`\`/i);
+    const candidate = fenced?.[1]?.trim() || text;
+    const start = candidate.indexOf('{');
+    const end = candidate.lastIndexOf('}');
+
+    if (start >= 0 && end > start) {
+      return JSON.parse(candidate.slice(start, end + 1));
+    }
+
+    throw new Error('Cloudflare AI did not return valid JSON');
+  }
+}
+
+export async function generateCloudflareJson({
+  system,
+  prompt,
+  explicitToken,
+  model = CLOUDFLARE_TEXT_MODEL,
+  maxTokens = 1800
+}) {
+  const { accountId, apiToken } = getCloudflareAiConfig(explicitToken);
+  const response = await fetch(
+    `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/v1/chat/completions`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          {
+            role: 'system',
+            content:
+              system ||
+              'Return only valid JSON. Do not include markdown fences or commentary.'
+          },
+          { role: 'user', content: prompt }
+        ],
+        temperature: 0.15,
+        max_completion_tokens: maxTokens
+      })
+    }
+  );
+
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    const message =
+      payload?.errors?.[0]?.message ||
+      payload?.error?.message ||
+      `Cloudflare Workers AI request failed: ${response.status}`;
+    throw new Error(message);
+  }
+
+  const content = payload?.choices?.[0]?.message?.content;
+  return extractJsonObject(content);
+}
+
+export async function generateCloudflareImage({
+  prompt,
+  explicitToken,
+  model = CLOUDFLARE_IMAGE_MODEL
+}) {
+  const { accountId, apiToken } = getCloudflareAiConfig(explicitToken);
+  const response = await fetch(
+    `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/run/${model}`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        prompt,
+        steps: 4,
+        seed: Math.floor(Math.random() * 2147483647)
+      })
+    }
+  );
+
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || !payload?.success || !payload?.result?.image) {
+    const message =
+      payload?.errors?.[0]?.message ||
+      payload?.messages?.[0]?.message ||
+      `Cloudflare Workers AI image request failed: ${response.status}`;
+    throw new Error(message);
+  }
+
+  return {
+    dataUrl: `data:image/jpeg;base64,${payload.result.image}`,
+    mimeType: 'image/jpeg',
+    model,
+    provider: 'cloudflare'
+  };
+}
