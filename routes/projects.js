@@ -3,6 +3,31 @@ const router = Router();
 import { body, param } from 'express-validator'; // 引入校验工具
 import Project from '../models/Project.js';
 import validate from '../middleware/validate.js'; // 引入刚才写的通用校验中间件
+import { previewGithubPortfolioImport } from '../services/portfolioImportService.js';
+
+router.post(
+  '/import-github/preview',
+  [
+    body('repoUrl')
+      .isURL({ protocols: ['https'], require_protocol: true })
+      .withMessage('请输入有效的 GitHub HTTPS 仓库地址'),
+    validate
+  ],
+  async (req, res) => {
+    try {
+      const preview = await previewGithubPortfolioImport(req.body.repoUrl);
+      res.json(preview);
+    } catch (error) {
+      console.error('[Portfolio Import]', error.message);
+      const status = /Invalid GitHub|Only github\.com|must include owner|Repository not found/.test(
+        error.message
+      )
+        ? 400
+        : 500;
+      res.status(status).json({ msg: error.message || 'Failed to import GitHub repository' });
+    }
+  }
+);
 
 // ==========================================
 // 1. 获取项目列表 (无需校验，因为没有参数)
