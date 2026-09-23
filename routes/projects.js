@@ -3,7 +3,10 @@ const router = Router();
 import { body, param } from 'express-validator'; // 引入校验工具
 import Project from '../models/Project.js';
 import validate from '../middleware/validate.js'; // 引入刚才写的通用校验中间件
-import { previewGithubPortfolioImport } from '../services/portfolioImportService.js';
+import {
+  previewGithubPortfolioImport,
+  generateCloudflarePortfolioCover
+} from '../services/portfolioImportService.js';
 
 router.post(
   '/import-github/preview',
@@ -25,6 +28,30 @@ router.post(
         ? 400
         : 500;
       res.status(status).json({ msg: error.message || 'Failed to import GitHub repository' });
+    }
+  }
+);
+
+router.post(
+  '/import-github/generate-cover',
+  [
+    body('title_en').optional({ checkFalsy: true }).isString(),
+    body('title_zh').optional({ checkFalsy: true }).isString(),
+    body('summary_en').optional({ checkFalsy: true }).isString(),
+    body('summary_zh').optional({ checkFalsy: true }).isString(),
+    body('techStack').optional().isArray(),
+    body('categories').optional().isArray(),
+    body('category').optional().isIn(['web', 'fullstack', 'mobile', 'tools']),
+    validate
+  ],
+  async (req, res) => {
+    try {
+      const cover = await generateCloudflarePortfolioCover(req.body);
+      res.json(cover);
+    } catch (error) {
+      console.error('[Portfolio Cover]', error.message);
+      const status = error.code === 'CLOUDFLARE_AI_NOT_CONFIGURED' ? 503 : 500;
+      res.status(status).json({ msg: error.message || 'Failed to generate project cover' });
     }
   }
 );
