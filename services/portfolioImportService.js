@@ -1,5 +1,5 @@
 import { fetch } from 'undici';
-import { generateJSON, getAiClient, CONFIG } from '../utils/aiProvider.js';
+import { generateJSON } from '../utils/aiProvider.js';
 
 const ALLOWED_CATEGORIES = new Set(['web', 'fullstack', 'mobile', 'tools']);
 
@@ -92,54 +92,186 @@ function normalizeTechStack(value) {
   return [...new Set(value.map((item) => String(item).trim()).filter(Boolean))].slice(0, 12);
 }
 
-function sanitizeSvg(svg) {
-  if (typeof svg !== 'string') return '';
-
-  const match = svg.match(/<svg\b[\s\S]*?<\/svg>/i);
-  if (!match) return '';
-
-  return match[0]
-    .replace(/<script\b[\s\S]*?<\/script>/gi, '')
-    .replace(/<foreignObject\b[\s\S]*?<\/foreignObject>/gi, '')
-    .replace(/\son\w+\s*=\s*(['"]).*?\1/gi, '')
-    .replace(/\s(?:href|xlink:href)\s*=\s*(['"])https?:[^'"]*\1/gi, '')
-    .replace(/<image\b[^>]*>/gi, '');
+function escapeXml(value = '') {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
 }
 
-async function generateCoverSvg(project) {
-  const ai = getAiClient('default');
-  const prompt = `
-Create a polished 16:9 portfolio cover illustration for this software project.
+function hashString(value = '') {
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
 
-Project:
-- Name: ${project.title_en}
-- Summary: ${project.summary_en}
-- Tech: ${project.techStack.join(', ')}
-- Categories: ${project.categories.join(', ')}
+function coverPalette(project) {
+  const primaryCategory = project.categories?.[0] || project.category || 'web';
+  const palettes = {
+    web: ['#071226', '#164e63', '#38bdf8', '#a5f3fc'],
+    fullstack: ['#09090b', '#312e81', '#8b5cf6', '#c4b5fd'],
+    mobile: ['#0b1020', '#155e75', '#22d3ee', '#67e8f9'],
+    tools: ['#0b0f14', '#14532d', '#22c55e', '#86efac']
+  };
+  return palettes[primaryCategory] || palettes.web;
+}
 
-Visual direction:
-- premium product/engineering portfolio aesthetic
-- abstract but clearly related to the product domain
-- no screenshots, no third-party logos, no copyrighted mascots
-- no tiny text; project name may appear once in a restrained way
-- dark-to-light depth, geometric/vector details, clean composition
-- designed to work as a card cover
+function coverMotif(project) {
+  const categories = new Set(project.categories || []);
+  const tech = (project.techStack || []).join(' ').toLowerCase();
+  const summary = `${project.title_en || ''} ${project.summary_en || ''}`.toLowerCase();
 
-Return ONLY a self-contained SVG.
-Use viewBox="0 0 1200 675".
-Do not use scripts, foreignObject, external images, external hrefs, filters that reference remote assets, or embedded raster data.
-`;
+  if (/satellite|orbit|starlink|rf|wireless|doppler|link budget/.test(`${tech} ${summary}`)) {
+    return 'orbit';
+  }
+  if (/map|leaflet|navigation|gps|route|openstreetmap|osrm/.test(`${tech} ${summary}`)) {
+    return 'map';
+  }
+  if (categories.has('tools') || /cli|bash|shell|terminal|developer tool/.test(`${tech} ${summary}`)) {
+    return 'terminal';
+  }
+  if (/ai|llm|agent|gemini|openai|model/.test(`${tech} ${summary}`)) {
+    return 'nodes';
+  }
+  return 'grid';
+}
 
-  const response = await ai.models.generateContent({
-    model: CONFIG.PRIMARY_MODEL,
-    contents: [{ role: 'user', parts: [{ text: prompt }] }],
-    config: {
-      systemInstruction:
-        'You generate safe, self-contained SVG portfolio artwork. Output raw SVG only.'
+export function generateProgrammaticCoverSvg(project) {
+  const [bg, mid, accent, soft] = coverPalette(project);
+  const seed = hashString(project.title_en || project.title_zh || 'project');
+  const motif = coverMotif(project);
+  const title = escapeXml(project.title_en || project.title_zh || 'Project');
+  const tags = (project.techStack || []).slice(0, 4).map(escapeXml);
+  const subtitle = escapeXml((project.categories || [project.category || 'web']).join(' · ').toUpperCase());
+
+  const dots = Array.from({ length: 16 }, (_, index) => {
+    const x = 70 + ((seed >> (index % 12)) + index * 137) % 1060;
+    const y = 70 + ((seed >> ((index + 4) % 16)) + index * 89) % 535;
+    const r = 2 + ((seed + index * 7) % 5);
+    return `<circle cx="${x}" cy="${y}" r="${r}" fill="${soft}" opacity="0.18"/>`;
+  }).join('');
+
+  const motifSvg = {
+    orbit: `
+      <circle cx="902" cy="326" r="118" fill="none" stroke="${accent}" stroke-width="2" opacity=".28"/>
+      <ellipse cx="902" cy="326" rx="222" ry="82" fill="none" stroke="${soft}" stroke-width="2" opacity=".35" transform="rotate(-19 902 326)"/>
+      <ellipse cx="902" cy="326" rx="176" ry="62" fill="none" stroke="${accent}" stroke-width="1.5" opacity=".24" transform="rotate(28 902 326)"/>
+      <circle cx="902" cy="326" r="72" fill="url(#planet)" stroke="${soft}" stroke-opacity=".28"/>
+      <g transform="translate(1030 193) rotate(-18)">
+        <rect x="-18" y="-12" width="36" height="24" rx="5" fill="${soft}" opacity=".92"/>
+        <rect x="-58" y="-9" width="34" height="18" rx="2" fill="${accent}" opacity=".72"/>
+        <rect x="24" y="-9" width="34" height="18" rx="2" fill="${accent}" opacity=".72"/>
+      </g>`,
+    map: `
+      <path d="M690 470 C760 370 760 238 844 208 C922 180 996 225 1068 152" fill="none" stroke="${soft}" stroke-width="7" stroke-linecap="round" opacity=".20"/>
+      <path d="M690 470 C760 370 760 238 844 208 C922 180 996 225 1068 152" fill="none" stroke="${accent}" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="12 14" opacity=".85"/>
+      <circle cx="692" cy="470" r="15" fill="${accent}"/><circle cx="1068" cy="152" r="15" fill="${soft}"/>
+      <circle cx="844" cy="208" r="7" fill="${soft}" opacity=".75"/>
+      <circle cx="915" cy="207" r="7" fill="${accent}" opacity=".65"/>`,
+    terminal: `
+      <rect x="680" y="160" width="430" height="340" rx="24" fill="#020617" opacity=".78" stroke="${soft}" stroke-opacity=".18"/>
+      <circle cx="718" cy="198" r="7" fill="#fb7185"/><circle cx="742" cy="198" r="7" fill="#facc15"/><circle cx="766" cy="198" r="7" fill="#4ade80"/>
+      <path d="M735 280 l34 26 -34 26" fill="none" stroke="${accent}" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+      <rect x="790" y="324" width="175" height="8" rx="4" fill="${soft}" opacity=".7"/>
+      <rect x="735" y="380" width="285" height="8" rx="4" fill="${soft}" opacity=".18"/>
+      <rect x="735" y="416" width="220" height="8" rx="4" fill="${soft}" opacity=".18"/>`,
+    nodes: `
+      <g stroke="${accent}" stroke-opacity=".35" stroke-width="2">
+        <path d="M720 390 L810 260 L900 350 L1035 220"/><path d="M810 260 L960 175"/><path d="M900 350 L1045 420"/>
+      </g>
+      <g fill="${soft}">
+        <circle cx="720" cy="390" r="15"/><circle cx="810" cy="260" r="22"/><circle cx="900" cy="350" r="17"/><circle cx="1035" cy="220" r="20"/><circle cx="960" cy="175" r="10"/><circle cx="1045" cy="420" r="13"/>
+      </g>`,
+    grid: `
+      <g opacity=".34" stroke="${accent}" stroke-width="1.5">
+        ${Array.from({ length: 8 }, (_, i) => `<path d="M690 ${160 + i * 48} H1090"/>`).join('')}
+        ${Array.from({ length: 9 }, (_, i) => `<path d="M${690 + i * 50} 160 V496"/>`).join('')}
+      </g>
+      <rect x="790" y="250" width="210" height="150" rx="26" fill="${soft}" opacity=".13" stroke="${soft}" stroke-opacity=".3"/>
+      <circle cx="895" cy="325" r="42" fill="${accent}" opacity=".48"/>`
+  }[motif];
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 675" role="img" aria-label="${title}">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="${bg}"/><stop offset=".58" stop-color="${mid}"/><stop offset="1" stop-color="${bg}"/></linearGradient>
+    <radialGradient id="glow" cx=".76" cy=".42" r=".55"><stop stop-color="${accent}" stop-opacity=".24"/><stop offset="1" stop-color="${accent}" stop-opacity="0"/></radialGradient>
+    <radialGradient id="planet" cx=".35" cy=".3" r=".8"><stop stop-color="${soft}"/><stop offset=".55" stop-color="${accent}"/><stop offset="1" stop-color="${mid}"/></radialGradient>
+  </defs>
+  <rect width="1200" height="675" rx="34" fill="url(#bg)"/>
+  <rect width="1200" height="675" rx="34" fill="url(#glow)"/>
+  ${dots}
+  <g>${motifSvg}</g>
+  <g transform="translate(74 116)">
+    <rect x="0" y="0" width="132" height="30" rx="15" fill="${accent}" opacity=".16" stroke="${accent}" stroke-opacity=".35"/>
+    <text x="66" y="20" text-anchor="middle" fill="${soft}" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" font-weight="700" letter-spacing="1.5">${subtitle}</text>
+    <text x="0" y="112" fill="#f8fafc" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="56" font-weight="760" letter-spacing="-1.6">${title}</text>
+    <rect x="0" y="145" width="76" height="5" rx="3" fill="${accent}"/>
+    ${tags.map((tag, index) => `<g transform="translate(${index * 118} 184)"><rect width="104" height="34" rx="17" fill="#ffffff" opacity=".08"/><text x="52" y="22" text-anchor="middle" fill="#e2e8f0" font-family="ui-sans-serif, system-ui" font-size="12">${tag}</text></g>`).join('')}
+  </g>
+  <text x="74" y="604" fill="#cbd5e1" opacity=".62" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" letter-spacing="2">ORION / PROJECT</text>
+</svg>`;
+}
+
+export async function generateCloudflarePortfolioCover(project) {
+  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID || process.env.R2_ACCOUNT_ID;
+  const apiToken = process.env.CLOUDFLARE_WORKERS_AI_TOKEN;
+
+  if (!accountId || !apiToken) {
+    const error = new Error(
+      'Cloudflare AI is not configured. Set CLOUDFLARE_WORKERS_AI_TOKEN; R2_ACCOUNT_ID can be reused as the Cloudflare account ID.'
+    );
+    error.code = 'CLOUDFLARE_AI_NOT_CONFIGURED';
+    throw error;
+  }
+
+  const prompt = [
+    'Premium 16:9 software portfolio cover illustration.',
+    `Project: ${clampText(project.title_en || project.title_zh, 120)}.`,
+    `Purpose: ${clampText(project.summary_en || project.summary_zh, 320)}.`,
+    `Technologies: ${normalizeTechStack(project.techStack).join(', ')}.`,
+    `Categories: ${normalizeCategories(project.categories || [project.category]).join(', ')}.`,
+    'Modern product-engineering aesthetic, strong composition, sophisticated depth, visually related to the product domain.',
+    'No logos, no UI screenshots, no people, no watermarks, no paragraphs, no tiny text.',
+    'Avoid generic AI imagery unless the project is actually AI-related.',
+    'Landscape composition with negative space suitable for a portfolio card.'
+  ].join(' ');
+
+  const response = await fetch(
+    `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/run/@cf/black-forest-labs/flux-1-schnell`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        prompt,
+        steps: 4,
+        seed: Math.floor(Math.random() * 2147483647)
+      })
     }
-  });
+  );
 
-  return sanitizeSvg(response.text || '');
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || !payload?.success || !payload?.result?.image) {
+    const message =
+      payload?.errors?.[0]?.message ||
+      payload?.messages?.[0]?.message ||
+      `Cloudflare Workers AI request failed: ${response.status}`;
+    throw new Error(message);
+  }
+
+  return {
+    dataUrl: `data:image/jpeg;base64,${payload.result.image}`,
+    mimeType: 'image/jpeg',
+    model: '@cf/black-forest-labs/flux-1-schnell',
+    provider: 'cloudflare'
+  };
 }
 
 export async function previewGithubPortfolioImport(repoUrl) {
@@ -236,11 +368,9 @@ ${JSON.stringify(repoContext)}
     isVisible: true
   };
 
-  const coverSvg = await generateCoverSvg(project);
-
   return {
     project,
-    coverSvg,
+    coverSvg: generateProgrammaticCoverSvg(project),
     source: {
       owner,
       repo,
