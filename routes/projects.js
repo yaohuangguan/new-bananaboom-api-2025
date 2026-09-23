@@ -18,7 +18,10 @@ router.post(
   ],
   async (req, res) => {
     try {
-      const preview = await previewGithubPortfolioImport(req.body.repoUrl);
+      const preview = await previewGithubPortfolioImport(
+        req.body.repoUrl,
+        req.get('x-cloudflare-ai-token') || undefined
+      );
       res.json(preview);
     } catch (error) {
       console.error('[Portfolio Import]', error.message);
@@ -46,7 +49,10 @@ router.post(
   ],
   async (req, res) => {
     try {
-      const cover = await generateCloudflarePortfolioCover(req.body);
+      const cover = await generateCloudflarePortfolioCover(
+        req.body,
+        req.get('x-cloudflare-ai-token') || undefined
+      );
       res.json(cover);
     } catch (error) {
       console.error('[Portfolio Cover]', error.message);
