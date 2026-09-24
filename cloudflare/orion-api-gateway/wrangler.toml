@@ -1,6 +1,6 @@
 name = "orion-api-gateway"
 main = "src/index.js"
-compatibility_date = "2026-09-25"
+compatibility_date = "2026-09-24"
 workers_dev = true
 preview_urls = false
 
