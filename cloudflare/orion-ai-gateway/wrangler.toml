@@ -1,0 +1,7 @@
+name = "orion-ai-gateway"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+workers_dev = true
+
+[ai]
+binding = "AI"
