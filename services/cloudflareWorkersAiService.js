@@ -18,13 +18,40 @@ function getCloudflareAiConfig(explicitToken, explicitAccountId) {
 
   if (!accountId || !apiToken) {
     const error = new Error(
-      'Cloudflare Workers AI is not configured. Set CLOUDFLARE_AI_TOKEN; R2_ACCOUNT_ID can be reused as the Cloudflare account ID.'
+      'Cloudflare Workers AI direct API is not configured. Provide Account ID + API token, or configure the Orion AI gateway.'
     );
     error.code = 'CLOUDFLARE_AI_NOT_CONFIGURED';
     throw error;
   }
 
   return { accountId, apiToken };
+}
+
+function getGatewayConfig() {
+  const url = process.env.CLOUDFLARE_AI_GATEWAY_URL;
+  const secret = process.env.CLOUDFLARE_AI_GATEWAY_SECRET;
+  return url && secret ? { url: url.replace(/\/$/, ''), secret } : null;
+}
+
+async function callGateway(path, body) {
+  const gateway = getGatewayConfig();
+  if (!gateway) return null;
+
+  const response = await fetch(`${gateway.url}${path}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-orion-ai-secret': gateway.secret
+    },
+    body: JSON.stringify(body)
+  });
+
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(payload?.error || `Orion AI gateway failed: ${response.status}`);
+  }
+
+  return payload;
 }
 
 function extractJsonObject(value) {
@@ -55,6 +82,16 @@ export async function generateCloudflareJson({
   model = CLOUDFLARE_TEXT_MODEL,
   maxTokens = 1800
 }) {
+  if (!explicitToken) {
+    const gatewayPayload = await callGateway('/text', {
+      model,
+      system,
+      prompt,
+      maxTokens
+    });
+    if (gatewayPayload) return extractJsonObject(gatewayPayload.content);
+  }
+
   const { accountId, apiToken } = getCloudflareAiConfig(explicitToken, explicitAccountId);
   const response = await fetch(
     `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/v1/chat/completions`,
@@ -100,6 +137,18 @@ export async function generateCloudflareImage({
   explicitAccountId,
   model = CLOUDFLARE_IMAGE_MODEL
 }) {
+  if (!explicitToken) {
+    const gatewayPayload = await callGateway('/image', { model, prompt });
+    if (gatewayPayload?.image) {
+      return {
+        dataUrl: `data:image/jpeg;base64,${gatewayPayload.image}`,
+        mimeType: gatewayPayload.mimeType || 'image/jpeg',
+        model: gatewayPayload.model || model,
+        provider: gatewayPayload.provider || 'cloudflare-workers-ai'
+      };
+    }
+  }
+
   const { accountId, apiToken } = getCloudflareAiConfig(explicitToken, explicitAccountId);
   const response = await fetch(
     `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/run/${model}`,
