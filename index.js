@@ -122,7 +122,7 @@ app.use(compression({
 }));
 app.use(morgan('tiny'));
 app.use(helmet());
-app.options(/.*/, cors()); // ✅ 修复：把 "*" 改成 "(.*)"
+app.options(/.*/, cors(corsConfig));
 app.use(cors(corsConfig));
 
 // Optional origin lock: enabled only when ORION_EDGE_SECRET is configured.
