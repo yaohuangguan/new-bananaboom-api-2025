@@ -1,3 +1,19 @@
+const ALLOWED_ORIGINS = new Set([
+  'https://samyao.me',
+  'https://www.samyao.me',
+  'https://ps6.space',
+  'https://www.ps6.space',
+  'https://bananaboom-frontend.vercel.app',
+  'http://localhost:5173'
+]);
+
+const ALLOWED_ORIGIN_SUFFIXES = [
+  '.samyao.me',
+  '.ps6.space',
+  '.vercel.app',
+  '.scf.usercontent.goog'
+];
+
 const PUBLIC_CACHE_RULES = [
   { prefix: '/api/projects', ttl: 300 },
   { prefix: '/api/homepage', ttl: 120 },
@@ -18,6 +34,47 @@ const EXPENSIVE_PREFIXES = [
 ];
 
 const AUTH_PREFIXES = ['/api/auth', '/api/users'];
+
+function corsOrigin(request) {
+  const origin = request.headers.get('origin');
+  if (!origin) return null;
+  if (ALLOWED_ORIGINS.has(origin)) return origin;
+
+  try {
+    const hostname = new URL(origin).hostname;
+    if (ALLOWED_ORIGIN_SUFFIXES.some((suffix) => hostname.endsWith(suffix))) {
+      return origin;
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function preflightResponse(request) {
+  const origin = corsOrigin(request);
+  if (request.headers.get('origin') && !origin) {
+    return new Response(null, { status: 403 });
+  }
+
+  const headers = new Headers({
+    'access-control-allow-methods': 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
+    'access-control-allow-headers':
+      request.headers.get('access-control-request-headers') ||
+      'authorization,content-type,x-auth-token,x-google-auth,x-cloudflare-ai-token,x-cloudflare-account-id',
+    'access-control-max-age': '86400',
+    'cache-control': 'public, max-age=86400',
+    vary: 'Origin, Access-Control-Request-Headers, Access-Control-Request-Method'
+  });
+
+  if (origin) {
+    headers.set('access-control-allow-origin', origin);
+    headers.set('access-control-allow-credentials', 'true');
+  }
+
+  return new Response(null, { status: 204, headers });
+}
 
 function clientIp(request) {
   return request.headers.get('cf-connecting-ip') || 'unknown';
@@ -106,6 +163,10 @@ export default {
     const incomingUrl = new URL(request.url);
     const pathname = incomingUrl.pathname;
 
+    if (request.method === 'OPTIONS') {
+      return withSecurityHeaders(preflightResponse(request));
+    }
+
     const limited = await enforceRateLimit(request, env, pathname);
     if (limited) return withSecurityHeaders(limited);
 
@@ -136,7 +197,7 @@ export default {
             cf: {
               cacheEverything: true,
               cacheTtl: ttl,
-              cacheKey: request.url
+              cacheKey: `${request.url}::origin=${request.headers.get('origin') || 'none'}`
             }
           }
         : undefined
@@ -145,6 +206,7 @@ export default {
     const secured = withSecurityHeaders(response);
 
     if (ttl > 0) {
+      secured.headers.delete('set-cookie');
       secured.headers.set('cache-control', `public, max-age=0, s-maxage=${ttl}`);
     } else if (request.method !== 'GET' || hasPrivateContext(request)) {
       secured.headers.set('cache-control', 'no-store');
