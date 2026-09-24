@@ -9,6 +9,69 @@ import {
 } from '../services/portfolioImportService.js';
 
 router.post(
+  '/import-github/stream',
+  [
+    body('repoUrl')
+      .isURL({ protocols: ['https'], require_protocol: true })
+      .withMessage('请输入有效的 GitHub HTTPS 仓库地址'),
+    validate
+  ],
+  async (req, res) => {
+    res.status(200);
+    res.set({
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no'
+    });
+    res.flushHeaders?.();
+
+    let closed = false;
+    res.on('close', () => {
+      closed = true;
+    });
+
+    const send = (event, payload) => {
+      if (closed || res.writableEnded) return;
+      res.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
+      res.flush?.();
+    };
+
+    const heartbeat = setInterval(() => {
+      if (!closed && !res.writableEnded) {
+        res.write(': keep-alive\n\n');
+        res.flush?.();
+      }
+    }, 10000);
+
+    try {
+      send('progress', {
+        stage: 'start',
+        percent: 2,
+        message: 'Starting GitHub import'
+      });
+
+      const preview = await previewGithubPortfolioImport(
+        req.body.repoUrl,
+        req.get('x-cloudflare-ai-token') || undefined,
+        req.get('x-cloudflare-account-id') || undefined,
+        (progress) => send('progress', progress)
+      );
+
+      send('result', preview);
+    } catch (error) {
+      console.error('[Portfolio Import Stream]', error.message);
+      send('error', {
+        message: error.message || 'Failed to import GitHub repository'
+      });
+    } finally {
+      clearInterval(heartbeat);
+      if (!closed && !res.writableEnded) res.end();
+    }
+  }
+);
+
+router.post(
   '/import-github/preview',
   [
     body('repoUrl')
