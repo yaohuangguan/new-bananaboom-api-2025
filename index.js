@@ -19,6 +19,7 @@ import socketHandler from './socket/socket.js';
 // 🔥 引入安检中间件 (核心改动)
 import auth from './middleware/auth.js'; // 身份识别 (温和模式)
 import globalGuard from './middleware/globalGuard.js'; // 权限门卫 (查表执法)
+import originEdgeGuard from './middleware/originEdgeGuard.js';
 import {
   normalizeR2RequestReferences,
   hydrateR2ResponseReferences
@@ -123,6 +124,10 @@ app.use(morgan('tiny'));
 app.use(helmet());
 app.options(/.*/, cors()); // ✅ 修复：把 "*" 改成 "(.*)"
 app.use(cors(corsConfig));
+
+// Optional origin lock: enabled only when ORION_EDGE_SECRET is configured.
+// Exempts Stripe webhook and scheduler trigger so existing external callbacks keep working.
+app.use('/api', originEdgeGuard);
 
 // 🛡️ Stripe Webhook 专属通道 (必须在 bodyParser 和 auth 网关前解析出原始 Buffer 数据)
 app.use('/api/payments/webhook', express.raw({ type: 'application/json' }));
