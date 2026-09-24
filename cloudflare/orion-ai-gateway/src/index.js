@@ -26,7 +26,7 @@ export default {
     try {
       if (url.pathname === '/text') {
         const model = body.model || '@cf/zai-org/glm-4.7-flash';
-        const result = await env.AI.run(model, {
+        const request = {
           messages: [
             {
               role: 'system',
@@ -36,14 +36,30 @@ export default {
             },
             { role: 'user', content: body.prompt || '' }
           ],
-          temperature: 0.15,
-          max_completion_tokens: body.maxTokens || 1800
-        });
+          temperature: 0.1,
+          max_completion_tokens: body.maxTokens || 2600
+        };
+
+        if (body.schema) {
+          request.response_format = {
+            type: 'json_schema',
+            json_schema: body.schema
+          };
+        } else {
+          request.response_format = { type: 'json_object' };
+        }
+
+        const result = await env.AI.run(model, request);
 
         const content = getTextContent(result);
         if (!content) return json({ error: 'Workers AI returned empty text' }, 502);
 
-        return json({ content, model, provider: 'cloudflare-workers-ai' });
+        return json({
+          content,
+          model,
+          provider: 'cloudflare-workers-ai',
+          structured: typeof content === 'object' && content !== null
+        });
       }
 
       if (url.pathname === '/image') {
