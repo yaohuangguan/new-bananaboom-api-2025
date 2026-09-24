@@ -6,8 +6,11 @@ export const CLOUDFLARE_TEXT_MODEL =
 export const CLOUDFLARE_IMAGE_MODEL =
   process.env.CLOUDFLARE_PORTFOLIO_IMAGE_MODEL || '@cf/black-forest-labs/flux-1-schnell';
 
-function getCloudflareAiConfig(explicitToken) {
-  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID || process.env.R2_ACCOUNT_ID;
+function getCloudflareAiConfig(explicitToken, explicitAccountId) {
+  const accountId =
+    explicitAccountId ||
+    process.env.CLOUDFLARE_ACCOUNT_ID ||
+    process.env.R2_ACCOUNT_ID;
   const apiToken =
     explicitToken ||
     process.env.CLOUDFLARE_AI_TOKEN ||
@@ -48,10 +51,11 @@ export async function generateCloudflareJson({
   system,
   prompt,
   explicitToken,
+  explicitAccountId,
   model = CLOUDFLARE_TEXT_MODEL,
   maxTokens = 1800
 }) {
-  const { accountId, apiToken } = getCloudflareAiConfig(explicitToken);
+  const { accountId, apiToken } = getCloudflareAiConfig(explicitToken, explicitAccountId);
   const response = await fetch(
     `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/v1/chat/completions`,
     {
@@ -93,9 +97,10 @@ export async function generateCloudflareJson({
 export async function generateCloudflareImage({
   prompt,
   explicitToken,
+  explicitAccountId,
   model = CLOUDFLARE_IMAGE_MODEL
 }) {
-  const { accountId, apiToken } = getCloudflareAiConfig(explicitToken);
+  const { accountId, apiToken } = getCloudflareAiConfig(explicitToken, explicitAccountId);
   const response = await fetch(
     `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/run/${model}`,
     {
