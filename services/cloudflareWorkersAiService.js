@@ -55,6 +55,10 @@ async function callGateway(path, body) {
 }
 
 function extractJsonObject(value) {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return value;
+  }
+
   const text = String(value || '').trim();
   if (!text) throw new Error('Cloudflare AI returned an empty response');
 
@@ -80,14 +84,16 @@ export async function generateCloudflareJson({
   explicitToken,
   explicitAccountId,
   model = CLOUDFLARE_TEXT_MODEL,
-  maxTokens = 1800
+  maxTokens = 2600,
+  schema
 }) {
   if (!explicitToken) {
     const gatewayPayload = await callGateway('/text', {
       model,
       system,
       prompt,
-      maxTokens
+      maxTokens,
+      schema
     });
     if (gatewayPayload) return extractJsonObject(gatewayPayload.content);
   }
@@ -112,8 +118,14 @@ export async function generateCloudflareJson({
           },
           { role: 'user', content: prompt }
         ],
-        temperature: 0.15,
-        max_completion_tokens: maxTokens
+        temperature: 0.1,
+        max_completion_tokens: maxTokens,
+        response_format: schema
+          ? {
+              type: 'json_schema',
+              json_schema: schema
+            }
+          : { type: 'json_object' }
       })
     }
   );
