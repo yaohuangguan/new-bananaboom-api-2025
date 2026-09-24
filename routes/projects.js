@@ -20,7 +20,8 @@ router.post(
     try {
       const preview = await previewGithubPortfolioImport(
         req.body.repoUrl,
-        req.get('x-cloudflare-ai-token') || undefined
+        req.get('x-cloudflare-ai-token') || undefined,
+        req.get('x-cloudflare-account-id') || undefined
       );
       res.json(preview);
     } catch (error) {
@@ -51,7 +52,8 @@ router.post(
     try {
       const cover = await generateCloudflarePortfolioCover(
         req.body,
-        req.get('x-cloudflare-ai-token') || undefined
+        req.get('x-cloudflare-ai-token') || undefined,
+        req.get('x-cloudflare-account-id') || undefined
       );
       res.json(cover);
     } catch (error) {
