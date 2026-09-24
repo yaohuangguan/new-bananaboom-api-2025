@@ -1,0 +1,40 @@
+name = "orion-api-gateway"
+main = "src/index.js"
+compatibility_date = "2026-09-25"
+workers_dev = true
+preview_urls = false
+
+[vars]
+ORIGIN_URL = "https://bananaboom-api-242273127238.asia-east1.run.app"
+
+[[routes]]
+pattern = "api.samyao.me"
+custom_domain = true
+
+[[ratelimits]]
+name = "GENERAL_LIMITER"
+namespace_id = "12001"
+  [ratelimits.simple]
+  limit = 300
+  period = 60
+
+[[ratelimits]]
+name = "WRITE_LIMITER"
+namespace_id = "12002"
+  [ratelimits.simple]
+  limit = 60
+  period = 60
+
+[[ratelimits]]
+name = "AUTH_LIMITER"
+namespace_id = "12003"
+  [ratelimits.simple]
+  limit = 20
+  period = 60
+
+[[ratelimits]]
+name = "EXPENSIVE_LIMITER"
+namespace_id = "12004"
+  [ratelimits.simple]
+  limit = 12
+  period = 60
