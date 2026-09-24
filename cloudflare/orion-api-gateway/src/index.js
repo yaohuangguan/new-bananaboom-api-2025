@@ -14,12 +14,10 @@ const ALLOWED_ORIGIN_SUFFIXES = [
   '.scf.usercontent.goog'
 ];
 
-const PUBLIC_CACHE_RULES = [
-  { prefix: '/api/projects', ttl: 300 },
-  { prefix: '/api/homepage', ttl: 120 },
-  { prefix: '/api/posts', ttl: 60 },
-  { prefix: '/api/resumes/list', ttl: 300 }
-];
+// Mutable Orion content is intentionally not edge-cached.
+// Correctness after create/update/delete is more important than saving a small number
+// of Cloud Run reads. Add routes here only when their staleness contract is explicit.
+const PUBLIC_CACHE_RULES = [];
 
 const EXPENSIVE_PREFIXES = [
   '/api/ai',
@@ -208,7 +206,7 @@ export default {
     if (ttl > 0) {
       secured.headers.delete('set-cookie');
       secured.headers.set('cache-control', `public, max-age=0, s-maxage=${ttl}`);
-    } else if (request.method !== 'GET' || hasPrivateContext(request)) {
+    } else {
       secured.headers.set('cache-control', 'no-store');
     }
 
