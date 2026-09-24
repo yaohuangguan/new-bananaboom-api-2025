@@ -6,6 +6,43 @@ import {
 
 const ALLOWED_CATEGORIES = new Set(['web', 'fullstack', 'mobile', 'tools']);
 
+const PORTFOLIO_IMPORT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    title_zh: { type: 'string' },
+    title_en: { type: 'string' },
+    summary_zh: { type: 'string' },
+    summary_en: { type: 'string' },
+    description_zh: { type: 'string' },
+    description_en: { type: 'string' },
+    techStack: {
+      type: 'array',
+      items: { type: 'string' },
+      maxItems: 12
+    },
+    categories: {
+      type: 'array',
+      items: {
+        type: 'string',
+        enum: ['web', 'fullstack', 'mobile', 'tools']
+      },
+      minItems: 1,
+      maxItems: 4
+    }
+  },
+  required: [
+    'title_zh',
+    'title_en',
+    'summary_zh',
+    'summary_en',
+    'description_zh',
+    'description_en',
+    'techStack',
+    'categories'
+  ]
+};
+
 const githubHeaders = () => {
   const headers = {
     Accept: 'application/vnd.github+json',
@@ -343,7 +380,8 @@ ${JSON.stringify(repoContext)}
     prompt,
     explicitToken,
     explicitAccountId,
-    maxTokens: 1800
+    maxTokens: 2600,
+    schema: PORTFOLIO_IMPORT_SCHEMA
   });
 
   progress({
