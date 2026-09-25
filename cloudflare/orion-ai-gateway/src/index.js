@@ -58,7 +58,17 @@ export default {
               error: 'Workers AI returned empty text',
               resultType: Array.isArray(result) ? 'array' : typeof result,
               resultKeys:
-                result && typeof result === 'object' ? Object.keys(result).slice(0, 20) : []
+                result && typeof result === 'object' ? Object.keys(result).slice(0, 20) : [],
+              choiceKeys:
+                result?.choices?.[0] && typeof result.choices[0] === 'object'
+                  ? Object.keys(result.choices[0]).slice(0, 20)
+                  : [],
+              messageKeys:
+                result?.choices?.[0]?.message &&
+                typeof result.choices[0].message === 'object'
+                  ? Object.keys(result.choices[0].message).slice(0, 20)
+                  : [],
+              finishReason: result?.choices?.[0]?.finish_reason || null
             },
             502
           );
