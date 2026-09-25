@@ -67,7 +67,7 @@ function iconCandidateScore(entry) {
   return score;
 }
 
-async function findGithubProjectIcon(owner, repo, defaultBranch) {
+export async function findGithubProjectIcon(owner, repo, defaultBranch) {
   try {
     const tree = await githubJson(
       `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/trees/${encodeURIComponent(defaultBranch)}?recursive=1`
