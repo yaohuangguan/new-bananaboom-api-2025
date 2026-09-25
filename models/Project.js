@@ -20,6 +20,7 @@ const ProjectSchema = new Schema(
     repoUrl: { type: String }, // GitHub 仓库链接
     demoUrl: { type: String }, // 演示/上线链接
     coverImage: { type: String }, // 封面图 URL
+    iconImage: { type: String }, // 项目图标 / favicon URL
     // Legacy single category kept for backwards compatibility.
     category: {
       type: String,
