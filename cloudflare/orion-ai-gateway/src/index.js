@@ -25,7 +25,7 @@ export default {
 
     try {
       if (url.pathname === '/text') {
-        const model = body.model || '@cf/zai-org/glm-4.7-flash';
+        const model = body.model || '@cf/google/gemma-4-26b-a4b-it';
         const request = {
           messages: [
             {
@@ -37,8 +37,10 @@ export default {
             { role: 'user', content: body.prompt || '' }
           ],
           temperature: 0.1,
-          reasoning_effort: body.reasoningEffort || 'low',
-          max_completion_tokens: body.maxTokens || 6000
+          max_completion_tokens: body.maxTokens || 3000,
+          chat_template_kwargs: {
+            enable_thinking: false
+          }
         };
 
         if (body.schema) {
