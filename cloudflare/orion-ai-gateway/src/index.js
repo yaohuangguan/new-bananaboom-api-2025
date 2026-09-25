@@ -52,7 +52,17 @@ export default {
         const result = await env.AI.run(model, request);
 
         const content = getTextContent(result);
-        if (!content) return json({ error: 'Workers AI returned empty text' }, 502);
+        if (!content) {
+          return json(
+            {
+              error: 'Workers AI returned empty text',
+              resultType: Array.isArray(result) ? 'array' : typeof result,
+              resultKeys:
+                result && typeof result === 'object' ? Object.keys(result).slice(0, 20) : []
+            },
+            502
+          );
+        }
 
         return json({
           content,
