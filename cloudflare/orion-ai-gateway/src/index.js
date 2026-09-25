@@ -37,7 +37,8 @@ export default {
             { role: 'user', content: body.prompt || '' }
           ],
           temperature: 0.1,
-          max_completion_tokens: body.maxTokens || 2600
+          reasoning_effort: body.reasoningEffort || 'low',
+          max_completion_tokens: body.maxTokens || 6000
         };
 
         if (body.schema) {
@@ -53,22 +54,14 @@ export default {
 
         const content = getTextContent(result);
         if (!content) {
+          const finishReason = result?.choices?.[0]?.finish_reason || null;
           return json(
             {
-              error: 'Workers AI returned empty text',
-              resultType: Array.isArray(result) ? 'array' : typeof result,
-              resultKeys:
-                result && typeof result === 'object' ? Object.keys(result).slice(0, 20) : [],
-              choiceKeys:
-                result?.choices?.[0] && typeof result.choices[0] === 'object'
-                  ? Object.keys(result.choices[0]).slice(0, 20)
-                  : [],
-              messageKeys:
-                result?.choices?.[0]?.message &&
-                typeof result.choices[0].message === 'object'
-                  ? Object.keys(result.choices[0].message).slice(0, 20)
-                  : [],
-              finishReason: result?.choices?.[0]?.finish_reason || null
+              error:
+                finishReason === 'length'
+                  ? 'Workers AI exhausted its completion budget before producing final JSON'
+                  : 'Workers AI returned empty text',
+              finishReason
             },
             502
           );
