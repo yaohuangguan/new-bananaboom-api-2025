@@ -1,7 +1,7 @@
 import { fetch } from 'undici';
 
 export const CLOUDFLARE_TEXT_MODEL =
-  process.env.CLOUDFLARE_PORTFOLIO_TEXT_MODEL || '@cf/zai-org/glm-4.7-flash';
+  process.env.CLOUDFLARE_PORTFOLIO_TEXT_MODEL || '@cf/google/gemma-4-26b-a4b-it';
 
 export const CLOUDFLARE_IMAGE_MODEL =
   process.env.CLOUDFLARE_PORTFOLIO_IMAGE_MODEL || '@cf/black-forest-labs/flux-1-schnell';
@@ -128,7 +128,10 @@ export async function generateCloudflareJson({
               type: 'json_schema',
               json_schema: schema
             }
-          : { type: 'json_object' }
+          : { type: 'json_object' },
+        chat_template_kwargs: {
+          enable_thinking: false
+        }
       })
     }
   );
