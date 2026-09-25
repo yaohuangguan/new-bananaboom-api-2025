@@ -6,6 +6,114 @@ import {
 
 const ALLOWED_CATEGORIES = new Set(['web', 'fullstack', 'mobile', 'tools']);
 
+const ICON_MIME_BY_EXT = {
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.webp': 'image/webp',
+  '.ico': 'image/x-icon',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg'
+};
+
+function extensionOf(filePath = '') {
+  const match = filePath.toLowerCase().match(/(\.[a-z0-9]+)$/);
+  return match?.[1] || '';
+}
+
+function sanitizeImportedSvg(svg = '') {
+  return String(svg)
+    .replace(/<script\b[\s\S]*?<\/script>/gi, '')
+    .replace(/<foreignObject\b[\s\S]*?<\/foreignObject>/gi, '')
+    .replace(/<style\b[\s\S]*?<\/style>/gi, '')
+    .replace(/\s+on[a-z]+\s*=\s*(['"]).*?\1/gi, '')
+    .replace(/\s+style\s*=\s*(['"]).*?\1/gi, '')
+    .replace(/\s+(?:href|xlink:href)\s*=\s*(['"])(?!#|data:).*?\1/gi, '')
+    .replace(/<image\b[\s\S]*?>/gi, '')
+    .trim();
+}
+
+function iconCandidateScore(entry) {
+  if (!entry || entry.type !== 'blob' || !entry.path) return -1;
+
+  const path = entry.path.toLowerCase();
+  const fileName = path.split('/').pop() || '';
+  const ext = extensionOf(path);
+  if (!ICON_MIME_BY_EXT[ext]) return -1;
+  if (typeof entry.size === 'number' && entry.size > 2 * 1024 * 1024) return -1;
+
+  let score = -1;
+
+  if (/^favicon\.(svg|png|webp|ico|jpg|jpeg)$/.test(fileName)) score = 140;
+  else if (/^favicon[-_.]/.test(fileName)) score = 132;
+  else if (/^apple-touch-icon(?:[-_.]|\.)/.test(fileName)) score = 122;
+  else if (/^icon\.(svg|png|webp|ico|jpg|jpeg)$/.test(fileName)) score = 118;
+  else if (/^(?:icon|app-icon)[-_]?(?:192|256|384|512)(?:x(?:192|256|384|512))?\./.test(fileName)) {
+    score = 112;
+  } else if (/^maskable[-_]?icon/.test(fileName)) score = 106;
+  else if (/^ic_launcher(?:_foreground)?\./.test(fileName)) score = 96;
+  else if (/^(?:app[-_])?logo\.(svg|png|webp|ico|jpg|jpeg)$/.test(fileName)) score = 78;
+
+  if (score < 0) return -1;
+
+  if (/(^|\/)public\//.test(path)) score += 24;
+  if (/(^|\/)(?:src\/)?app\//.test(path)) score += 18;
+  if (/(^|\/)icons?\//.test(path)) score += 12;
+  if (/(^|\/)assets?\//.test(path)) score += 6;
+  if (/docs?|screenshots?|examples?|fixtures?|test/.test(path)) score -= 35;
+
+  const dimension = fileName.match(/(?:^|[-_])(\d{2,4})(?:x\1)?(?:[-_.]|$)/)?.[1];
+  if (dimension) score += Math.min(Number(dimension) / 64, 12);
+
+  return score;
+}
+
+async function findGithubProjectIcon(owner, repo, defaultBranch) {
+  try {
+    const tree = await githubJson(
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/trees/${encodeURIComponent(defaultBranch)}?recursive=1`
+    );
+
+    const candidates = (Array.isArray(tree?.tree) ? tree.tree : [])
+      .map((entry) => ({ entry, score: iconCandidateScore(entry) }))
+      .filter(({ score }) => score >= 0)
+      .sort((a, b) => b.score - a.score);
+
+    const selected = candidates[0]?.entry;
+    if (!selected?.path) return null;
+
+    const payload = await githubJson(
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${selected.path
+        .split('/')
+        .map(encodeURIComponent)
+        .join('/')}?ref=${encodeURIComponent(defaultBranch)}`
+    );
+
+    if (!payload || payload.type !== 'file' || !payload.content) return null;
+
+    let buffer = Buffer.from(payload.content.replace(/\n/g, ''), 'base64');
+    if (buffer.byteLength > 2 * 1024 * 1024) return null;
+
+    const ext = extensionOf(selected.path);
+    const mimeType = ICON_MIME_BY_EXT[ext];
+    if (!mimeType) return null;
+
+    if (ext === '.svg') {
+      const sanitized = sanitizeImportedSvg(buffer.toString('utf8'));
+      if (!/^<svg\b/i.test(sanitized)) return null;
+      buffer = Buffer.from(sanitized, 'utf8');
+    }
+
+    return {
+      path: selected.path,
+      mimeType,
+      dataUrl: `data:${mimeType};base64,${buffer.toString('base64')}`
+    };
+  } catch {
+    // Icon discovery is best-effort and must never block an otherwise valid import.
+    return null;
+  }
+}
+
 const PORTFOLIO_IMPORT_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -303,13 +411,20 @@ export async function previewGithubPortfolioImport(
 
   progress({
     stage: 'content',
-    percent: 30,
+    percent: 28,
     message: 'Reading README and package metadata'
   });
   const [readme, packageJsonText] = await Promise.all([
     githubContent(owner, repo, 'README.md'),
     githubContent(owner, repo, 'package.json')
   ]);
+
+  progress({
+    stage: 'icon',
+    percent: 36,
+    message: 'Looking for a real project icon in the repository'
+  });
+  const repoIcon = await findGithubProjectIcon(owner, repo, metadata.default_branch);
 
   let packageJson = {};
   try {
@@ -406,6 +521,7 @@ ${JSON.stringify(repoContext)}
         ? metadata.homepage
         : '',
     coverImage: '',
+    iconImage: '',
     category: categories[0],
     categories,
     order: 0,
@@ -421,11 +537,13 @@ ${JSON.stringify(repoContext)}
   const result = {
     project,
     coverSvg: generateProgrammaticCoverSvg(project),
+    iconDataUrl: repoIcon?.dataUrl || '',
     source: {
       owner,
       repo,
       private: Boolean(metadata.private),
-      description: metadata.description || ''
+      description: metadata.description || '',
+      iconPath: repoIcon?.path || ''
     }
   };
 
