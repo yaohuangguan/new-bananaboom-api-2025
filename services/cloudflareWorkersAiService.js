@@ -84,8 +84,9 @@ export async function generateCloudflareJson({
   explicitToken,
   explicitAccountId,
   model = CLOUDFLARE_TEXT_MODEL,
-  maxTokens = 2600,
-  schema
+  maxTokens = 6000,
+  schema,
+  reasoningEffort = 'low'
 }) {
   if (!explicitToken) {
     const gatewayPayload = await callGateway('/text', {
@@ -93,7 +94,8 @@ export async function generateCloudflareJson({
       system,
       prompt,
       maxTokens,
-      schema
+      schema,
+      reasoningEffort
     });
     if (gatewayPayload) return extractJsonObject(gatewayPayload.content);
   }
@@ -119,6 +121,7 @@ export async function generateCloudflareJson({
           { role: 'user', content: prompt }
         ],
         temperature: 0.1,
+        reasoning_effort: reasoningEffort,
         max_completion_tokens: maxTokens,
         response_format: schema
           ? {
