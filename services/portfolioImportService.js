@@ -385,6 +385,106 @@ export async function generateCloudflarePortfolioCover(
   return generateCloudflareImage({ prompt, explicitToken, explicitAccountId });
 }
 
+export async function rewritePortfolioProject(
+  project,
+  explicitToken,
+  explicitAccountId,
+  onProgress
+) {
+  const progress = typeof onProgress === 'function' ? onProgress : () => {};
+
+  progress({
+    stage: 'prepare',
+    percent: 10,
+    message: 'Preparing the current project card'
+  });
+
+  const source = {
+    title_zh: clampText(project.title_zh, 120),
+    title_en: clampText(project.title_en, 120),
+    summary_zh: clampText(project.summary_zh, 600),
+    summary_en: clampText(project.summary_en, 600),
+    description_zh: clampText(project.description_zh, 3000),
+    description_en: clampText(project.description_en, 3000),
+    techStack: normalizeTechStack(project.techStack),
+    categories: normalizeCategories(project.categories || [project.category]),
+    repoUrl: clampText(project.repoUrl, 500),
+    demoUrl: clampText(project.demoUrl, 500)
+  };
+
+  const prompt = `
+You are rewriting an existing software portfolio card.
+
+Return JSON only with:
+{
+  "title_zh": string,
+  "title_en": string,
+  "summary_zh": string,
+  "summary_en": string,
+  "description_zh": string,
+  "description_en": string,
+  "techStack": string[],
+  "categories": ("web"|"fullstack"|"mobile"|"tools")[]
+}
+
+Rules:
+- Improve clarity, specificity and professional polish without inventing facts.
+- Preserve the real product identity and meaning.
+- summary fields: one concise sentence with a clear product value proposition.
+- description fields: 1-2 compact paragraphs suitable for a software portfolio.
+- Keep Chinese natural and concise; keep English idiomatic and direct.
+- Do not add technologies or capabilities that are not evidenced by the supplied card.
+- categories can contain multiple values.
+- "tools" means developer/productivity/lab/tooling software, not a generic catch-all.
+
+Existing project card:
+${JSON.stringify(source)}
+`;
+
+  progress({
+    stage: 'ai',
+    percent: 42,
+    message: 'Rewriting the project card with Cloudflare Workers AI'
+  });
+
+  const generated = await generateCloudflareJson({
+    system:
+      'You are a precise bilingual software portfolio editor. Return only valid JSON matching the requested schema and never invent product capabilities.',
+    prompt,
+    explicitToken,
+    explicitAccountId,
+    maxTokens: 5000,
+    schema: PORTFOLIO_IMPORT_SCHEMA
+  });
+
+  progress({
+    stage: 'draft',
+    percent: 88,
+    message: 'Formatting the rewritten project card'
+  });
+
+  const categories = normalizeCategories(generated.categories);
+  const rewritten = {
+    title_zh: clampText(generated.title_zh, 120) || source.title_zh,
+    title_en: clampText(generated.title_en, 120) || source.title_en,
+    summary_zh: clampText(generated.summary_zh, 320),
+    summary_en: clampText(generated.summary_en, 320),
+    description_zh: clampText(generated.description_zh, 2400),
+    description_en: clampText(generated.description_en, 2400),
+    techStack: normalizeTechStack(generated.techStack),
+    category: categories[0],
+    categories
+  };
+
+  progress({
+    stage: 'complete',
+    percent: 100,
+    message: 'AI rewrite is ready to review'
+  });
+
+  return rewritten;
+}
+
 export async function previewGithubPortfolioImport(
   repoUrl,
   explicitToken,

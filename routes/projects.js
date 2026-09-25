@@ -5,6 +5,7 @@ import Project from '../models/Project.js';
 import validate from '../middleware/validate.js'; // 引入刚才写的通用校验中间件
 import {
   previewGithubPortfolioImport,
+  rewritePortfolioProject,
   generateCloudflarePortfolioCover
 } from '../services/portfolioImportService.js';
 
@@ -95,6 +96,77 @@ router.post(
         ? 400
         : 500;
       res.status(status).json({ msg: error.message || 'Failed to import GitHub repository' });
+    }
+  }
+);
+
+router.post(
+  '/ai-rewrite/stream',
+  [
+    body('title_zh').optional({ checkFalsy: true }).isString(),
+    body('title_en').optional({ checkFalsy: true }).isString(),
+    body('summary_zh').optional({ checkFalsy: true }).isString(),
+    body('summary_en').optional({ checkFalsy: true }).isString(),
+    body('description_zh').optional({ checkFalsy: true }).isString(),
+    body('description_en').optional({ checkFalsy: true }).isString(),
+    body('techStack').optional().isArray(),
+    body('categories').optional().isArray(),
+    body('category').optional().isIn(['web', 'fullstack', 'mobile', 'tools']),
+    body('repoUrl').optional({ checkFalsy: true }).isURL(),
+    body('demoUrl').optional({ checkFalsy: true }).isURL(),
+    validate
+  ],
+  async (req, res) => {
+    res.status(200);
+    res.set({
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no'
+    });
+    res.flushHeaders?.();
+
+    let closed = false;
+    res.on('close', () => {
+      closed = true;
+    });
+
+    const send = (event, payload) => {
+      if (closed || res.writableEnded) return;
+      res.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
+      res.flush?.();
+    };
+
+    const heartbeat = setInterval(() => {
+      if (!closed && !res.writableEnded) {
+        res.write(': keep-alive\n\n');
+        res.flush?.();
+      }
+    }, 10000);
+
+    try {
+      send('progress', {
+        stage: 'start',
+        percent: 2,
+        message: 'Starting AI rewrite'
+      });
+
+      const rewritten = await rewritePortfolioProject(
+        req.body,
+        req.get('x-cloudflare-ai-token') || undefined,
+        req.get('x-cloudflare-account-id') || undefined,
+        (progress) => send('progress', progress)
+      );
+
+      send('result', rewritten);
+    } catch (error) {
+      console.error('[Portfolio AI Rewrite]', error.message);
+      send('error', {
+        message: error.message || 'Failed to rewrite project card'
+      });
+    } finally {
+      clearInterval(heartbeat);
+      if (!closed && !res.writableEnded) res.end();
     }
   }
 );
