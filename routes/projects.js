@@ -167,6 +167,10 @@ router.post(
       .optional({ checkFalsy: true })
       .custom((value) => /^uploads\/\S+$/.test(value) || /^https?:\/\//i.test(value))
       .withMessage('封面图必须是有效的 URL 或 R2 key'),
+    body('iconImage')
+      .optional({ checkFalsy: true })
+      .custom((value) => /^uploads\/\S+$/.test(value) || /^https?:\/\//i.test(value))
+      .withMessage('项目图标必须是有效的 URL 或 R2 key'),
 
     body('order').optional().isInt().withMessage('排序权重必须是整数'),
     body('isVisible').optional().isBoolean().withMessage('可见性必须是布尔值'),
@@ -211,6 +215,10 @@ router.put(
     body('title_zh').optional().notEmpty().withMessage('中文标题不能为空'),
     body('title_en').optional().notEmpty().withMessage('英文标题不能为空'),
     body('demoUrl').optional({ checkFalsy: true }).isURL().withMessage('演示链接格式错误'),
+    body('iconImage')
+      .optional({ checkFalsy: true })
+      .custom((value) => /^uploads\/\S+$/.test(value) || /^https?:\/\//i.test(value))
+      .withMessage('项目图标必须是有效的 URL 或 R2 key'),
     body('order').optional().isInt(),
     body('techStack').optional().isArray(),
     body('category').optional().isIn(['web', 'fullstack', 'mobile', 'tools']),
