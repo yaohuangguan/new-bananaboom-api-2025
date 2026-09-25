@@ -380,7 +380,8 @@ ${JSON.stringify(repoContext)}
     prompt,
     explicitToken,
     explicitAccountId,
-    maxTokens: 2600,
+    maxTokens: 6000,
+    reasoningEffort: 'low',
     schema: PORTFOLIO_IMPORT_SCHEMA
   });
 
