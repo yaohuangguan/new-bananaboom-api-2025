@@ -15,18 +15,29 @@
 import jwt from 'jsonwebtoken';
 import { get } from '../cache/session.js'; // MongoDB/Redis Session 助手
 import permissionService from '../services/permissionService.js'; // 权限服务
+import { getAuthCookie } from '../utils/authCookie.js';
 const SECRET = process.env.SECRET_JWT || 'secret';
 
 export default async function (req, res, next) {
   // ============================================================
   // 1. 提取 Token
   // ============================================================
-  // 支持自定义 Header x-auth-token 或标准 Authorization Bearer 格式
+  // Migration compatibility:
+  // 1) legacy x-auth-token
+  // 2) standard Authorization Bearer
+  // 3) new HttpOnly session cookie
   let token = req.header('x-auth-token');
+  let authSource = token ? 'header' : null;
   const authHeader = req.header('Authorization');
 
   if (!token && authHeader && authHeader.startsWith('Bearer ')) {
     token = authHeader.split(' ')[1];
+    authSource = 'bearer';
+  }
+
+  if (!token) {
+    token = getAuthCookie(req);
+    if (token) authSource = 'cookie';
   }
 
   // ============================================================
@@ -82,6 +93,8 @@ export default async function (req, res, next) {
 
     // 挂载原始 Token 供业务使用 (如注销接口需要用到)
     req.user.token = token;
+    req.authToken = token;
+    req.authSource = authSource;
     req.userId = req.user.id;
 
     next(); // ✅ 身份解析成功，进入下一关

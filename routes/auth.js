@@ -4,6 +4,7 @@ import Otp from '../models/Otp.js';
 import { signAndSyncToken } from '../utils/authUtils.js';
 import { verifyIdToken } from '../services/firebaseAdmin.js';
 import permissionService from '../services/permissionService.js';
+import { setAuthCookie } from '../utils/authCookie.js';
 import rateLimit from 'express-rate-limit';
 
 const router = Router();
@@ -242,6 +243,7 @@ router.post('/verify-otp', async (req, res) => {
 
     // 4. Issue JWT Token
     const token = await signAndSyncToken(user);
+    setAuthCookie(res, token);
     const userPayload = permissionService.buildUserPayload(user);
 
     res.json({
@@ -305,6 +307,7 @@ router.post('/firebase-verify', async (req, res) => {
 
     // 3. Issue local JWT Token
     const token = await signAndSyncToken(user);
+    setAuthCookie(res, token);
     const userPayload = permissionService.buildUserPayload(user);
 
     res.json({
