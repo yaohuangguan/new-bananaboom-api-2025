@@ -33,6 +33,17 @@ const EXPENSIVE_PREFIXES = [
 
 const AUTH_PREFIXES = ['/api/auth', '/api/users'];
 
+const R2_BROWSER_READ_PATHS = new Set([
+  '/api/upload/list',
+  '/api/upload/r2/usage',
+  '/api/upload/object'
+]);
+
+function isR2BrowserRead(request, pathname) {
+  return ['GET', 'HEAD'].includes(request.method) && R2_BROWSER_READ_PATHS.has(pathname);
+}
+
+
 function corsOrigin(request) {
   const origin = request.headers.get('origin');
   if (!origin) return null;
@@ -115,7 +126,13 @@ async function enforceRateLimit(request, env, pathname) {
   let limiter = env.GENERAL_LIMITER;
   let bucket = 'general';
 
-  if (isExpensive(pathname)) {
+  if (isR2BrowserRead(request, pathname)) {
+    // System Management's R2 browser can legitimately issue list/usage/range-preview
+    // requests in quick succession. Keep these reads isolated from the 12/min
+    // expensive mutation bucket while retaining per-IP protection.
+    limiter = env.GENERAL_LIMITER;
+    bucket = 'r2-browser-read';
+  } else if (isExpensive(pathname)) {
     limiter = env.EXPENSIVE_LIMITER;
     bucket = 'expensive';
   } else if (isAuth(pathname)) {
