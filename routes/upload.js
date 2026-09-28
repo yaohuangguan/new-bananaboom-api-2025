@@ -12,7 +12,7 @@ import {
   getR2ObjectUrls,
   R2
 } from '../utils/r2.js';
-import { ListObjectsV2Command } from '@aws-sdk/client-s3';
+import { GetObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import logOperation from '../utils/audit.js';
 
 const router = Router();
@@ -217,7 +217,7 @@ router.post('/presign', async (req, res) => {
 /**
  * @route   GET /api/upload/list
  * @desc    获取 R2 文件列表 (支持文件夹层级浏览，智能路径修正)
- * @query   limit (默认50), cursor (分页), type ('image' | 'backup'), folder (子目录路径)
+ * @query   limit (默认50), cursor (分页), type ('resource' | 'backup' | 'all'), folder (子目录路径)
  */
 router.get('/list', async (req, res) => {
   try {
@@ -229,6 +229,9 @@ router.get('/list', async (req, res) => {
     let rootPrefix = 'uploads/'; // 默认资源库
     if (type === 'backup') {
       rootPrefix = 'db-backups/';
+    } else if (type === 'all') {
+      // Bucket root: expose every top-level prefix/object to the system-management file browser.
+      rootPrefix = '';
     }
 
     // 2. 获取并清洗前端请求的 folder 参数
@@ -298,6 +301,70 @@ router.get('/list', async (req, res) => {
   } catch (error) {
     console.error('List Files Error:', error);
     res.status(500).json({ msg: 'Failed to fetch file list', error: error.message });
+  }
+});
+
+/**
+ * @route   GET /api/upload/object
+ * @desc    Authenticated inline read proxy for R2 objects used by System Management previews.
+ * @query   key (full R2 object key)
+ */
+router.get('/object', async (req, res) => {
+  const key = String(req.query.key || '').trim();
+  if (!key) {
+    return res.status(400).json({ msg: 'Object key is required' });
+  }
+
+  try {
+    const range = req.headers.range;
+    const response = await R2.send(
+      new GetObjectCommand({
+        Bucket: process.env.R2_BUCKET_NAME,
+        Key: key,
+        ...(range ? { Range: range } : {})
+      })
+    );
+
+    res.status(response.ContentRange ? 206 : 200);
+    res.setHeader('Content-Type', response.ContentType || 'application/octet-stream');
+    res.setHeader(
+      'Content-Disposition',
+      `inline; filename*=UTF-8''${encodeURIComponent(path.basename(key) || 'object')}`
+    );
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('Accept-Ranges', 'bytes');
+
+    if (response.ContentLength != null) {
+      res.setHeader('Content-Length', String(response.ContentLength));
+    }
+    if (response.ContentRange) {
+      res.setHeader('Content-Range', response.ContentRange);
+    }
+
+    const body = response.Body;
+    if (body && typeof body.pipe === 'function') {
+      body.on('error', streamError => {
+        console.error('R2 object stream error:', streamError);
+        if (!res.headersSent) res.status(500).end();
+        else res.destroy(streamError);
+      });
+      body.pipe(res);
+      return;
+    }
+
+    if (body && typeof body.transformToByteArray === 'function') {
+      const bytes = await body.transformToByteArray();
+      return res.end(Buffer.from(bytes));
+    }
+
+    return res.status(404).json({ msg: 'Object body is empty' });
+  } catch (error) {
+    console.error('Read R2 Object Error:', error);
+    const status =
+      error?.$metadata?.httpStatusCode === 404 || error?.name === 'NoSuchKey' ? 404 : 500;
+    return res.status(status).json({
+      msg: status === 404 ? 'Object not found' : 'Failed to read object'
+    });
   }
 });
 
