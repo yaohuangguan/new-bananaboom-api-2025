@@ -7,6 +7,7 @@ import logOperation from '../utils/audit.js';
 import K from '../config/permissionKeys.js';
 import permissionService from '../services/permissionService.js';
 import { signAndSyncToken } from '../utils/authUtils.js';
+import { clearAuthCookie, setAuthCookie } from '../utils/authCookie.js';
 const router = Router();
 import { check, validationResult } from 'express-validator';
 
@@ -343,6 +344,7 @@ router.post(
       await newUser.save();
 
       const token = await signAndSyncToken(newUser);
+      setAuthCookie(res, token);
 
       // 8. 审计日志
       logOperation({
@@ -431,6 +433,7 @@ router.post(
       }
 
       const token = await signAndSyncToken(user);
+      setAuthCookie(res, token);
 
       // 6. 记录日志 (区分登录方式)
       const loginMethod = inputAccount.includes('@') ? 'email' : 'phone';
@@ -467,18 +470,23 @@ router.post(
  */
 router.post('/logout', async (req, res) => {
   try {
-    // 1. 从 req.user 拿到当前正在使用的 token (由 auth 中间件挂载)
-    const currentToken = req.user.token;
-    await del(currentToken);
+    const currentToken = req.authToken || req.user?.token;
 
-    // 3. (可选) 清理 5 秒缓存，让该用户的状态在服务器内存也干净
-    permissionService.clearUserCache(req.user.id);
+    if (currentToken) {
+      await del(`auth:${currentToken}`);
+    }
 
+    if (req.user?.id) {
+      permissionService.clearUserCache(req.user.id);
+    }
+
+    clearAuthCookie(res);
     res.json({
       success: true,
       msg: '已成功安全退出'
     });
   } catch (err) {
+    clearAuthCookie(res);
     res.status(500).send('Logout Error');
   }
 });

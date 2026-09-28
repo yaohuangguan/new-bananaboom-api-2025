@@ -2,6 +2,7 @@ import request from 'supertest';
 import jwt from 'jsonwebtoken';
 import app from '../index.js';
 import User from '../models/User.js';
+import { get } from '../cache/session.js';
 
 // ==========================================
 // 🛠️ 基础配置与 Mock 数据
@@ -113,10 +114,21 @@ describe('👤 Users Module Full Coverage', () => {
 
   // ... (Logout, Password, Fitness-Goal, Reset-by-secret 保持不变) ...
   describe('POST /api/users/logout', () => {
-    it('Should logout', async () => {
+    it('Should authenticate with the HttpOnly cookie and revoke the server session', async () => {
       const reg = await request(app).post('/api/users').send(mockUser);
-      const res = await request(app).post('/api/users/logout').set('x-auth-token', reg.body.token);
+      const setCookie = reg.headers['set-cookie']?.[0];
+
+      expect(setCookie).toContain('orion_session=');
+      expect(setCookie).toContain('HttpOnly');
+      expect(setCookie).toContain('SameSite=Lax');
+      expect(await get(`auth:${reg.body.token}`)).toBeTruthy();
+
+      const sessionCookie = setCookie.split(';')[0];
+      const res = await request(app).post('/api/users/logout').set('Cookie', sessionCookie);
+
       expect(res.statusCode).toEqual(200);
+      expect(await get(`auth:${reg.body.token}`)).toBeNull();
+      expect(res.headers['set-cookie']?.[0]).toContain('orion_session=;');
     });
   });
 
