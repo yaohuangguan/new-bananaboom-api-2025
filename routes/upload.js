@@ -217,7 +217,7 @@ router.post('/presign', async (req, res) => {
 /**
  * @route   GET /api/upload/list
  * @desc    获取 R2 文件列表 (支持文件夹层级浏览，智能路径修正)
- * @query   limit (默认50), cursor (分页), type ('image' | 'backup'), folder (子目录路径)
+ * @query   limit (默认50), cursor (分页), type ('resource' | 'backup' | 'all'), folder (子目录路径)
  */
 router.get('/list', async (req, res) => {
   try {
@@ -229,6 +229,9 @@ router.get('/list', async (req, res) => {
     let rootPrefix = 'uploads/'; // 默认资源库
     if (type === 'backup') {
       rootPrefix = 'db-backups/';
+    } else if (type === 'all') {
+      // Bucket root: expose every top-level prefix/object to the system-management file browser.
+      rootPrefix = '';
     }
 
     // 2. 获取并清洗前端请求的 folder 参数
