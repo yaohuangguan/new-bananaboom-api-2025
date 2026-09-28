@@ -80,6 +80,7 @@ const ROUTE_MAP = [
   // 3. 媒体库列表：写文章的人需要能看到列表，方便选图
   // 🔥 放在 /api/upload 之前，确保优先匹配
   { path: '/api/upload/list', method: 'GET', permission: K.IMAGE_RESOURCES_USE },
+  { path: '/api/upload/object', method: 'GET', permission: K.IMAGE_RESOURCES_USE },
 
   // 4. 视频预签名：写文章的人需要上传视频
   // 🔥 也是具体路径，放在前面
