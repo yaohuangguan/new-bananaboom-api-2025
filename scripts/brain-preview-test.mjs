@@ -184,6 +184,8 @@ try {
   assert.equal((await decision).status(),200);
   await page.waitForFunction(()=>document.body.textContent.includes('Authorized synthetic callback'));
   assert.equal(callback.searchParams.get('state'),'preview-state');
+  const issuerMetadata = await (await fetch(apiBase+'/.well-known/oauth-authorization-server')).json();
+  assert.equal(callback.searchParams.get('iss'),issuerMetadata.issuer);
   const exchanged = await fetch(apiBase+'/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
     body:new URLSearchParams({grant_type:'authorization_code',client_id:client.client_id,code:callback.searchParams.get('code'),
       code_verifier:verifier,redirect_uri:client.redirect_uris[0],resource:apiBase+'/api/brain/sync/mcp'})});
