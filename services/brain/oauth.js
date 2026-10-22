@@ -120,7 +120,7 @@ export async function approveAuthorization(ownerId, input) {
     if (!client || !client.redirect_uris.includes(pending.params.redirectUri)) fail('NOT_FOUND', 404);
     const target = new URL(pending.params.redirectUri);
     if (pending.params.state) target.searchParams.set('state', pending.params.state);
-    target.searchParams.set('iss', publicBase());
+    target.searchParams.set('iss', new URL(publicBase()).href);
     if (!input.allow) { target.searchParams.set('error', 'access_denied'); return { redirectUrl: target.href }; }
     const scopes = scopesOf(input.scopes || pending.params.scopes);
     if (scopes.some(s => !pending.params.scopes.includes(s))) fail('INVALID_SCOPES');

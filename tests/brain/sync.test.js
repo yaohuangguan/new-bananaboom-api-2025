@@ -97,7 +97,10 @@ async function begin(scopes = 'memory:read memory:write') {
 async function grant(flow, scopes = ['memory:read','memory:write']) {
   const approved = await request(app).post('/api/brain/connections/authorize').set('test-user', owner).send({ request: flow.pending, allow: true, scopes });
   expect(approved.status).toBe(200);
-  expect(new URL(approved.body.redirectUrl).searchParams.get('iss')).toBe(base);
+  const metadata = (await request(app).get('/.well-known/oauth-authorization-server')).body;
+  const resource = (await request(app).get('/.well-known/oauth-protected-resource/api/brain/sync/mcp')).body;
+  expect(resource.authorization_servers).toContain(metadata.issuer);
+  expect(new URL(approved.body.redirectUrl).searchParams.get('iss')).toBe(metadata.issuer);
   return new URL(approved.body.redirectUrl).searchParams.get('code');
 }
 const exchange = (flow, code, verifier = flow.verifier) => request(app).post('/token').type('form').send({
