@@ -3,6 +3,7 @@ import rateLimit from 'express-rate-limit';
 import mongoose from 'mongoose';
 import { BrainSource, BrainDocument, BrainMemory, BrainRevision, BrainImportJob } from '../models/brain.js';
 import { objectId, publicRow, pageRows, writeMemory, fail, limitOf } from '../services/brain/core.js';
+import { attachImports } from '../services/brain/imports.js';
 import Conversation from '../models/Conversation.js';
 import Chat from '../models/Chat.js';
 export const brainRouter = Router();
@@ -67,6 +68,7 @@ brainRouter.get('/legacy/messages', async (req, res) => {
   const rows = await Chat.find(filter).sort({ _id: 1 }).limit(limit + 1).lean();
   res.json({ items: rows.slice(0, limit), nextCursor: rows.length > limit ? String(rows[limit - 1]._id) : null });
 });
+attachImports(brainRouter);
 export function finishBrainRouter(router = brainRouter) {
   router.use((_req, res) => res.status(404).json({ message: 'NOT_FOUND' }));
   router.use((error, _req, res, _next) => {

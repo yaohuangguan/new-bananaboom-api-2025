@@ -75,10 +75,14 @@ export async function writeMemory(ownerId, input, memoryId) {
   return mongoose.connection.transaction(async session => {
     await validateEvidence(ownerId, data, session);
     if (!memoryId) {
-      const sourceId = new mongoose.Types.ObjectId();
+      let sourceId = new mongoose.Types.ObjectId();
       const documentId = new mongoose.Types.ObjectId();
+      if (data.sourceAnchors?.length) {
+        sourceId = (await BrainDocument.findOne({ _id: data.sourceAnchors[0].documentId, ownerId }).session(session).lean()).sourceId;
+      } else {
       await BrainSource.create([{ _id: sourceId, ownerId, provider: 'manual', sourceType: 'manual', originalSha256: sha(data.statement + randomUUID()), status: 'ready', metadata: { origin: 'user-entered' } }], { session });
       await BrainDocument.create([{ _id: documentId, ownerId, sourceId, stableKey: 'manual:' + sourceId, rawText: data.statement, contentSha256: sha(data.statement), ...searchFields(data.statement) }], { session });
+      }
       const [created] = await BrainMemory.create([{ ...data, ownerId, sourceId, sourceAnchors: data.sourceAnchors?.length ? data.sourceAnchors : [{ documentId, quote: data.statement }], ...searchFields(data.statement) }], { session });
       const after = created.toObject();
       await BrainRevision.create([{ ownerId, actorId: ownerId, memoryId: created._id, action: 'create', after, revisionNumber: 1, reason: input.reason }], { session });
@@ -102,7 +106,14 @@ export async function pageRows(Model, ownerId, query = {}, extra = {}) {
     if (typeof query[k] !== 'string' || query[k].length > 30) fail('INVALID_FILTER');
     filter[k] = query[k];
   }
-  if (query.source) filter.sourceId = objectId(query.source);
+  if (query.source) {
+    const sourceId = objectId(query.source);
+    if (Model === BrainDocument) {
+      const source = await BrainSource.findOne({ _id: sourceId, ownerId }).lean();
+      if (!source) fail('NOT_FOUND', 404);
+      filter.$or = [{ sourceId }, { _id: { $in: source.metadata?.documentIds || [] } }];
+    } else filter.sourceId = sourceId;
+  }
   if (query.from || query.to) {
     filter.eventAt = {};
     for (const [input, op] of [['from', '$gte'], ['to', '$lte']]) if (query[input]) {
