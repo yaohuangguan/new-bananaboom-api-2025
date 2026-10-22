@@ -3,3 +3,6 @@ node_modules
 .env
 *.log
 coverage/
+
+# Personal Memory Vault local private objects
+/.vault-data/

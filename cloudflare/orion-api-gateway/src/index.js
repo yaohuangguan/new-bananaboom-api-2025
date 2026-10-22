@@ -132,7 +132,11 @@ async function enforceRateLimit(request, env, pathname) {
     // expensive mutation bucket while retaining per-IP protection.
     limiter = env.GENERAL_LIMITER;
     bucket = 'r2-browser-read';
-  } else if (isExpensive(pathname)) {
+  } else if (
+    isExpensive(pathname) ||
+    (!['GET', 'HEAD'].includes(request.method) &&
+      /^\/api\/brain\/(?:imports|exports|restore|legacy\/preview)(?:\/|$)/.test(pathname))
+  ) {
     limiter = env.EXPENSIVE_LIMITER;
     bucket = 'expensive';
   } else if (isAuth(pathname)) {
@@ -202,7 +206,8 @@ export default {
       method: request.method,
       headers,
       body: ['GET', 'HEAD'].includes(request.method) ? undefined : request.body,
-      redirect: 'manual'
+      redirect: 'manual',
+      duplex: 'half'
     });
 
     const response = await fetch(

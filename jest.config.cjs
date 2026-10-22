@@ -13,7 +13,7 @@ module.exports = {
     testMatch: ['**/tests/**/*.test.js'],
 
     // 4. 忽略目录
-    testPathIgnorePatterns: ['/node_modules/'],
+    testPathIgnorePatterns: ['/node_modules/', '/tests/brain/'],
 
     // 5. 其它设置
     verbose: true,

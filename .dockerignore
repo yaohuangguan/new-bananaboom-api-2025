@@ -1,0 +1,3 @@
+# Keep Personal Memory Vault objects out of the Docker build context.
+.vault-data
+.vault-data/**

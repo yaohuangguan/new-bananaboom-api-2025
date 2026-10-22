@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { constants } from 'node:fs';
@@ -8,14 +9,31 @@ const MAX = 128 * 1024 * 1024;
 function config() {
   const driver = process.env.BRAIN_STORAGE_DRIVER || 'local';
   if (driver === 's3') {
-    if (!process.env.BRAIN_S3_BUCKET || process.env.BRAIN_S3_BUCKET === process.env.R2_BUCKET_NAME || !process.env.BRAIN_STORAGE_KEY || process.env.BRAIN_STORAGE_KEY.length < 32) fail('PRIVATE_STORAGE_NOT_CONFIGURED', 503);
-    return { driver, bucket: process.env.BRAIN_S3_BUCKET, client: new S3Client({
-      region: process.env.BRAIN_S3_REGION || 'auto', endpoint: process.env.BRAIN_S3_ENDPOINT,
-      forcePathStyle: true, credentials: { accessKeyId: process.env.BRAIN_S3_ACCESS_KEY_ID, secretAccessKey: process.env.BRAIN_S3_SECRET_ACCESS_KEY }
-    }) };
+    if (
+      !process.env.BRAIN_S3_BUCKET ||
+      process.env.BRAIN_S3_BUCKET === process.env.R2_BUCKET_NAME ||
+      !process.env.BRAIN_STORAGE_KEY ||
+      process.env.BRAIN_STORAGE_KEY.length < 32
+    )
+      fail('PRIVATE_STORAGE_NOT_CONFIGURED', 503);
+    return {
+      driver,
+      bucket: process.env.BRAIN_S3_BUCKET,
+      client: new S3Client({
+        region: process.env.BRAIN_S3_REGION || 'auto',
+        endpoint: process.env.BRAIN_S3_ENDPOINT,
+        forcePathStyle: true,
+        credentials: {
+          accessKeyId: process.env.BRAIN_S3_ACCESS_KEY_ID,
+          secretAccessKey: process.env.BRAIN_S3_SECRET_ACCESS_KEY
+        }
+      })
+    };
   }
-  if (driver !== 'local' || !process.env.BRAIN_STORAGE_ROOT || !path.isAbsolute(process.env.BRAIN_STORAGE_ROOT)) fail('PRIVATE_STORAGE_NOT_CONFIGURED', 503);
-  if (process.env.NODE_ENV === 'production' && process.env.BRAIN_LOCAL_DURABLE !== '1') fail('DURABLE_STORAGE_REQUIRED', 503);
+  if (driver !== 'local' || !process.env.BRAIN_STORAGE_ROOT || !path.isAbsolute(process.env.BRAIN_STORAGE_ROOT))
+    fail('PRIVATE_STORAGE_NOT_CONFIGURED', 503);
+  if (process.env.NODE_ENV === 'production' && process.env.BRAIN_LOCAL_DURABLE !== '1')
+    fail('DURABLE_STORAGE_REQUIRED', 503);
   return { driver, root: process.env.BRAIN_STORAGE_ROOT };
 }
 function validKey(ownerId, key) {
@@ -25,30 +43,66 @@ function validKey(ownerId, key) {
 async function localDirectory(root, ownerId) {
   await fs.mkdir(root, { recursive: true, mode: 0o700 });
   const rootInfo = await fs.lstat(root);
-  if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink()) fail('UNSAFE_STORAGE_ROOT', 503);
+  if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink() || rootInfo.mode & 0o077) fail('UNSAFE_STORAGE_ROOT', 503);
   const directory = path.join(root, ownerId);
   await fs.mkdir(directory, { recursive: true, mode: 0o700 });
   const info = await fs.lstat(directory);
-  if (!info.isDirectory() || info.isSymbolicLink()) fail('UNSAFE_STORAGE_ROOT', 503);
+  if (!info.isDirectory() || info.isSymbolicLink() || info.mode & 0o077) fail('UNSAFE_STORAGE_ROOT', 503);
   return directory;
 }
 export async function putPrivate(ownerId, bytes) {
   objectId(ownerId);
   if (!Buffer.isBuffer(bytes) || bytes.length > MAX) fail('OBJECT_TOO_LARGE', 413);
-  const key = ownerId + '/' + sha(bytes), c = config();
+  const key = ownerId + '/' + sha(bytes),
+    c = config();
   if (c.driver === 's3') {
-    await c.client.send(new PutObjectCommand({ Bucket: c.bucket, Key: key, Body: await seal(bytes, process.env.BRAIN_STORAGE_KEY), ContentType: 'application/octet-stream' }));
+    await c.client.send(
+      new PutObjectCommand({
+        Bucket: c.bucket,
+        Key: key,
+        Body: await seal(bytes, process.env.BRAIN_STORAGE_KEY),
+        ContentType: 'application/octet-stream'
+      })
+    );
   } else {
     const dir = await localDirectory(c.root, ownerId);
+    const target = path.join(dir, sha(bytes));
+    const temporary = path.join(dir, '.vault-' + randomUUID() + '.tmp');
+    const handle = await fs.open(
+      temporary,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+      0o600
+    );
     try {
-      const handle = await fs.open(path.join(dir, sha(bytes)), constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
-      try { await handle.writeFile(bytes); await handle.sync(); } finally { await handle.close(); }
-    } catch (e) { if (e.code !== 'EEXIST') throw e; const existing = await getPrivate(ownerId, key); if (sha(existing) !== sha(bytes)) fail('OBJECT_CORRUPT', 500); }
+      try {
+        await handle.writeFile(bytes);
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+      try {
+        await fs.link(temporary, target);
+      } catch (e) {
+        if (e.code !== 'EEXIST') throw e;
+        const existing = await getPrivate(ownerId, key);
+        if (sha(existing) !== sha(bytes)) fail('OBJECT_CORRUPT', 500);
+      }
+      const directoryHandle = await fs.open(dir, constants.O_RDONLY | constants.O_DIRECTORY);
+      try {
+        await directoryHandle.sync();
+      } finally {
+        await directoryHandle.close();
+      }
+    } finally {
+      await fs.unlink(temporary).catch(() => {});
+    }
   }
   return key;
 }
 export async function getPrivate(ownerId, key) {
-  validKey(ownerId, key); const c = config(); let bytes;
+  validKey(ownerId, key);
+  const c = config();
+  let bytes;
   if (c.driver === 's3') {
     const result = await c.client.send(new GetObjectCommand({ Bucket: c.bucket, Key: key }));
     if (result.ContentLength > MAX + 52) fail('OBJECT_TOO_LARGE', 413);
@@ -56,7 +110,13 @@ export async function getPrivate(ownerId, key) {
   } else {
     const dir = await localDirectory(c.root, ownerId);
     const handle = await fs.open(path.join(dir, key.split('/')[1]), constants.O_RDONLY | constants.O_NOFOLLOW);
-    try { const stat = await handle.stat(); if (!stat.isFile() || stat.size > MAX) fail('OBJECT_TOO_LARGE', 413); bytes = await handle.readFile(); } finally { await handle.close(); }
+    try {
+      const stat = await handle.stat();
+      if (!stat.isFile() || stat.size > MAX) fail('OBJECT_TOO_LARGE', 413);
+      bytes = await handle.readFile();
+    } finally {
+      await handle.close();
+    }
   }
   if (sha(bytes) !== key.split('/')[1]) fail('OBJECT_CORRUPT', 500);
   return bytes;

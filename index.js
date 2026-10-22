@@ -121,7 +121,7 @@ app.use(compression({
     return compression.filter(req, res);
   }
 }));
-app.use(morgan('tiny', { skip: req => /^\/api\/brain(?:\/|$)/.test(req.originalUrl) }));
+app.use(morgan('tiny', { skip: req => /^\/api\/brain(?:\/|$)/.test(req.originalUrl.split('?')[0]) }));
 app.use(helmet());
 app.options(/.*/, cors(corsConfig));
 app.use(cors(corsConfig));
