@@ -1,3 +1,6 @@
+import { attachConnections } from '../services/brain/dashboard.js';
+import { connectionRow, createApiKey, revokeConnection } from '../services/brain/connections.js';
+import { approveAuthorization } from '../services/brain/oauth.js';
 import { Router, json } from 'express';
 import rateLimit from 'express-rate-limit';
 import mongoose from 'mongoose';
@@ -125,6 +128,7 @@ brainRouter.get('/legacy/messages', async (req, res) => {
     .lean();
   res.json({ items: rows.slice(0, limit), nextCursor: rows.length > limit ? String(rows[limit - 1]._id) : null });
 });
+attachConnections(brainRouter, { connectionRow, createApiKey, revokeConnection, approveAuthorization });
 attachImports(brainRouter);
 attachBackup(brainRouter);
 export function finishBrainRouter(router = brainRouter) {

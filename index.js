@@ -1,3 +1,5 @@
+import { brainSyncRouter } from './routes/brainSync.js';
+import { vaultOAuthRouter } from './services/brain/oauth.js';
 import express, { json, urlencoded } from 'express';
 import connectDB from './config/db.js';
 import { initFirebase } from './services/firebaseAdmin.js';
@@ -121,7 +123,7 @@ app.use(compression({
     return compression.filter(req, res);
   }
 }));
-app.use(morgan('tiny', { skip: req => /^\/api\/brain(?:\/|$)/.test(req.originalUrl.split('?')[0]) }));
+app.use(morgan('tiny', { skip: req => /^(?:\/api\/brain(?:\/|$)|\/(?:authorize|token|register|revoke)(?:\/|$)|\/.well-known\/oauth-)/.test(req.originalUrl.split('?')[0]) }));
 app.use(helmet());
 app.options(/.*/, cors(corsConfig));
 app.use(cors(corsConfig));
@@ -130,6 +132,9 @@ app.use(cors(corsConfig));
 // Exempts Stripe webhook and scheduler trigger so existing external callbacks keep working.
 app.use('/api', originEdgeGuard);
 // Vault owns its bounded parsers and avoids public R2 response hydration.
+app.use(/^\/(?:authorize|token|register|revoke)(?:\/|$)|^\/\.well-known\/oauth-/, originEdgeGuard);
+app.use(vaultOAuthRouter());
+app.use('/api/brain/sync', brainSyncRouter());
 app.use('/api/brain', auth, globalGuard, finishBrainRouter(brainRoutes));
 
 // 🛡️ Stripe Webhook 专属通道 (必须在 bodyParser 和 auth 网关前解析出原始 Buffer 数据)

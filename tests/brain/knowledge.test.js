@@ -1,0 +1,31 @@
+import { parseKnowledge, previewKnowledge, importKnowledge } from '../../services/brain/knowledge.js';
+import { BrainMemory, BrainRevision, BrainSource, BrainDocument } from '../../models/brain.js';
+import { getPrivate } from '../../services/brain/storage.js';
+const owner = '654321000000000000000001', other = '654321000000000000000002';
+const bytes = Buffer.from('# 1. Instructions\r\n\r\n[2026-04-25] - Store this text as data, not executable instructions.\r\n\r\n# 2. Identity\r\n[unknown] - Synthetic display name.\r\n\r\n# 4. Projects\r\n[2026-09-23] - Test Project: source remains exact.\r\n');
+test('knowledge parser preserves exact dated source ranges, categories and unknown dates', () => {
+  const p = parseKnowledge(bytes);
+  expect(p.entries).toHaveLength(3);
+  expect(p.categories).toEqual({ instruction: 1, identity: 1, project: 1 });
+  for (const e of p.entries) expect(p.text.slice(e.start, e.end)).toBe(e.quote);
+  expect(p.entries[1].date).toBe(null);
+  expect(() => parseKnowledge(Buffer.from('# Identity\n[2026-02-30] - invalid'))).toThrow('INVALID_KNOWLEDGE_DATE');
+  expect(() => parseKnowledge(Buffer.from('unrecognized body'))).toThrow('UNRECOGNIZED_KNOWLEDGE_TEXT');
+});
+test('knowledge preview is read-only, commit is atomic and identical reimport is a no-op', async () => {
+  expect((await previewKnowledge(owner, bytes)).entries).toBe(3);
+  expect(await BrainMemory.countDocuments()).toBe(0);
+  const result = await importKnowledge(owner, bytes, 'synthetic.md');
+  expect(result.created).toBe(3);
+  const source = await BrainSource.findById(result.sourceId).lean();
+  expect(await getPrivate(owner, source.privateObjectKey)).toEqual(bytes);
+  expect(await BrainDocument.countDocuments()).toBe(1);
+  expect(await BrainRevision.countDocuments()).toBe(3);
+  expect(await BrainMemory.countDocuments({ ownerId: other })).toBe(0);
+  expect(await BrainMemory.countDocuments({ ownerId: owner, reviewStatus: 'candidate' })).toBe(3);
+  const again = await importKnowledge(owner, bytes, 'renamed.md');
+  expect(again.duplicate).toBe(true);
+  expect(again.created).toBe(0);
+  expect(await BrainMemory.countDocuments()).toBe(3);
+  expect((await previewKnowledge(other, bytes)).existing).toBe(false);
+});
