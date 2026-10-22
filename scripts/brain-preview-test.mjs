@@ -1,0 +1,174 @@
+/* global document, innerWidth, getComputedStyle */
+// Local cross-repository preview acceptance, using synthetic auth/data only.
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import assert from 'node:assert/strict';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { createRequire } from 'node:module';
+import express from 'express';
+import mongoose from 'mongoose';
+import { MongoMemoryReplSet } from 'mongodb-memory-server';
+import { brainRouter, finishBrainRouter } from '../routes/brain.js';
+import { BrainMemory, BrainSource } from '../models/brain.js';
+import { verifyArchive } from '../services/brain/archive.js';
+import { unseal } from '../services/brain/crypto.mjs';
+const frontend = process.env.ORION_FRONTEND_DIR || fileURLToPath(new URL('../../orion-frontend/', import.meta.url));
+const frontendRequire = createRequire(path.join(frontend, 'package.json'));
+const { createServer } = await import(pathToFileURL(frontendRequire.resolve('vite')).href);
+const puppeteer = (await import(pathToFileURL(frontendRequire.resolve('puppeteer')).href)).default;
+for (const name of Object.keys(process.env))
+  if (/^(GEMINI|OPENAI|ANTHROPIC|CLAUDE|GOOGLE_API_KEY)/.test(name)) delete process.env[name];
+const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'orion-vault-preview-'));
+process.env.NODE_ENV = 'test';
+process.env.BRAIN_STORAGE_ROOT = path.join(directory, 'private-objects');
+process.env.VITE_API_URL = '/api';
+let mongo, apiServer, vite, browser;
+try {
+  mongo = await MongoMemoryReplSet.create({ replSet: { count: 1, storageEngine: 'wiredTiger' } });
+  await mongoose.connect(mongo.getUri('orion_vault_local_preview'));
+  const app = express();
+  app.use((req, _res, next) => {
+    if (req.headers.cookie?.includes('brain_preview_session=synthetic-only'))
+      req.user = { id: '654321000000000000000001', permissions: ['BRAIN:USE'] };
+    req.authSource = 'cookie';
+    next();
+  });
+  app.get('/api/external/{*path}', (_req, res) => res.json({ list: [] }));
+  app.use('/api/brain', finishBrainRouter(brainRouter));
+  apiServer = await new Promise((resolve) => {
+    const s = app.listen(0, '127.0.0.1', () => resolve(s));
+  });
+  // Tailwind's automatic source scan must run from the actual frontend root.
+  process.chdir(frontend);
+  vite = await createServer({
+    root: frontend,
+    mode: 'test',
+    server: {
+      host: '127.0.0.1',
+      port: 0,
+      open: false,
+      proxy: { '/api': { target: 'http://127.0.0.1:' + apiServer.address().port, changeOrigin: false } }
+    }
+  });
+  await vite.listen();
+  const origin = 'http://127.0.0.1:' + vite.httpServer.address().port;
+  process.env.BRAIN_ALLOWED_ORIGINS = origin;
+  browser = await puppeteer.launch({ executablePath: process.env.CHROME_PATH, headless: true, args: ['--no-sandbox'] });
+  const page = await browser.newPage(),
+    errors = [];
+  await page.setViewport({ width: 1440, height: 1050 });
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.setCookie({ name: 'brain_preview_session', value: 'synthetic-only', url: origin, httpOnly: true });
+  await page.goto(origin + '/tests/brain/index.html', { waitUntil: 'networkidle0' });
+  await page.waitForSelector('.captains-cabin');
+  const minimizeNews = await page.$('button .fa-compress-alt');
+  if (minimizeNews) await minimizeNews.click();
+  const click = (text) => page.locator('button ::-p-text(' + text + ')').click();
+  assert.ok(await page.$('.captains-cabin .memory-vault'));
+  const cabinStyle = await page.$eval('.memory-vault', (el) => ({
+    surface: getComputedStyle(el.querySelector('.vault-head')).backgroundColor,
+    accent: getComputedStyle(el).getPropertyValue('--vault-accent').trim()
+  }));
+  assert.equal(cabinStyle.accent, '#e11d48');
+  const shellStyle = await page.$eval('.captains-cabin', el => ({ background: getComputedStyle(el).backgroundImage, paddingTop: getComputedStyle(el).paddingTop }));
+  assert.notEqual(shellStyle.background, 'none'); assert.equal(shellStyle.paddingTop, '96px');
+  assert.ok(cabinStyle.surface.startsWith('rgba(255, 255, 255'));
+  await click('New memory');
+  await page.type('[aria-label="Statement"]', 'E2E 中文 memory with real local API');
+  await click('Save revision');
+  await page.waitForFunction(() => document.body.textContent.includes('Saved with a new revision'));
+  assert.equal(await BrainMemory.countDocuments(), 1);
+  await click('Sources');
+  const source = path.join(directory, 'manual-source.md');
+  await fs.writeFile(source, 'Imported E2E 原始证据');
+  await page.select('.vault-editor select', 'manual');
+  await (await page.$('input[type="file"]')).uploadFile(source);
+  await click('Preview import');
+  await page.waitForFunction(() => document.body.textContent.includes('Current job'));
+  await click('Confirm additive import');
+  await page.waitForFunction(() => document.body.textContent.includes('complete'));
+  assert.equal(await BrainSource.countDocuments(), 2);
+  assert.equal(await BrainMemory.countDocuments(), 2);
+  await click('Backup & Restore');
+  await page.type('[aria-label="Backup passphrase"]', 'local preview synthetic key');
+  const createdResponse = page.waitForResponse((r) => r.url().endsWith('/exports') && r.request().method() === 'POST');
+  await click('Create & verify backup');
+  const created = await createdResponse;
+  assert.equal(created.status(), 201);
+  const job = await created.json();
+  const response = await fetch(
+    'http://127.0.0.1:' + apiServer.address().port + '/api/brain/exports/' + job._id + '/download',
+    { headers: { cookie: 'brain_preview_session=synthetic-only' } }
+  );
+  assert.equal(response.status, 200);
+  const bytes = Buffer.from(await response.arrayBuffer());
+  const archive = await verifyArchive(await unseal(bytes, 'local preview synthetic key'));
+  assert.equal(archive.manifest.counts.memories, 2);
+  const fixture = path.join(directory, 'preview.orion');
+  await fs.writeFile(fixture, bytes);
+  await page.waitForFunction(() => document.querySelector('[aria-label="Backup passphrase"]').value === '');
+  await (await page.$('[aria-label="Restore file"]')).uploadFile(fixture);
+  await page.type('[aria-label="Restore passphrase"]', 'local preview synthetic key');
+  await click('Verify & preview restore');
+  await page.waitForFunction(() => document.body.textContent.includes('Archive coverage'));
+  const committedResponse = page.waitForResponse((r) => r.url().endsWith('/restore/commit'));
+  await click('Confirm additive restore');
+  assert.equal((await committedResponse).status(), 200);
+  assert.equal(await BrainMemory.countDocuments(), 2);
+  assert.deepEqual(errors, []);
+  const evidence = process.env.BRAIN_EVIDENCE_OUTPUT;
+  if (evidence) {
+    await fs.mkdir(evidence, { recursive: true });
+    await new Promise(resolve => setTimeout(resolve, 700));
+    await page.screenshot({ path: path.join(evidence, 'vault-preview-desktop.png'), fullPage: true });
+    await click('Overview');
+    await page.waitForFunction(() => document.querySelector('.memory-vault nav button[aria-current=page]')?.textContent.includes('Overview'));
+    await new Promise(resolve => setTimeout(resolve, 700));
+    await page.screenshot({ path: path.join(evidence, 'vault-cabin-overview.png'), fullPage: true });
+    await page.setViewport({ width: 390, height: 844 });
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    await new Promise(resolve => setTimeout(resolve, 700));
+    await page.screenshot({ path: path.join(evidence, 'vault-preview-mobile.png'), fullPage: true });
+    await fs.writeFile(
+      path.join(evidence, 'preview-result.json'),
+      JSON.stringify(
+        {
+          passed: true,
+          nodeVersion: process.version,
+          mongoVersion: (await mongoose.connection.db.admin().command({ buildInfo: 1 })).version,
+          syntheticAuth: true,
+          modelKeysConfigured: false,
+          cabinStyle,
+          database: 'temporary Mongo replica set',
+          frontend: 'real Vite/React',
+          api: 'real Express/Mongoose',
+          workflow: [
+            'create',
+            'import preview',
+            'import commit',
+            'encrypted export',
+            'download/decrypt/verify',
+            'restore preview',
+            'idempotent restore commit'
+          ],
+          counts: archive.manifest.counts,
+          mobile: '390x844 no overflow'
+        },
+        null,
+        2
+      )
+    );
+  }
+  console.log(
+    'PASS local full-stack preview: real React -> Vite proxy -> Express/owner guard -> MongoDB/private bytes; create/import/encrypted export/decrypt/verify/restore; mobile layout.'
+  );
+} finally {
+  await browser?.close();
+  await vite?.close();
+  if (apiServer) await new Promise((resolve) => apiServer.close(resolve));
+  await mongoose.disconnect();
+  await mongo?.stop();
+  // Remove only this mkdtemp-owned test directory after all services stop.
+  await fs.rm(directory, { recursive: true, force: true });
+}

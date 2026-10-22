@@ -3,18 +3,22 @@ import { GoogleGenAI } from '@google/genai';
 import { fetch } from 'undici'
 import sharp from 'sharp';
 // 1. 基础配置
-if (!process.env.GEMINI_API_KEY) {
-  throw new Error('❌ [Fatal] 缺少环境变量 GEMINI_API_KEY');
-}
+// Optional provider configuration must not prevent non-AI modules from starting.
 
 const clients = {
-  default: new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY }),
+  default: process.env.GEMINI_API_KEY ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY }) : null,
   'orion-english': process.env.GEMINI_ORION_ENGLISH_API_KEY ? new GoogleGenAI({ apiKey: process.env.GEMINI_ORION_ENGLISH_API_KEY }) : null,
   reading: process.env.GEMINI_READING_APP_API_KEY ? new GoogleGenAI({ apiKey: process.env.GEMINI_READING_APP_API_KEY }) : null,
 };
 
 const getAiClient = (appKey = 'default') => {
-  return clients[appKey] || clients.default;
+  const client = clients[appKey] || clients.default;
+  if (!client) {
+    const error = new Error('AI_PROVIDER_NOT_CONFIGURED');
+    error.status = 503;
+    throw error;
+  }
+  return client;
 };
 
 // 生产级配置

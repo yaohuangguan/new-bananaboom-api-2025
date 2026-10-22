@@ -8,6 +8,7 @@ import K from './permissionKeys.js';
  * 3. 配合 GlobalGuard 的实时权限 Key 校验
  */
 const ROUTE_MAP = [
+  { regex: /^\/api\/brain(?:\/|$)/, method: 'ALL', permission: K.BRAIN_USE },
   // ============================================================
   // Level 1: 纯公开基础设施 (Public)
   // ============================================================
