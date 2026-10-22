@@ -31,7 +31,7 @@ const EXPENSIVE_PREFIXES = [
   '/api/projects/import-github'
 ];
 
-const AUTH_PREFIXES = ['/api/auth', '/api/users'];
+const AUTH_PREFIXES = ['/api/auth', '/api/users', '/authorize', '/token', '/register', '/revoke'];
 
 const R2_BROWSER_READ_PATHS = new Set([
   '/api/upload/list',

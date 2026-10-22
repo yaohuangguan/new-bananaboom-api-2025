@@ -134,7 +134,7 @@ async function validateEvidence(ownerId, data, session) {
     }
   }
 }
-export async function writeMemory(ownerId, input, memoryId) {
+export async function writeMemory(ownerId, input, memoryId, { session: suppliedSession } = {}) {
   const data = memoryInput(input, Boolean(memoryId));
   if (memoryId && (!Number.isInteger(input.expectedRevision) || input.expectedRevision < 1))
     fail('EXPECTED_REVISION_REQUIRED');
@@ -142,8 +142,9 @@ export async function writeMemory(ownerId, input, memoryId) {
     !memoryId && !data.sourceAnchors?.length
       ? await (await import('./storage.js')).putPrivate(ownerId, Buffer.from(data.statement))
       : null;
-  return mongoose.connection.transaction(async (session) => {
+  const operation = async (session) => {
     await validateEvidence(ownerId, data, session);
+    if (memoryId && data.sourceAnchors?.length) data.sourceId = (await BrainDocument.findOne({ _id: data.sourceAnchors[0].documentId, ownerId }).session(session).lean()).sourceId;
     if (!memoryId) {
       let sourceId = new mongoose.Types.ObjectId();
       const documentId = new mongoose.Types.ObjectId();
@@ -247,7 +248,8 @@ export async function writeMemory(ownerId, input, memoryId) {
       { session }
     );
     return publicRow(after);
-  });
+  };
+  return suppliedSession ? operation(suppliedSession) : mongoose.connection.transaction(operation);
 }
 export async function pageRows(Model, ownerId, query = {}, extra = {}) {
   const filter = { ...extra, ownerId, ...searchFilter(query.query) };
