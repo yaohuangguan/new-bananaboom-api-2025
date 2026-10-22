@@ -489,7 +489,8 @@ export async function previewGithubPortfolioImport(
   repoUrl,
   explicitToken,
   explicitAccountId,
-  onProgress
+  onProgress,
+  options = {}
 ) {
   const progress = typeof onProgress === 'function' ? onProgress : () => {};
 
@@ -531,6 +532,58 @@ export async function previewGithubPortfolioImport(
     packageJson = packageJsonText ? JSON.parse(packageJsonText) : {};
   } catch {
     packageJson = {};
+  }
+
+  const readmeHeading = readme
+    .match(/^\s*#\s+(.+?)\s*$/m)?.[1]
+    ?.replace(/<[^>]+>/g, '')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .trim();
+  const readmeParagraph = readme
+    .split(/\n\s*\n+/)
+    .map((block) => block.trim())
+    .find(
+      (block) =>
+        block &&
+        !/^#/.test(block) &&
+        !/^(?:!\[|\[!\[|<img|<p[^>]*align=)/i.test(block)
+    );
+  const readmeTitleEn = clampText(readmeHeading || metadata.name, 120);
+  const readmeSummaryEn = clampText(
+    (readmeParagraph || metadata.description || metadata.name)
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+      .replace(/[*_~>|]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim(),
+    320
+  );
+  const readmeDescriptionEn = clampText(
+    readme || metadata.description || readmeSummaryEn,
+    12000
+  );
+
+  const readmeImageMatch =
+    readme.match(/!\[[^\]]*\]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)/) ||
+    readme.match(/<img\b[^>]*?src=["']([^"']+)["'][^>]*>/i);
+  let readmeCover = '';
+  if (!metadata.private && readmeImageMatch?.[1]) {
+    const imageSource = readmeImageMatch[1].trim();
+    if (
+      /^https?:\/\//i.test(imageSource) &&
+      !/shields\.io|badge|coverage|workflow/i.test(imageSource)
+    ) {
+      readmeCover = imageSource;
+    } else if (!/^(?:data:|#|https?:\/\/)/i.test(imageSource)) {
+      const cleanPath = imageSource.replace(/^\.\//, '').replace(/^\//, '').split(/[?#]/)[0];
+      if (cleanPath && !cleanPath.includes('..')) {
+        readmeCover = `https://raw.githubusercontent.com/${owner}/${repo}/${metadata.default_branch}/${cleanPath
+          .split('/')
+          .map(encodeURIComponent)
+          .join('/')}`;
+      }
+    }
   }
 
   const repoContext = {
@@ -608,19 +661,19 @@ ${JSON.stringify(repoContext)}
 
   const categories = normalizeCategories(generated.categories);
   const project = {
-    title_zh: clampText(generated.title_zh, 120) || metadata.name,
-    title_en: clampText(generated.title_en, 120) || metadata.name,
-    summary_zh: clampText(generated.summary_zh, 320),
-    summary_en: clampText(generated.summary_en, 320),
-    description_zh: clampText(generated.description_zh, 2400),
-    description_en: clampText(generated.description_en, 2400),
+    title_zh: clampText(generated.title_zh, 120) || readmeTitleEn,
+    title_en: readmeTitleEn,
+    summary_zh: clampText(generated.summary_zh, 320) || readmeSummaryEn,
+    summary_en: readmeSummaryEn,
+    description_zh: clampText(generated.description_zh, 12000) || readmeDescriptionEn,
+    description_en: readmeDescriptionEn,
     techStack: normalizeTechStack(generated.techStack),
     repoUrl: metadata.html_url,
     demoUrl:
       typeof metadata.homepage === 'string' && /^https?:\/\//i.test(metadata.homepage)
         ? metadata.homepage
         : '',
-    coverImage: '',
+    coverImage: readmeCover,
     iconImage: '',
     category: categories[0],
     categories,
@@ -628,22 +681,39 @@ ${JSON.stringify(repoContext)}
     isVisible: true
   };
 
-  progress({
-    stage: 'cover',
-    percent: 94,
-    message: 'Generating the Orion project cover'
-  });
+  let coverDataUrl = '';
+  let coverSvg = '';
+  if (!readmeCover && options.generateCover !== false) {
+    progress({
+      stage: 'cover',
+      percent: 94,
+      message: 'No README artwork found; generating a project cover'
+    });
+    try {
+      const generatedCover = await generateCloudflarePortfolioCover(
+        project,
+        explicitToken,
+        explicitAccountId
+      );
+      coverDataUrl = generatedCover?.dataUrl || '';
+    } catch (error) {
+      console.warn('[Portfolio Import] AI cover generation failed:', error.message);
+      coverSvg = generateProgrammaticCoverSvg(project);
+    }
+  }
 
   const result = {
     project,
-    coverSvg: generateProgrammaticCoverSvg(project),
+    coverSvg,
+    coverDataUrl,
     iconDataUrl: repoIcon?.dataUrl || '',
     source: {
       owner,
       repo,
       private: Boolean(metadata.private),
       description: metadata.description || '',
-      iconPath: repoIcon?.path || ''
+      iconPath: repoIcon?.path || '',
+      readmeBacked: Boolean(readme)
     }
   };
 
