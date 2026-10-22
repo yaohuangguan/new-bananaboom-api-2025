@@ -47,6 +47,7 @@ import fitnessRoutes from './routes/fitness.js';
 import periodRoutes from './routes/period.js';
 import footprintRoutes from './routes/footprint.js';
 import chatRoutes from './routes/chat.js';
+import brainRoutes, { finishBrainRouter } from './routes/brain.js';
 
 // --- 工具与系统类 ---
 import backupRoutes from './routes/backup.js';
@@ -120,7 +121,7 @@ app.use(compression({
     return compression.filter(req, res);
   }
 }));
-app.use(morgan('tiny'));
+app.use(morgan('tiny', { skip: req => /^\/api\/brain(?:\/|$)/.test(req.originalUrl) }));
 app.use(helmet());
 app.options(/.*/, cors(corsConfig));
 app.use(cors(corsConfig));
@@ -128,6 +129,8 @@ app.use(cors(corsConfig));
 // Optional origin lock: enabled only when ORION_EDGE_SECRET is configured.
 // Exempts Stripe webhook and scheduler trigger so existing external callbacks keep working.
 app.use('/api', originEdgeGuard);
+// Vault owns its bounded parsers and avoids public R2 response hydration.
+app.use('/api/brain', auth, globalGuard, finishBrainRouter(brainRoutes));
 
 // 🛡️ Stripe Webhook 专属通道 (必须在 bodyParser 和 auth 网关前解析出原始 Buffer 数据)
 app.use('/api/payments/webhook', express.raw({ type: 'application/json' }));
