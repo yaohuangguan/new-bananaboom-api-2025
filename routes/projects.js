@@ -56,7 +56,8 @@ router.post(
         req.body.repoUrl,
         req.get('x-cloudflare-ai-token') || undefined,
         req.get('x-cloudflare-account-id') || undefined,
-        (progress) => send('progress', progress)
+        (progress) => send('progress', progress),
+        { generateCover: req.body.generateCover !== false }
       );
 
       send('result', preview);
@@ -85,7 +86,9 @@ router.post(
       const preview = await previewGithubPortfolioImport(
         req.body.repoUrl,
         req.get('x-cloudflare-ai-token') || undefined,
-        req.get('x-cloudflare-account-id') || undefined
+        req.get('x-cloudflare-account-id') || undefined,
+        undefined,
+        { generateCover: req.body.generateCover !== false }
       );
       res.json(preview);
     } catch (error) {
