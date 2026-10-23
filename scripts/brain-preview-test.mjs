@@ -137,7 +137,7 @@ try {
   const imported = await importKnowledge('654321000000000000000001', Buffer.from(knowledge));
   assert.equal(imported.created, 102);
   await click('AI Sync');
-  await page.waitForSelector('[aria-label="ChatGPT MCP URL"]');
+  await page.waitForSelector('[aria-label="MCP URL"], [aria-label="ChatGPT MCP URL"]');
   await page.click('.knowledge-api-details > summary');
   await click('Create dedicated key');
   await page.waitForSelector('[aria-label="New connection key"]');
@@ -154,6 +154,7 @@ try {
   await click('Saved, close'); assert.equal(await page.$('[aria-label="New connection key"]'),null);
   await click('Refresh');
   await page.waitForFunction(() => document.querySelector('.knowledge-connection-list')?.textContent.includes('Last write:'));
+  page.once('dialog', dialog => dialog.accept());
   await click('Revoke');
   await page.waitForFunction(() => document.querySelector('.knowledge-connection-list')?.textContent.includes('Revoked'));
   assert.equal((await send()).status,401);
