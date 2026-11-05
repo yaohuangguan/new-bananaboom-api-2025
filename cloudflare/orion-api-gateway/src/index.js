@@ -1,3 +1,5 @@
+import { redactPublicPostResponse } from './publicPostPrivacy.js';
+
 const ALLOWED_ORIGINS = new Set([
   'https://samyao.me',
   'https://www.samyao.me',
@@ -29,8 +31,21 @@ const MIGRATED_PUBLIC_READ_PATHS = new Set([
 
 // Explicit path allowlist prevents private, write and admin routes from
 // accidentally bypassing the legacy Cloud Run auth and permission checks.
-export function shouldRouteToCoreWorker(method, path, search = '') {
-  if (method !== 'GET' || !MIGRATED_PUBLIC_READ_PATHS.has(path)) return false;
+function hasLegacyCredentials(headers) {
+  const get = (name) => typeof headers?.get === 'function'
+    ? headers.get(name) : headers?.[name] || headers?.[name.toLowerCase()] || null;
+  if (get('x-auth-token') || get('authorization') || get('x-google-auth')) return true;
+  return Boolean(get('cookie'));
+}
+
+export function shouldRouteToCoreWorker(method, path, search = '', headers = {}) {
+  if (method !== 'GET') return false;
+  if (/^\/api\/posts\/[a-f\d]{24}$/i.test(path)) {
+    // Existing identity semantics are preserved by routing credentialed readers
+    // to Cloud Run; the Worker serves only isPrivate=false articles.
+    return !hasLegacyCredentials(headers);
+  }
+  if (!MIGRATED_PUBLIC_READ_PATHS.has(path)) return false;
   const query = new URLSearchParams(search);
   // Logged-in users can request private/all tags from the original authenticated
   // API. Never serve those queries from the public-only MongoDB RPC.
@@ -222,7 +237,7 @@ export default {
 
     // Internal service binding: no public workers.dev hop, no shared origin secret.
     // Keep Cloud Run as a per-request fallback if the new database path fails.
-    if (shouldRouteToCoreWorker(request.method, pathname, incomingUrl.search) && env.BANANABOOM_CORE) {
+    if (shouldRouteToCoreWorker(request.method, pathname, incomingUrl.search, request.headers) && env.BANANABOOM_CORE) {
       try {
         const workerHeaders = new Headers(request.headers);
         workerHeaders.delete('host');
@@ -244,7 +259,7 @@ export default {
             secured.headers.set('access-control-allow-credentials', 'true');
             secured.headers.append('vary', 'Origin');
           }
-          return secured;
+          return redactPublicPostResponse(request, secured);
         }
         console.error('BananaBoom Worker read returned', workerResponse.status, 'falling back to Cloud Run');
       } catch (error) {
@@ -295,6 +310,6 @@ export default {
       secured.headers.set('cache-control', 'no-store');
     }
 
-    return secured;
+    return redactPublicPostResponse(request, secured);
   }
 };

@@ -1,13 +1,34 @@
 import openmesh from 'openmesh-node';
 import { repository as mongoRepository } from './db.js';
 import { hydrateR2References } from '../../../utils/r2Reference.js';
+import { authenticateLegacyRequest, canReadPrivatePosts, extractLegacyToken } from './auth.js';
 
 // Match legacy JSON serialization before applying its response hydration middleware.
 // Otherwise recursively traversing BSON ObjectId/Date would erase their values.
 const asLegacyJson = (value) => hydrateR2References(JSON.parse(JSON.stringify(value)));
 
 // Only explicitly migrated public read paths. All other routes remain on Cloud Run.
-export function createApp(repository = mongoRepository) {
+async function runtimeJwtSecret() {
+  const { env } = await import('cloudflare:workers');
+  return env.SECRET_JWT;
+}
+
+function listOptions(query) {
+  const first = (value) => Array.isArray(value) ? value[0] : value;
+  const parsedNumber = (value, fallback, max) => {
+    const n = parseInt(first(value), 10);
+    return Number.isSafeInteger(n) && n > 0 ? Math.min(n, max) : fallback;
+  };
+  return {
+    page: parsedNumber(query.page, 1, 1000),
+    limit: parsedNumber(query.limit, 10, 50),
+    q: first(query.q) || undefined,
+    tag: first(query.tag) || undefined
+  };
+}
+
+export function createApp(repository = mongoRepository, options = {}) {
+  const secretProvider = options.secretProvider || runtimeJwtSecret;
   const app = openmesh({ service: 'bananaboom-core' });
   app.get('/health', () => 'OK');
   app.get('/', () => 'API Server is running...');
@@ -44,5 +65,65 @@ export function createApp(repository = mongoRepository) {
       tag: tag || undefined
     }));
   });
+  // The Gateway routes here only if no legacy login credential was supplied.
+  // The database query itself requires isPrivate=false, regardless of route.
+  app.get('/api/posts/:id', async (ctx) => {
+    const id = ctx.params.id;
+    if (!/^[a-f0-9]{24}$/i.test(id)) {
+      ctx.status = 404;
+      return { message: 'Post not found' };
+    }
+    const post = await repository.publicPostById(id);
+    if (!post) {
+      ctx.status = 404;
+      return { message: 'Post not found' };
+    }
+    ctx.set('Cache-Control', 'no-store');
+    return asLegacyJson(post);
+  });
+
+  // Authenticated private read is deliberately NOT in the Gateway allowlist.
+  // Until real-user parity is checked, the existing Cloud Run endpoint remains live.
+  app.get('/api/posts/private/posts', async (ctx) => {
+    ctx.set('Cache-Control', 'no-store');
+    if (!extractLegacyToken(ctx.headers)) {
+      ctx.status = 401;
+      return {
+        success: false,
+        message: 'Unauthorized: Please login first',
+        message_cn: '请先登录'
+      };
+    }
+    const auth = await authenticateLegacyRequest(ctx.headers, repository, await secretProvider());
+    if (auth.kind === 'invalid') {
+      ctx.status = 401;
+      return { msg: auth.code === 'AUTH_EXPIRED' ? 'Token expired' : 'Token invalid', code: auth.code };
+    }
+    if (auth.kind !== 'authenticated') {
+      ctx.status = 401;
+      return {
+        success: false,
+        message: 'Unauthorized: Please login first',
+        message_cn: '请先登录'
+      };
+    }
+    if (!canReadPrivatePosts(auth.user)) {
+      ctx.status = 403;
+      return {
+        success: false,
+        message: 'Access Denied: You do not have permission',
+        message_cn: '权限不足：您没有操作该功能的权限',
+        code: 'PERMISSION_DENIED',
+        required: 'PRIVATE_POST:READ'
+      };
+    }
+    const parameters = listOptions(ctx.query);
+    if ((parameters.q?.length || 0) > 100 || (parameters.tag?.length || 0) > 100) {
+      ctx.status = 400;
+      return { error: 'Search query is too long' };
+    }
+    return asLegacyJson(await repository.privatePosts(parameters));
+  });
+
   return app;
 }
