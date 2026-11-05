@@ -113,3 +113,9 @@ before any authenticated read traffic is switched by default.
 The opt-in private read canary reports bounded diagnostic stages to the
 Gateway if session verification or a private post query fails. It never
 includes request tokens, keys, user data, or MongoDB connection information.
+
+Authenticated article detail `GET /api/posts/:id` requires a verified JWT,
+live MongoDB Session and live `PRIVATE_POST:READ` permission when the article
+is private; missing or disallowed articles return 404. Public article details
+remain readable without login. Writes and Google identity flows remain on
+Cloud Run.

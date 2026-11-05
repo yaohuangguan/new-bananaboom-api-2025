@@ -91,21 +91,49 @@ export function createApp(repository = mongoRepository, options = {}) {
     return asLegacyJson(await repository.publicPostLikes(id));
   });
 
-  // The Gateway routes here only if no legacy login credential was supplied.
-  // The database query itself requires isPrivate=false, regardless of route.
+  // Public details are readable without a session. Private details are
+  // intentionally indistinguishable from missing posts without live RBAC.
   app.get('/api/posts/:id', async (ctx) => {
+    const notFound = () => {
+      ctx.status = 404;
+      return { message: 'Post not found' };
+    };
     const id = ctx.params.id;
-    if (!/^[a-f0-9]{24}$/i.test(id)) {
-      ctx.status = 404;
-      return { message: 'Post not found' };
-    }
-    const post = await repository.publicPostById(id);
-    if (!post) {
-      ctx.status = 404;
-      return { message: 'Post not found' };
-    }
+    if (!/^[a-f0-9]{24}$/i.test(id)) return notFound();
     ctx.set('Cache-Control', 'no-store');
-    return asLegacyJson(post);
+
+    const token = extractLegacyToken(ctx.headers);
+    let auth = { kind: 'guest' };
+    if (token) {
+      try {
+        auth = await authenticateLegacyRequest(ctx.headers, repository, await secretProvider());
+      } catch (error) {
+        console.error('post-detail-auth-failure', error?.name || 'UnknownError');
+        ctx.status = 503; // Gateway falls back to authenticated Cloud Run.
+        return { error: 'Article detail temporarily unavailable' };
+      }
+      if (auth.kind === 'invalid') {
+        ctx.status = 401;
+        return {
+          msg: auth.code === 'AUTH_EXPIRED' ? 'Token expired' : 'Token invalid',
+          code: auth.code
+        };
+      }
+    }
+
+    try {
+      const publicPost = await repository.publicPostById(id);
+      if (publicPost) return asLegacyJson(publicPost);
+      if (auth.kind !== 'authenticated' || !canReadPrivatePosts(auth.user)) {
+        return notFound();
+      }
+      const privatePost = await repository.privatePostById(id);
+      return privatePost ? asLegacyJson(privatePost) : notFound();
+    } catch (error) {
+      console.error('post-detail-query-failure', error?.name || 'UnknownError');
+      ctx.status = 503;
+      return { error: 'Article detail temporarily unavailable' };
+    }
   });
 
   // Authenticated private read is deliberately NOT in the Gateway allowlist.
