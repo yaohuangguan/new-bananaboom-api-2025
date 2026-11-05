@@ -130,3 +130,22 @@ test('anonymous detail reads use only public post repository and hide missing ID
   assert.equal((await fetch(base + '/api/posts/507f1f77bcf86cd799439012')).status, 404);
   assert.equal((await fetch(base + '/api/posts/not-valid')).status, 404);
 });
+
+test('public likes count returns the old JSON shape and hides missing posts', async (t) => {
+  const id = '507f1f77bcf86cd799439011';
+  const app = createApp({
+    ...fakeRepository,
+    publicPostLikes: async (requested) => requested === id ? { _id: id, likes: 3 } : null
+  });
+  await app.ready();
+  const server = createServer(app.callback());
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const base = 'http://127.0.0.1:' + server.address().port;
+  const response = await fetch(base + '/api/posts/likes/' + id);
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { _id: id, likes: 3 });
+  assert.equal(await (await fetch(base + '/api/posts/likes/507f1f77bcf86cd799439012')).json(), null);
+  assert.equal((await fetch(base + '/api/posts/likes/invalid')).status, 404);
+  assert.equal((await fetch(base + '/api/posts/likes/' + id + '/add', { method: 'POST' })).status, 404);
+});

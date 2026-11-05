@@ -80,3 +80,71 @@ Cloudflare Service binding only after restoring the gateway paths.
   intentionally not in the Worker Gateway allowlist.
 - Six distinct real article detail responses were checked in local Wrangler
   against sanitized production responses, with exact JSON equality.
+
+## JWT staged key rotation (prepared; not yet deployed to Cloud Run)
+
+All password, OTP and Firebase login paths use `signAndSyncToken()` from
+`utils/authUtils.js`. The existing middleware uses the shared
+`verifySessionJwt()` helper. Both now support a **versioned keyring**:
+
+1. **Phase A (code-only)**: Deploy the reviewed keyring code while
+   `ORION_JWT_SIGNING_MODE` remains unset, so existing `SECRET_JWT`
+   continues issuing legacy tokens. Keep Cloud Run serving private routes.
+   Because Cloud Build auto-triggers are disabled, deployment must be
+   explicit. A Cloud Run source deployment will create an image — schedule
+   **one** build only when it is necessary; do not enable CI triggers.
+2. **Phase B (prepare)**: Generate a cryptographically random 32-byte or
+   stronger signing secret and configure it in both Cloud Run
+   (`ORION_JWT_NEXT_SECRET`) and the internal `bananaboom-core` Worker.
+   Preserve the current `SECRET_JWT` unchanged. No source code or private
+   session values should be copied into configuration or committed.
+   Signing mode remains `legacy`. Verify old login, invalid JWT and
+   permissions on Cloud Run; confirm Worker can validate both generations.
+3. **Phase C (switch issuance)**: Set
+   `ORION_JWT_SIGNING_MODE=v2` on Cloud Run only after all serving
+   revisions have both verification keys. New JWTs have `kid=orion-v2`.
+   Both backends accept old and new JWTs with the same MongoDB sessions.
+   Cloud Run configuration changes create revisions but need not rebuild
+   the image if the tested code is already deployed.
+4. **Phase D (authenticated rollout)**: Verify a real logged-in browser
+   session on old and new keys, private article reads, role downgrade,
+   logout/session deletion and fallback. Only then allowlist private
+   read endpoints in Gateway. Do not allow a Worker response to bypass
+   a session check, and keep Cloud Run for any unported writes.
+5. **Phase E (retire legacy)**: Stop accepting the legacy key **only after**
+   the last possible legacy JWT/session expiry (30 days after the final
+   legacy issuance, with operational margin) and traffic confirmation.
+   Remove legacy signing material from both Cloud Run and Worker only
+   as part of a tested retirement. Deleting `SECRET_JWT` prematurely
+   breaks currently signed-in clients.
+
+Rollback before phase C: restore the preceding tested Cloud Run revision.
+Rollback **after v2 issuance begins**: set
+`ORION_JWT_SIGNING_MODE=legacy` on a revision containing the dual-key
+verifier, while preserving BOTH keys. Never roll back to a pre-keyring
+Cloud Run image that cannot verify v2 JWTs, because users may already have
+v2 sessions. Gateway private reads remain on Cloud Run until real-user
+testing passes.
+
+`SECRET_JWT` is currently shorter than the desired new-key minimum;
+the Worker accepts that **legacy** secret solely for migration compatibility,
+and only with an exact live MongoDB session, 30-day expiry and current
+RBAC permissions. Never use it for new v2 signing.
+
+Test commands:
+`node --test tests/jwtKeyring.test.mjs`
+and from `cloudflare/bananaboom-worker`, `npm test`.
+
+## Phase 4: anonymous post-like reads
+
+- `GET /api/posts/likes/:id` for anonymous requests now routes through
+  `orion-api-gateway` to `bananaboom-core` for a 24-digit hex ObjectId.
+- The MongoDB query constrains `isPrivate=false`, returning only the
+  legacy `{ _id, likes }` shape for an existing public post.
+- Write operations (add/remove likes), credentialed requests, invalid IDs
+  and other post actions remain on Cloud Run.
+- Six production article IDs showed exact JSON parity with local Workers;
+  three production reads were confirmed HTTP 200 with
+  `x-bananaboom-origin: worker`.
+- Production Cloud Run's JWT signing mode/key were not modified. No additional
+  Google Docker builds were created during this phase.

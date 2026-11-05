@@ -86,3 +86,50 @@ test('private listing enforces login, session revocation, and live permission', 
   res = await fetch(url + '/api/posts/private/posts', { headers: { authorization: 'Bearer ' + token } });
   assert.equal(res.status, 401);
 });
+
+test('staged v2 tokens and legacy short-key tokens share strict session + RBAC verification', async () => {
+  const legacy = 'legacy-test';
+  const next = 'a-v2-test-secret-with-more-than-thirty-two-characters';
+  const config = { legacy, next };
+  const oldToken = await new SignJWT({ user: { id, permissions: ['*'] } })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setIssuedAt().setExpirationTime('1h')
+    .sign(new TextEncoder().encode(legacy));
+  const newToken = await new SignJWT({ user: { id, role: 'super_admin' } })
+    .setProtectedHeader({ alg: 'HS256', kid: 'orion-v2' })
+    .setIssuedAt().setExpirationTime('1h')
+    .sign(new TextEncoder().encode(next));
+
+  const approved = new Set([oldToken, newToken]);
+  const repository = { authorizeSession: async (token) => approved.has(token)
+    ? { id, role: 'user', permissions: ['PRIVATE_POST:READ'] } : null };
+
+  assert.equal((await authenticateLegacyRequest({ authorization: 'Bearer ' + oldToken }, repository, config)).kind, 'authenticated');
+  const newAuth = await authenticateLegacyRequest({ authorization: 'Bearer ' + newToken }, repository, config);
+  assert.equal(newAuth.kind, 'authenticated');
+  assert.equal(newAuth.user.role, 'user'); // never trusts 'super_admin' from JWT
+  assert.equal((await authenticateLegacyRequest({ authorization: 'Bearer ' + newToken }, repository, { legacy })).code, 'AUTH_INVALID');
+
+  approved.delete(oldToken);
+  const revoked = await authenticateLegacyRequest({ authorization: 'Bearer ' + oldToken }, repository, config);
+  assert.equal(revoked.kind, 'guest');
+
+  approved.delete(newToken);
+  const v2Revoked = await authenticateLegacyRequest({ authorization: 'Bearer ' + newToken }, repository, config);
+  assert.equal(v2Revoked.kind, 'guest');
+});
+
+test('unknown key identifier and invalid v2 signing configuration fail closed', async () => {
+  const legacy = 'legacy-test';
+  const next = 'a-v2-test-secret-with-more-than-thirty-two-characters';
+  const token = await new SignJWT({ user: { id } })
+    .setProtectedHeader({ alg: 'HS256', kid: 'unexpected' })
+    .setIssuedAt().setExpirationTime('1h')
+    .sign(new TextEncoder().encode(legacy));
+  const repo = { authorizeSession: async () => { throw Error('should not touch DB'); } };
+  assert.equal((await authenticateLegacyRequest({ 'x-auth-token': token }, repo, { legacy, next })).kind, 'invalid');
+  await assert.rejects(
+    authenticateLegacyRequest({ 'x-auth-token': token }, repo, { legacy, next: 'short' }),
+    /at least 32/
+  );
+});

@@ -75,6 +75,17 @@ export class MongoDBConnection extends DurableObject {
     };
   }
 
+  async publicPostLikes(id) {
+    if (!/^[a-f0-9]{24}$/i.test(id)) return null;
+    await this.client.connect();
+    const post = await this.client.db().collection('posts').findOne(
+      { _id: new ObjectId(id), isPrivate: false },
+      { projection: { likes: 1 } }
+    );
+    if (!post) return null;
+    return JSON.parse(JSON.stringify(post));
+  }
+
   async publicPostById(id) {
     // A public detail response must never fetch a private post by ID.
     if (!/^[a-f0-9]{24}$/i.test(id)) return null;

@@ -40,3 +40,13 @@ test('public post detail only goes to Worker for anonymous readers', () => {
   assert.equal(shouldRouteToCoreWorker('GET', '/api/posts/507f1f77bcf86cd799439011/stuff'), false);
   assert.equal(shouldRouteToCoreWorker('GET', '/api/posts/not-a-valid-id'), false);
 });
+
+test('anonymous likes GET is Worker-only, not writes or credentialed reads', () => {
+  const path = '/api/posts/likes/507f1f77bcf86cd799439011';
+  assert.equal(shouldRouteToCoreWorker('GET', path), true);
+  assert.equal(shouldRouteToCoreWorker('POST', path), false);
+  assert.equal(shouldRouteToCoreWorker('GET', path, '', new Headers({ cookie: 'orion_session=a' })), false);
+  assert.equal(shouldRouteToCoreWorker('GET', path, '', new Headers({ authorization: 'Bearer a' })), false);
+  assert.equal(shouldRouteToCoreWorker('GET', path + '/add'), false);
+  assert.equal(shouldRouteToCoreWorker('GET', '/api/posts/likes/nope'), false);
+});

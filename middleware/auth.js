@@ -12,11 +12,10 @@
  * - 权限不足或未登录的拦截工作，仍建议交给 GlobalGuard。
  */
 
-import jwt from 'jsonwebtoken';
+import { verifySessionJwt } from '../utils/jwtKeyring.js';
 import { get } from '../cache/session.js'; // MongoDB/Redis Session 助手
 import permissionService from '../services/permissionService.js'; // 权限服务
 import { getAuthCookie } from '../utils/authCookie.js';
-const SECRET = process.env.SECRET_JWT || 'secret';
 
 export default async function (req, res, next) {
   // ============================================================
@@ -54,7 +53,7 @@ export default async function (req, res, next) {
     // ============================================================
     // 🔥 关键点：jwt.verify 如果失败（过期或签名错误），会直接 throw Error
     // 我们必须 catch 住这个错误并返回 401，而不是降级为游客
-    jwt.verify(token, SECRET);
+    verifySessionJwt(token);
 
     // ============================================================
     // 4. 状态校验：Session 白名单 (Soft Check)
