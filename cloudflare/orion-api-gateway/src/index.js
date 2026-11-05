@@ -21,13 +21,31 @@ const MIGRATED_PUBLIC_READ_PATHS = new Set([
   '/api/homepage',
   '/api/homepage/likes',
   '/api/homepage/projects',
-  '/api/homepage/logs'
+  '/api/homepage/logs',
+  '/api/projects',
+  '/api/posts',
+  '/api/tags'
 ]);
 
 // Explicit path allowlist prevents private, write and admin routes from
 // accidentally bypassing the legacy Cloud Run auth and permission checks.
-export function shouldRouteToCoreWorker(method, path) {
-  return method === 'GET' && MIGRATED_PUBLIC_READ_PATHS.has(path);
+export function shouldRouteToCoreWorker(method, path, search = '') {
+  if (method !== 'GET' || !MIGRATED_PUBLIC_READ_PATHS.has(path)) return false;
+  const query = new URLSearchParams(search);
+  // Logged-in users can request private/all tags from the original authenticated
+  // API. Never serve those queries from the public-only MongoDB RPC.
+  if (path === '/api/tags') {
+    const types = query.getAll('type');
+    return types.length <= 1 && (types.length === 0 || types[0] === 'public');
+  }
+  if (path === '/api/posts') {
+    if (['q', 'tag'].some((key) => query.get(key)?.length > 100)) return false;
+    for (const [key, max] of [['page', 1000], ['limit', 50]]) {
+      const v = query.get(key);
+      if (v !== null && (!/^\d+$/.test(v) || Number(v) < 1 || Number(v) > max)) return false;
+    }
+  }
+  return true;
 }
 
 const PUBLIC_CACHE_RULES = [];
@@ -204,7 +222,7 @@ export default {
 
     // Internal service binding: no public workers.dev hop, no shared origin secret.
     // Keep Cloud Run as a per-request fallback if the new database path fails.
-    if (shouldRouteToCoreWorker(request.method, pathname) && env.BANANABOOM_CORE) {
+    if (shouldRouteToCoreWorker(request.method, pathname, incomingUrl.search) && env.BANANABOOM_CORE) {
       try {
         const workerHeaders = new Headers(request.headers);
         workerHeaders.delete('host');

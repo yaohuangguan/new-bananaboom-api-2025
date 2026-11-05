@@ -54,3 +54,11 @@ CORS support for `samyao.me` origins. Compare source via the response header
 The Google Cloud Build trigger for `bananaboom-api` is disabled while migrating,
 to avoid rebuilding Docker images on every commit. Reactivate or redeploy manually
 if you need a new Cloud Run revision before the complete migration.
+
+## Additional public reads
+- `GET /api/projects`: visible portfolio projects (order descending)
+- `GET /api/posts`: only isPrivate=false posts, with paging/search/tags
+- `GET /api/tags`: public tag counts only; private/all tag queries remain on Cloud Run
+
+These routes are read-only. Protected post details and all write endpoints stay
+on the existing Node backend until the authentication/permissions adapter is ready.

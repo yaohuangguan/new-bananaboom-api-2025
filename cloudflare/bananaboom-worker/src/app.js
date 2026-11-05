@@ -21,5 +21,28 @@ export function createApp(repository = mongoRepository) {
     ctx.set('Cache-Control', 'public, max-age=3600');
     return repository.logs().then(asLegacyJson);
   });
+  app.get('/api/projects', async () => asLegacyJson(await repository.publicProjects()));
+  app.get('/api/tags', async () => asLegacyJson(await repository.publicTags()));
+  app.get('/api/posts', async (ctx) => {
+    const first = (value) => Array.isArray(value) ? value[0] : value;
+    const parsedNumber = (value, fallback) => {
+      const n = parseInt(first(value), 10);
+      return Number.isSafeInteger(n) && n > 0 ? n : fallback;
+    };
+    const page = Math.min(parsedNumber(ctx.query.page, 1), 1000);
+    const limit = Math.min(parsedNumber(ctx.query.limit, 10), 50);
+    const q = first(ctx.query.q);
+    const tag = first(ctx.query.tag);
+    if ((q && q.length > 100) || (tag && tag.length > 100)) {
+      ctx.status = 400;
+      return { error: 'Search query is too long' };
+    }
+    return asLegacyJson(await repository.publicPosts({
+      page,
+      limit,
+      q: q || undefined,
+      tag: tag || undefined
+    }));
+  });
   return app;
 }
