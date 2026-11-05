@@ -1,10 +1,9 @@
 /**
  * @module utils/authUtils
  */
-import jwt from 'jsonwebtoken';
+import { signSessionJwt } from './jwtKeyring.js';
 import { set } from '../cache/session.js'; // 操作 MongoDB Session 表
 import permissionService from '../services/permissionService.js';
-const SECRET = process.env.SECRET_JWT || 'secret';
 
 /**
  * 签发 Token 并同步到 Session
@@ -17,7 +16,7 @@ const signAndSyncToken = async (user) => {
   };
 
   // 2. 签发 JWT
-  const token = jwt.sign(payload, SECRET, { expiresIn: '30d' });
+  const token = signSessionJwt(payload);
 
   // 3. 🔥 存入 Session 白名单 (必须带 auth: 前缀)
   // Value 建议存 userId，方便后面 auth 中间件实时补全

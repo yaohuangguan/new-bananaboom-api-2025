@@ -40,6 +40,9 @@ function hasLegacyCredentials(headers) {
 
 export function shouldRouteToCoreWorker(method, path, search = '', headers = {}) {
   if (method !== 'GET') return false;
+  if (/^\/api\/posts\/likes\/[a-f\d]{24}$/i.test(path)) {
+    return !hasLegacyCredentials(headers);
+  }
   if (/^\/api\/posts\/[a-f\d]{24}$/i.test(path)) {
     // Existing identity semantics are preserved by routing credentialed readers
     // to Cloud Run; the Worker serves only isPrivate=false articles.

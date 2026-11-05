@@ -10,7 +10,7 @@ const asLegacyJson = (value) => hydrateR2References(JSON.parse(JSON.stringify(va
 // Only explicitly migrated public read paths. All other routes remain on Cloud Run.
 async function runtimeJwtSecret() {
   const { env } = await import('cloudflare:workers');
-  return env.SECRET_JWT;
+  return { legacy: env.SECRET_JWT, next: env.ORION_JWT_NEXT_SECRET };
 }
 
 function listOptions(query) {
@@ -65,6 +65,16 @@ export function createApp(repository = mongoRepository, options = {}) {
       tag: tag || undefined
     }));
   });
+  app.get('/api/posts/likes/:id', async (ctx) => {
+    const id = ctx.params.id;
+    if (!/^[a-f0-9]{24}$/i.test(id)) {
+      ctx.status = 404;
+      return { message: 'Post not found' };
+    }
+    ctx.set('Cache-Control', 'no-store');
+    return asLegacyJson(await repository.publicPostLikes(id));
+  });
+
   // The Gateway routes here only if no legacy login credential was supplied.
   // The database query itself requires isPrivate=false, regardless of route.
   app.get('/api/posts/:id', async (ctx) => {

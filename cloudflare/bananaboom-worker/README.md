@@ -83,3 +83,19 @@ redacts both Worker and fallback Cloud Run post-list/detail responses.
 
 `GET /api/posts/:id` resolves only public Mongo posts and populates minimal
 author fields. Credentialed requests are delegated to Cloud Run for now.
+
+## Versioned JWT migration
+
+`authenticateLegacyRequest` now recognizes legacy HS256 JWTs without
+a key ID and v2 HS256 JWTs with `kid=orion-v2`. It requires an exact
+live MongoDB session and current RBAC permissions for either key. The
+Worker runtime reads `SECRET_JWT` and optional `ORION_JWT_NEXT_SECRET`.
+Neither secret is provisioned for private production routing yet.
+Do not allowlist authenticated routes until key provisioning, dual-key
+tests and live browser checks pass. See `docs/WORKERS-MIGRATION.md`.
+
+## Public post-like count reads
+
+Anonymous `GET /api/posts/likes/:id` is now handled by the Worker with a
+public-post constraint. Authenticated reads and write operations remain
+on Cloud Run.

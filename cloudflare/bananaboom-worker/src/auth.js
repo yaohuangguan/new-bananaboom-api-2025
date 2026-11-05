@@ -1,4 +1,4 @@
-import { jwtVerify, errors as joseErrors } from 'jose';
+import { jwtVerify, decodeProtectedHeader, errors as joseErrors } from 'jose';
 
 const TOKEN_COOKIE = 'orion_session';
 const VALID_ID = /^[a-f0-9]{24}$/i;
@@ -29,24 +29,55 @@ export function extractLegacyToken(headers = {}) {
  * Fail closed on signed tokens without a live, nonexpired MongoDB session.
  * Never trust roles or permissions embedded in JWT claims.
  */
-export async function authenticateLegacyRequest(headers, repo, secret) {
-  const token = extractLegacyToken(headers);
-  if (!token) return { kind: 'guest' };
-  if (typeof secret !== 'string' || secret.length < 16) {
-    // Missing signing key is a server configuration error, NOT a guest session.
-    throw new Error('SECRET_JWT is missing or unsafe');
+export async function verifyKeyringToken(token, secrets) {
+  const config = typeof secrets === 'string'
+    ? { legacy: secrets, next: null }
+    : secrets || {};
+  if (!config.legacy || typeof config.legacy !== 'string') {
+    throw new Error('Missing legacy SECRET_JWT');
+  }
+  if (config.next && (config.next.length < 32 || config.next === config.legacy)) {
+    throw new Error('ORION_JWT_NEXT_SECRET must be distinct and at least 32 characters');
   }
 
-  let claims;
+  let protectedHeader;
   try {
-    const result = await jwtVerify(token, new TextEncoder().encode(secret), { algorithms: ['HS256'] });
-    claims = result.payload;
+    protectedHeader = decodeProtectedHeader(token);
+  } catch {
+    return { kind: 'invalid', code: 'AUTH_INVALID' };
+  }
+
+  if (protectedHeader.alg !== 'HS256') {
+    return { kind: 'invalid', code: 'AUTH_INVALID' };
+  }
+  let key;
+  if (protectedHeader.kid === 'orion-v2') {
+    key = config.next;
+  } else if (!protectedHeader.kid) {
+    key = config.legacy;
+  }
+  if (!key) return { kind: 'invalid', code: 'AUTH_INVALID' };
+
+  try {
+    const { payload } = await jwtVerify(token, new TextEncoder().encode(key), { algorithms: ['HS256'] });
+    return { kind: 'verified', claims: payload };
   } catch (error) {
     return {
       kind: 'invalid',
       code: error instanceof joseErrors.JWTExpired ? 'AUTH_EXPIRED' : 'AUTH_INVALID'
     };
   }
+}
+
+export async function authenticateLegacyRequest(headers, repo, secret) {
+  const token = extractLegacyToken(headers);
+  if (!token) return { kind: 'guest' };
+  // Legacy short key is accepted only for compatibility with existing sessions,
+  // and never grants access by itself: the MongoDB session whitelist remains
+  // mandatory. New v2 keys must meet the stronger minimum.
+  const verified = await verifyKeyringToken(token, secret);
+  if (verified.kind !== 'verified') return verified;
+  const claims = verified.claims;
 
   const subjectId = claims?.user?.id || claims?.user?._id;
   if (typeof subjectId !== 'string' || !VALID_ID.test(subjectId)) {
