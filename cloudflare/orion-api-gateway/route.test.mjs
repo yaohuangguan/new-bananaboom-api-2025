@@ -81,3 +81,41 @@ test('public menu list is Worker-only; category duplicates and other menu endpoi
   assert.equal(shouldRouteToCoreWorker('GET', '/api/menu/history'), false);
   assert.equal(shouldRouteToCoreWorker('POST', '/api/menu'), false);
 });
+
+test('diagnostic header identifies private-canary fallback only, without exposing credentials', async () => {
+  const { default: gateway } = await import('./src/index.js');
+  const originalFetch = globalThis.fetch;
+  const request = new Request('https://api.samyao.me/api/posts/private/posts', {
+    headers: {
+      cookie: 'orion_session=safe-test-cookie',
+      origin: 'https://samyao.me',
+      'x-orion-private-worker-canary': '1'
+    }
+  });
+  const env = {
+    ORIGIN_URL: 'https://upstream.example',
+    GENERAL_LIMITER: { limit: async () => ({ success: true }) },
+    BANANABOOM_CORE: {
+      fetch: async () => new Response('unavailable', {
+        status: 503, headers: { 'x-orion-private-worker-stage': 'auth' }
+      })
+    }
+  };
+  let forwarded;
+  globalThis.fetch = async (req) => {
+    forwarded = req;
+    return new Response(JSON.stringify({ data: [] }), {
+      headers: { 'content-type': 'application/json' }
+    });
+  };
+  try {
+    const reply = await gateway.fetch(request, env);
+    assert.equal(reply.status, 200);
+    assert.equal(reply.headers.get('x-orion-private-canary-result'), 'fallback-auth');
+    assert.match(reply.headers.get('access-control-expose-headers'), /x-orion-private-canary-result/);
+    assert.equal(forwarded.headers.get('cookie'), 'orion_session=safe-test-cookie');
+    assert.equal(forwarded.headers.has('x-orion-private-worker-canary'), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

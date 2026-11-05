@@ -120,7 +120,16 @@ export function createApp(repository = mongoRepository, options = {}) {
         message_cn: '请先登录'
       };
     }
-    const auth = await authenticateLegacyRequest(ctx.headers, repository, await secretProvider());
+    let auth;
+    try {
+      auth = await authenticateLegacyRequest(ctx.headers, repository, await secretProvider());
+    } catch (error) {
+      // Do not log credential values, MongoDB query details, or document contents.
+      console.error('private-read-canary-auth-failure', error?.name || 'UnknownError');
+      ctx.set('x-orion-private-worker-stage', 'auth');
+      ctx.status = 503; // The Gateway can safely use the existing Cloud Run fallback.
+      return { error: 'Private read temporarily unavailable' };
+    }
     if (auth.kind === 'invalid') {
       ctx.status = 401;
       return { msg: auth.code === 'AUTH_EXPIRED' ? 'Token expired' : 'Token invalid', code: auth.code };
@@ -148,7 +157,14 @@ export function createApp(repository = mongoRepository, options = {}) {
       ctx.status = 400;
       return { error: 'Search query is too long' };
     }
-    return asLegacyJson(await repository.privatePosts(parameters));
+    try {
+      return asLegacyJson(await repository.privatePosts(parameters));
+    } catch (error) {
+      console.error('private-read-canary-query-failure', error?.name || 'UnknownError');
+      ctx.set('x-orion-private-worker-stage', 'query');
+      ctx.status = 503;
+      return { error: 'Private read temporarily unavailable' };
+    }
   });
 
   return app;

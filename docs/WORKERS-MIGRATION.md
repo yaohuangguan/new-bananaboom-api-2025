@@ -191,3 +191,30 @@ Post-cutover production verification: menu category variants (8/5/3/0 items)
 all returned HTTP 200 from Worker and matched their pre-cutover JSON SHA-256
 hashes. Private routes without authentication remain 401, and the canary
 with an invalid Bearer token was 401 via Cloud Run fallback.
+
+## Private-read canary fallback diagnostics (2026-11-05)
+
+Real signed-in browser verification returned HTTP 200 and identical JSON from
+Cloud Run and Worker-canary URLs, but the canary response lacked
+`x-bananaboom-origin: worker`. This was **not** counted as a Worker pass:
+the Gateway may have silently fallen back to Cloud Run on a 5xx or exception.
+
+To distinguish routes safely while the canary is opt-in, requests with
+`x-orion-private-worker-canary: 1` now carry the response header
+`x-orion-private-canary-result` with one of these static values:
+
+- `worker`: core Worker actually handled the response (also has origin marker).
+- `not-routed`: canary gate was not matched; the Cloud Run route was used.
+- `fallback-auth`: JWT/Session/RBAC lookup raised in the Worker; Cloud Run replied.
+- `fallback-query`: private post query/hydration raised in the Worker.
+- `fallback-5xx`: Worker failed without a known diagnostic stage.
+- `fallback-exception`: Service Binding fetch threw.
+
+Only the stage, never auth material, MongoDB details, or private documents,
+is exposed. `Access-Control-Expose-Headers` permits reading it through
+same-site browser JavaScript. This diagnostic is temporary and should be
+removed when private reads are fully validated. Ordinary responses are unchanged.
+
+A forged-token canary returned 401 directly from Worker and reported
+`worker`; a canary without a JWT carrier was 401 from Cloud Run and
+reported `not-routed`. No general private-read traffic was migrated.
