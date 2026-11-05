@@ -1,21 +1,14 @@
-import { MongoClient } from 'mongodb';
-
-// Each Workers request gets its own TCP connection. Never cache sockets across isolates.
-async function withDatabase(work) {
-  const uri = process.env.MONGO_URI;
-  if (!uri) throw new Error('MONGO_URI is not configured');
-  const client = new MongoClient(uri, { serverSelectionTimeoutMS: 5000, maxPoolSize: 1 });
-  try {
-    await client.connect();
-    return await work(client.db());
-  } finally {
-    await client.close();
-  }
+// The binding is imported only on the runtime path so Node.js tests can supply
+// their own repository without importing Cloudflare-specific modules.
+async function mongo() {
+  const { env } = await import('cloudflare:workers');
+  const id = env.MONGODB_CONNECTION.idFromName('bananaboom-mongo');
+  return env.MONGODB_CONNECTION.get(id, { locationHint: 'enam' });
 }
 
 export const repository = {
-  homepages: () => withDatabase((db) => db.collection('homepages').find({}).toArray()),
-  likes: () => withDatabase((db) => db.collection('homepages').find({}, { projection: { likes: 1 } }).toArray()),
-  projects: () => withDatabase((db) => db.collection('projects').find({}).toArray()),
-  logs: () => withDatabase((db) => db.collection('logs').find({}).sort({ version: 1 }).toArray())
+  homepages: async () => (await mongo()).homepages(),
+  likes: async () => (await mongo()).likes(),
+  projects: async () => (await mongo()).projects(),
+  logs: async () => (await mongo()).logs()
 };

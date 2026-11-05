@@ -38,3 +38,8 @@ namespace_id = "12004"
   [ratelimits.simple]
   limit = 12
   period = 60
+
+
+[[services]]
+binding = "BANANABOOM_CORE"
+service = "bananaboom-core"

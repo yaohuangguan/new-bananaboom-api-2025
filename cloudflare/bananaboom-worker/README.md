@@ -18,3 +18,39 @@ All four read endpoints have been compared against the current production gatewa
 using the same MongoDB; their parsed JSON responses matched exactly (2026-11-05).
 No production traffic has been switched. The first iteration uses one MongoDB
 connection per request (roughly 1.2-1.4s on local WSL smoke tests).
+
+## MongoDB connection pooling
+
+The `MongoDBConnection` SQLite-backed Durable Object now owns a reusable
+MongoDB client. Only the four public, read-only RPC methods are exposed.
+It is named deterministically and located near the database (North America East
+hint), and resets to a fresh connection if the Durable Object is evicted.
+BSON values are converted to the legacy JSON shape before crossing the RPC
+boundary. No SQL tables are created in the Durable Object.
+
+After the first production gateway cutover, direct workers.dev access is disabled.
+Production requests must enter via api.samyao.me and its Cloudflare Service binding.
+
+## Production first-batch cutover (2026-11-05)
+
+`api.samyao.me` continues to run through the existing `orion-api-gateway`.
+The Gateway has a Cloudflare Service binding to this Worker and forwards only
+these four public GET routes:
+- `/api/homepage`
+- `/api/homepage/likes`
+- `/api/homepage/projects`
+- `/api/homepage/logs`
+
+All other paths, including writes, authorization, OAuth, media and backups,
+continue to be served by the original Cloud Run backend. If the Worker fails
+with a 5xx response or a service-binding exception on a migrated GET,
+the Gateway falls back to Cloud Run.
+
+The public `bananaboom-core.nzs.workers.dev` route is intentionally disabled,
+so requests cannot bypass the Gateway's rate limit. Read responses retain
+CORS support for `samyao.me` origins. Compare source via the response header
+`x-bananaboom-origin: worker`.
+
+The Google Cloud Build trigger for `bananaboom-api` is disabled while migrating,
+to avoid rebuilding Docker images on every commit. Reactivate or redeploy manually
+if you need a new Cloud Run revision before the complete migration.
