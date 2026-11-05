@@ -37,6 +37,30 @@ export function isWorkerLikeMutation(method, path) {
     /^\/api\/posts\/likes\/[a-f\d]{24}\/(?:add|remove)$/i.test(path);
 }
 
+// No stochastic write sampling: the same idempotency key must always hit
+// the same backend across retries. Deploy at 0, canary explicitly, then 100.
+export function isArticleWrite(method, path, headers = {}) {
+  const validMethodPath = method === 'POST'
+    ? path === '/api/posts'
+    : (method === 'PUT' || method === 'DELETE') &&
+      /^\/api\/posts\/[a-f0-9]{24}$/i.test(path);
+  if (!validMethodPath) return false;
+  const get = (name) => typeof headers?.get === 'function'
+    ? headers.get(name) : headers?.[name] || headers?.[name.toLowerCase()] || null;
+  if (get('x-google-auth')) return false;
+  const signedIn = get('x-auth-token') ||
+    get('authorization')?.startsWith('Bearer ') ||
+    /(?:^|;)\s*orion_session=/.test(get('cookie') || '');
+  return Boolean(signedIn) && /^[A-Za-z0-9_-]{16,128}$/.test(get('x-idempotency-key') || '');
+}
+
+export function routeArticleWrite(method, path, headers, cutover = false) {
+  if (!isArticleWrite(method, path, headers)) return false;
+  const get = (name) => typeof headers?.get === 'function'
+    ? headers.get(name) : headers?.[name] || headers?.[name.toLowerCase()] || null;
+  return cutover || get('x-orion-article-write-canary') === '1';
+}
+
 // Retire publicly callable shared-secret recovery/verification before Cloud
 // Run gets rebuilt; a valid VIP role is no longer an anonymous password.
 export function isRetiredSecretEndpoint(method, path) {
@@ -309,6 +333,22 @@ function withSecurityHeaders(response) {
   return next;
 }
 
+function articleWriteFailure(request) {
+  const response = withSecurityHeaders(new Response(JSON.stringify({
+    error: 'Article operation result unknown. Retry only with the same X-Idempotency-Key.'
+  }), {
+    status: 503,
+    headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }
+  }));
+  const origin = corsOrigin(request);
+  if (origin) {
+    response.headers.set('access-control-allow-origin', origin);
+    response.headers.set('access-control-allow-credentials', 'true');
+    response.headers.append('vary', 'Origin');
+  }
+  return response;
+}
+
 function likeWriteFailure(request) {
   // The Worker might have committed an increment before its connection failed.
   // Never retry or fall back to Cloud Run, or we can double-count the same click.
@@ -372,7 +412,9 @@ export default {
     // Keep Cloud Run as a per-request fallback if the new database path fails.
     const rolloutPercent = Number(env.PRIVATE_POST_READ_ROLLOUT_PERCENT || 0);
     const likeWrite = isWorkerLikeMutation(request.method, pathname);
-    const routeToCore = likeWrite ? true : pathname === '/api/posts/private/posts'
+    const articleWrite = routeArticleWrite(request.method, pathname, request.headers,
+      String(env.ARTICLE_WRITE_CUTOVER || '0') === '1');
+    const routeToCore = likeWrite || articleWrite ? true : pathname === '/api/posts/private/posts'
       ? shouldRoutePrivateRead(request.method, pathname, incomingUrl.search, request.headers, rolloutPercent)
       : shouldRouteToCoreWorker(request.method, pathname, incomingUrl.search, request.headers);
 
@@ -383,10 +425,13 @@ export default {
         workerHeaders.delete('x-forwarded-host');
         workerHeaders.delete('x-orion-edge-secret');
         workerHeaders.delete('x-orion-private-worker-canary');
+        workerHeaders.delete('x-orion-article-write-canary');
+        const body = articleWrite ? request.body : undefined;
         const workerRequest = new Request(request.url, {
           method: request.method,
           headers: workerHeaders,
-          // Like updates are bodyless, so do not forward arbitrary client bodies.
+          ...(body ? { body, duplex: 'half' } : {}),
+          // Like updates remain bodyless.
           redirect: 'manual'
         });
         const workerResponse = await env.BANANABOOM_CORE.fetch(workerRequest);
@@ -409,6 +454,10 @@ export default {
           }
           return redactPublicPostResponse(request, secured);
         }
+        if (articleWrite) {
+          console.error('BananaBoom article write returned 5xx; never retry via Cloud Run');
+          return articleWriteFailure(request);
+        }
         if (likeWrite) {
           console.error('BananaBoom like write returned 5xx; not replaying mutation');
           return likeWriteFailure(request);
@@ -420,6 +469,10 @@ export default {
         }
         console.error('BananaBoom Worker read returned', workerResponse.status, 'falling back to Cloud Run');
       } catch (error) {
+        if (articleWrite) {
+          console.error('BananaBoom article write exception; not replaying', error?.name || 'UnknownError');
+          return articleWriteFailure(request);
+        }
         if (likeWrite) {
           console.error('BananaBoom like write threw; not replaying mutation', error?.name || 'UnknownError');
           return likeWriteFailure(request);
@@ -430,6 +483,7 @@ export default {
       }
     }
 
+    if (articleWrite) return articleWriteFailure(request); // No core binding -> never replay.
     const originUrl = new URL(pathname + incomingUrl.search, env.ORIGIN_URL);
     const headers = new Headers(request.headers);
     headers.set('x-orion-edge', 'cloudflare');
@@ -442,6 +496,7 @@ export default {
     headers.delete('host');
     headers.delete('x-forwarded-host');
     headers.delete('x-orion-private-worker-canary');
+    headers.delete('x-orion-article-write-canary');
 
     const ttl = cacheTtlFor(request, pathname);
     const upstreamRequest = new Request(originUrl, {

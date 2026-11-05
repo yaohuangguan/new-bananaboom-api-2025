@@ -126,3 +126,19 @@ test('only administrator with a live verified session can read event feed', asyn
   current = null;
   assert.equal((await fetch(url, { headers: { authorization: 'Bearer ' + token } })).status, 401);
 });
+
+test('Bark destination reuses the canonical sam super_admin only', async () => {
+  const { resolveBarkDestination } = await import('../src/postOutbox.js');
+  const valid = 'https://api.day.app/fully-private-existing-device-token';
+  const find = async (filter) => {
+    assert.equal(filter.role, 'super_admin');
+    assert.equal(filter.displayName, 'sam');
+    return { barkUrl: valid };
+  };
+  assert.equal(await resolveBarkDestination({ findOne: find }), valid);
+  assert.equal(await resolveBarkDestination({ findOne: find }, 'https://push.example.com/explicit'), 'https://push.example.com/explicit');
+  assert.equal(await resolveBarkDestination({ findOne: async () => ({
+    barkUrl: 'https://evil.example/collector'
+  }) }), null);
+  assert.equal(await resolveBarkDestination({ findOne: async () => null }), null);
+});

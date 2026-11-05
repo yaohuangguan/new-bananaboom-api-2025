@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { SignJWT } from 'jose';
 import { createServer } from 'node:http';
+import { randomUUID } from 'node:crypto';
 import { createApp } from '../src/app.js';
 import { normalizePostInput, PostInputError } from '../src/postWrites.js';
 
@@ -13,7 +14,8 @@ const makeToken = () => new SignJWT({user:{id}}).setProtectedHeader({alg:'HS256'
 const writer = {id,role:'user',permissions:['BLOG:MANAGE']};
 const valid = {name:' New post ',info:'Summary',author:'Author',content:'Body'};
 const req = (method, body, token, extra={}) => ({method,headers:{
-  'content-type':'application/json',...(token?{authorization:'Bearer '+token}:{}),...extra
+  'content-type':'application/json','x-idempotency-key':randomUUID(),
+  ...(token?{authorization:'Bearer '+token}:{}),...extra
 },...(body===undefined?{}:{body:JSON.stringify(body)})});
 async function serve(repo, adminSecret) {
   const app=createApp(repo,{secretProvider:async()=>secret,adminSecretProvider:async()=>adminSecret});
@@ -67,13 +69,13 @@ test('CREATE and UPDATE emit proper values and block forged fields',async(t)=>{
   },token));
   assert.equal(res.status,201);
   assert.equal((await res.json()).data.likes,0);
-  assert.deepEqual(operations[0],['create',{
+  assert.deepEqual(operations[0].slice(0,-1),['create',{
     name:'New',info:'Summary',author:'Author',content:'Body',tags:['a','b']
   },id,'']);
   res=await fetch(base+'/api/posts/'+article,req('PUT',{name:' Updated ',user:'forged'},token));
   assert.equal(res.status,200);
   assert.equal((await res.json()).data.name,'Updated');
-  assert.deepEqual(operations[1],['update',article,{name:'Updated'},id,'']);
+  assert.deepEqual(operations[1].slice(0,-1),['update',article,{name:'Updated'},id,'']);
   assert.equal((await fetch(base+'/api/posts/'+article,req('PUT',{name:''},token))).status,400);
   assert.equal(operations.length,2);
 });

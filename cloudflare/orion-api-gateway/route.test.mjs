@@ -303,3 +303,103 @@ test('retired public shared-secret endpoints are blocked at Gateway before Cloud
     globalThis.fetch = originalFetch;
   }
 });
+
+test('article mutations require stable idempotency key and legacy session, exclude Google identity', async () => {
+  const { isArticleWrite, routeArticleWrite } = await import('./src/index.js');
+  const postId = '507f1f77bcf86cd799439011';
+  const headers = new Headers({
+    cookie: 'orion_session=signed-session',
+    'x-idempotency-key': '12345678-1234-4000-8000-123456789abc'
+  });
+  assert.equal(isArticleWrite('POST', '/api/posts', headers), true);
+  assert.equal(isArticleWrite('PUT', '/api/posts/' + postId, headers), true);
+  assert.equal(isArticleWrite('DELETE', '/api/posts/' + postId, headers), true);
+  assert.equal(isArticleWrite('POST', '/api/posts/likes/' + postId + '/add', headers), false);
+  assert.equal(isArticleWrite('GET', '/api/posts/' + postId, headers), false);
+  assert.equal(isArticleWrite('POST', '/api/posts', new Headers()), false);
+  assert.equal(isArticleWrite('POST', '/api/posts', new Headers({cookie:'orion_session=token'})), false);
+  assert.equal(isArticleWrite('POST', '/api/posts', new Headers({
+    ...Object.fromEntries(headers), 'x-google-auth': '{}'
+  })), false);
+  assert.equal(routeArticleWrite('POST', '/api/posts', headers, false), false);
+  assert.equal(routeArticleWrite('POST', '/api/posts', headers, true), true);
+  headers.set('x-orion-article-write-canary', '1');
+  assert.equal(routeArticleWrite('POST', '/api/posts', headers, false), true);
+});
+
+test('article CREATE forwards JSON body only once to Core and returns CORS Worker marker', async () => {
+  const { default: gateway } = await import('./src/index.js');
+  const originalFetch = globalThis.fetch;
+  let cloudrun = 0;
+  let core = 0;
+  globalThis.fetch = async () => { cloudrun++; return new Response('legacy'); };
+  const env = {
+    ORIGIN_URL: 'https://upstream.example',
+    ARTICLE_WRITE_CUTOVER: '1',
+    GENERAL_LIMITER: { limit: async () => ({ success:true }) },
+    WRITE_LIMITER: { limit: async () => ({ success:true }) },
+    BANANABOOM_CORE: { fetch: async (request) => {
+      core++;
+      assert.equal(request.method, 'POST');
+      assert.equal(request.headers.get('x-idempotency-key'), '12345678-1234-4000-8000-123456789abc');
+      assert.equal(request.headers.has('x-orion-article-write-canary'), false);
+      assert.deepEqual(await request.json(), { name:'Test', info:'Summary', author:'Author' });
+      return new Response(JSON.stringify({success:true,data:{_id:'new'}}),{
+        status:201,headers:{'content-type':'application/json'}
+      });
+    }}
+  };
+  try {
+    const res = await gateway.fetch(new Request('https://api.samyao.me/api/posts',{
+      method:'POST', headers:{
+        'content-type':'application/json','origin':'https://samyao.me',
+        'cookie':'orion_session=signed-session',
+        'x-idempotency-key':'12345678-1234-4000-8000-123456789abc',
+        'x-orion-article-write-canary':'1'
+      },
+      body:JSON.stringify({name:'Test',info:'Summary',author:'Author'})
+    }),env);
+    assert.equal(res.status,201);
+    assert.equal(res.headers.get('x-bananaboom-origin'),'worker');
+    assert.equal(res.headers.get('access-control-allow-origin'),'https://samyao.me');
+    assert.equal((await res.json()).success,true);
+    assert.equal(core,1);
+    assert.equal(cloudrun,0);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test('article mutation ambiguous 5xx, thrown error and missing binding NEVER replay on Cloud Run', async () => {
+  const { default: gateway } = await import('./src/index.js');
+  const originalFetch = globalThis.fetch;
+  let cloudrun = 0;
+  globalThis.fetch = async () => { cloudrun++; return new Response('legacy'); };
+  const env = {
+    ORIGIN_URL:'https://upstream.example',
+    ARTICLE_WRITE_CUTOVER:'1',
+    GENERAL_LIMITER: { limit: async () => ({ success:true }) },
+    WRITE_LIMITER: { limit: async () => ({ success:true }) },
+    BANANABOOM_CORE: { fetch: async () => new Response('db unknown',{status:503}) }
+  };
+  const make = () => new Request(
+    'https://api.samyao.me/api/posts/507f1f77bcf86cd799439011',{
+      method:'DELETE',headers:{
+        cookie:'orion_session=token',
+        'x-idempotency-key':'12345678-1234-4000-8000-123456789abc'
+      }
+    }
+  );
+  try {
+    let r = await gateway.fetch(make(),env);
+    assert.equal(r.status,503);
+    assert.match((await r.json()).error,/same X-Idempotency-Key/);
+    assert.equal(cloudrun,0);
+    env.BANANABOOM_CORE.fetch = async () => { throw Error('connection interrupted'); };
+    r = await gateway.fetch(make(),env);
+    assert.equal(r.status,503);
+    assert.equal(cloudrun,0);
+    delete env.BANANABOOM_CORE;
+    r = await gateway.fetch(make(),env);
+    assert.equal(r.status,503);
+    assert.equal(cloudrun,0);
+  } finally { globalThis.fetch = originalFetch; }
+});

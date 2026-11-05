@@ -8,6 +8,9 @@ preview_urls = false
 # 0 disables automatic private-read migration; explicit canary remains available.
 PRIVATE_POST_READ_ROLLOUT_PERCENT = 100
 ORIGIN_URL = "https://bananaboom-api-242273127238.asia-east1.run.app"
+# Off until authenticated E2E validates the Core Worker CRUD path.
+# Then switch to 1 (all eligible JWT+idempotency requests).
+ARTICLE_WRITE_CUTOVER = "0"
 
 [[routes]]
 pattern = "api.samyao.me"
