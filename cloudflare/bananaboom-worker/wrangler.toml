@@ -9,6 +9,8 @@ preview_urls = false
 
 [vars]
 R2_PUBLIC_DOMAIN = "https://assets.samyao.me"
+# Existing GCP Todo job is paused: do not send until separately enabled.
+TODO_REMINDERS_ENABLED = "0"
 
 [[durable_objects.bindings]]
 name = "MONGODB_CONNECTION"
