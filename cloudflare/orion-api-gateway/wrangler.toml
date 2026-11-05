@@ -11,6 +11,9 @@ ORIGIN_URL = "https://bananaboom-api-242273127238.asia-east1.run.app"
 # Off until authenticated E2E validates the Core Worker CRUD path.
 # Then switch to 1 (all eligible JWT+idempotency requests).
 ARTICLE_WRITE_CUTOVER = "0"
+# 0: old Cloud Run PDF, explicit x-orion-pdf-canary: 1 tests new Browser Run.
+# Switch to 1 only after a production PDF is generated and inspected.
+PDF_BROWSER_CUTOVER = "0"
 
 [[routes]]
 pattern = "api.samyao.me"
@@ -56,3 +59,7 @@ namespace_id = "12004"
 [[services]]
 binding = "BANANABOOM_CORE"
 service = "bananaboom-core"
+
+# Browser Run (free daily allowance) renders only the public Orion resume page.
+[browser]
+binding = "BROWSER"

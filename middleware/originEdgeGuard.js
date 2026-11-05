@@ -1,7 +1,6 @@
 import { timingSafeEqual } from 'crypto';
 
 const EXEMPT_PATHS = new Set([
-  '/api/payments/webhook',
   '/api/cron/trigger'
 ]);
 

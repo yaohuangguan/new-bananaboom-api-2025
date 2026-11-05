@@ -1,4 +1,5 @@
 import { redactPublicPostResponse } from './publicPostPrivacy.js';
+import { serveResumePdf } from './resumePdf.js';
 
 const ALLOWED_ORIGINS = new Set([
   'https://samyao.me',
@@ -71,6 +72,15 @@ export function isRetiredSecretEndpoint(method, path) {
     path === '/api/users/reset-by-secret' ||
     path === '/api/auth/verify-secret'
   );
+}
+
+// Human chat, Socket.IO and legacy Stripe checkout are intentionally retired.
+// AI conversation history under /api/chat/ai remains a supported endpoint.
+export function isRetiredOrionFeature(path) {
+  return path === '/socket.io' || path.startsWith('/socket.io/') ||
+    path === '/api/payments' || path.startsWith('/api/payments/') ||
+    path === '/api/chat/public' || path.startsWith('/api/chat/public/') ||
+    path === '/api/chat/private' || path.startsWith('/api/chat/private/');
 }
 
 function hasLegacyCredentials(headers) {
@@ -177,7 +187,8 @@ const EXPENSIVE_PREFIXES = [
   '/api/reading',
   '/api/upload',
   '/api/backup',
-  '/api/projects/import-github'
+  '/api/projects/import-github',
+  '/api/resumes/export-pdf'
 ];
 
 const AUTH_PREFIXES = ['/api/auth', '/api/users', '/authorize', '/token', '/register', '/revoke'];
@@ -393,6 +404,36 @@ export default {
     const limited = await enforceRateLimit(request, env, pathname);
     if (limited) return withSecurityHeaders(limited);
 
+    if (pathname === '/api/resumes/export-pdf' &&
+        (env.PDF_BROWSER_CUTOVER === '1' ||
+         request.headers.get('x-orion-pdf-canary') === '1')) {
+      const pdf = await serveResumePdf(request, env);
+      const secured = withSecurityHeaders(pdf);
+      const origin = corsOrigin(request);
+      if (origin) {
+        secured.headers.set('access-control-allow-origin', origin);
+        secured.headers.set('access-control-allow-credentials', 'true');
+        secured.headers.append('vary', 'Origin');
+      }
+      return secured;
+    }
+
+    if (isRetiredOrionFeature(pathname)) {
+      const response = withSecurityHeaders(new Response(JSON.stringify({
+        message: 'This legacy chat or billing endpoint has been retired.'
+      }), {
+        status: 410,
+        headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }
+      }));
+      const origin = corsOrigin(request);
+      if (origin) {
+        response.headers.set('access-control-allow-origin', origin);
+        response.headers.set('access-control-allow-credentials', 'true');
+        response.headers.append('vary', 'Origin');
+      }
+      return response;
+    }
+
     if (isRetiredSecretEndpoint(request.method, pathname)) {
       const response = withSecurityHeaders(new Response(JSON.stringify({
         message: 'Shared admin passphrases are retired. Sign in with a verification code.'
@@ -506,6 +547,7 @@ export default {
     headers.delete('x-forwarded-host');
     headers.delete('x-orion-private-worker-canary');
     headers.delete('x-orion-article-write-canary');
+    headers.delete('x-orion-pdf-canary');
 
     const ttl = cacheTtlFor(request, pathname);
     const upstreamRequest = new Request(originUrl, {

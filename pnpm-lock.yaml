@@ -95,12 +95,6 @@ importers:
       sharp:
         specifier: ^0.34.5
         version: 0.34.5
-      socket.io:
-        specifier: ^4.8.1
-        version: 4.8.1(supports-color@8.1.1)
-      stripe:
-        specifier: ^21.0.1
-        version: 21.0.1(@types/node@25.0.3)
       undici:
         specifier: ^7.16.0
         version: 7.16.0
