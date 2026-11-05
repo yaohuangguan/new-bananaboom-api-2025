@@ -27,6 +27,14 @@ namespace_id = "12002"
   limit = 60
   period = 60
 
+# Legacy likes rate limit: 30 requests per client IP per minute.
+[[ratelimits]]
+name = "LIKE_LIMITER"
+namespace_id = "12005"
+  [ratelimits.simple]
+  limit = 30
+  period = 60
+
 [[ratelimits]]
 name = "AUTH_LIMITER"
 namespace_id = "12003"

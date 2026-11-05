@@ -271,3 +271,30 @@ The Gateway still routes `x-google-auth` to Cloud Run.
 - Six public post detail JSON summaries were captured before cutover and must
   match afterwards. An authenticated private detail still needs a real
   signed-in UI regression check; local JWT/RBAC tests alone do not replace it.
+
+## Phase 6: blog like writes (first migrated mutations)
+
+- Migrate only `POST /api/posts/likes/:id/add` and
+  `POST /api/posts/likes/:id/remove` to OpenMesh / `bananaboom-core`,
+  with exact 24-character ObjectId path validation. No other write method
+  may be routed by this rule.
+- Preserve old MongoDB semantics: atomic `$inc` 1 or -1,
+  decrement only for `likes > 0`, no `updatedAt` modification;
+  return `{ _id, likes }` or `null` for nonexistent valid IDs.
+- Preserve 30 requests/client-IP/minute independently from the 60/min
+  general write limit using Cloudflare `LIKE_LIMITER` and the original
+  user-facing 429 message.
+- **Mutation fallback boundary:** Worker 5xx or a Service Binding exception
+  returns a 503 with an explicit *unknown operation status*. Unlike GETs,
+  the Gateway does not replay POSTs on Cloud Run because MongoDB may already
+  have committed the update. The browser should refresh the count before
+  any manual retry. This policy is mandatory for all future mutations.
+- The authenticated article CRUD operations are not migrated by this change:
+  they rely on `logOperation`, Socket.IO events, Mongoose validation and,
+  for deleting private journals, an additional admin secret. These must be
+  implemented and tested separately before retiring Cloud Run.
+- Deployment order: Core Worker, immediately activate new Durable Object RPC
+  with `wrangler versions deploy <id>@100% --durable-objects-code-update-mode
+  immediate`, then Gateway, then verify Worker response markers and counter
+  parity. Never apply test mutations to production without checking and
+  restoring the original count.

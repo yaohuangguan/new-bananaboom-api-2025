@@ -32,6 +32,11 @@ const MIGRATED_PUBLIC_READ_PATHS = new Set([
 
 // Explicit path allowlist prevents private, write and admin routes from
 // accidentally bypassing the legacy Cloud Run auth and permission checks.
+export function isWorkerLikeMutation(method, path) {
+  return method === 'POST' &&
+    /^\/api\/posts\/likes\/[a-f\d]{24}\/(?:add|remove)$/i.test(path);
+}
+
 function hasLegacyCredentials(headers) {
   const get = (name) => typeof headers?.get === 'function'
     ? headers.get(name) : headers?.[name] || headers?.[name.toLowerCase()] || null;
@@ -217,7 +222,11 @@ async function enforceRateLimit(request, env, pathname) {
   let limiter = env.GENERAL_LIMITER;
   let bucket = 'general';
 
-  if (isR2BrowserRead(request, pathname)) {
+  if (isWorkerLikeMutation(request.method, pathname)) {
+    // Preserve the legacy 30/IP/min like limiter, separate from general writes.
+    limiter = env.LIKE_LIMITER || env.WRITE_LIMITER || env.GENERAL_LIMITER;
+    bucket = 'likes';
+  } else if (isR2BrowserRead(request, pathname)) {
     // System Management's R2 browser can legitimately issue list/usage/range-preview
     // requests in quick succession. Keep these reads isolated from the 12/min
     // expensive mutation bucket while retaining per-IP protection.
@@ -241,6 +250,18 @@ async function enforceRateLimit(request, env, pathname) {
   const { success } = await limiter.limit({ key: `${ip}:${bucket}` });
   if (success) return null;
 
+  if (bucket === 'likes') {
+    return new Response(JSON.stringify({
+      message: '❤️ 您的手速太快了，请休息一下再点赞吧！'
+    }), {
+      status: 429,
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+        'retry-after': '60',
+        'cache-control': 'no-store'
+      }
+    });
+  }
   return new Response(
     JSON.stringify({
       error: 'Too many requests',
@@ -268,6 +289,29 @@ function withSecurityHeaders(response) {
   return next;
 }
 
+function likeWriteFailure(request) {
+  // The Worker might have committed an increment before its connection failed.
+  // Never retry or fall back to Cloud Run, or we can double-count the same click.
+  const response = withSecurityHeaders(new Response(
+    JSON.stringify({
+      error: 'Like update result unknown. Refresh the displayed count before retrying.'
+    }), {
+      status: 503,
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+        'cache-control': 'no-store'
+      }
+    }
+  ));
+  const origin = corsOrigin(request);
+  if (origin) {
+    response.headers.set('access-control-allow-origin', origin);
+    response.headers.set('access-control-allow-credentials', 'true');
+    response.headers.append('vary', 'Origin');
+  }
+  return response;
+}
+
 export default {
   async fetch(request, env) {
     const incomingUrl = new URL(request.url);
@@ -288,7 +332,8 @@ export default {
     // Internal service binding: no public workers.dev hop, no shared origin secret.
     // Keep Cloud Run as a per-request fallback if the new database path fails.
     const rolloutPercent = Number(env.PRIVATE_POST_READ_ROLLOUT_PERCENT || 0);
-    const routeToCore = pathname === '/api/posts/private/posts'
+    const likeWrite = isWorkerLikeMutation(request.method, pathname);
+    const routeToCore = likeWrite ? true : pathname === '/api/posts/private/posts'
       ? shouldRoutePrivateRead(request.method, pathname, incomingUrl.search, request.headers, rolloutPercent)
       : shouldRouteToCoreWorker(request.method, pathname, incomingUrl.search, request.headers);
 
@@ -302,6 +347,7 @@ export default {
         const workerRequest = new Request(request.url, {
           method: request.method,
           headers: workerHeaders,
+          // Like updates are bodyless, so do not forward arbitrary client bodies.
           redirect: 'manual'
         });
         const workerResponse = await env.BANANABOOM_CORE.fetch(workerRequest);
@@ -324,6 +370,10 @@ export default {
           }
           return redactPublicPostResponse(request, secured);
         }
+        if (likeWrite) {
+          console.error('BananaBoom like write returned 5xx; not replaying mutation');
+          return likeWriteFailure(request);
+        }
         if (privateCanary) {
           const stage = workerResponse.headers.get('x-orion-private-worker-stage');
           privateCanaryResult = stage === 'auth' ? 'fallback-auth' :
@@ -331,6 +381,10 @@ export default {
         }
         console.error('BananaBoom Worker read returned', workerResponse.status, 'falling back to Cloud Run');
       } catch (error) {
+        if (likeWrite) {
+          console.error('BananaBoom like write threw; not replaying mutation', error?.name || 'UnknownError');
+          return likeWriteFailure(request);
+        }
         if (privateCanary) privateCanaryResult = 'fallback-exception';
         // Do not log credential-bearing request URLs or headers.
         console.error('BananaBoom Worker read failed; falling back to Cloud Run', error?.name || 'UnknownError');

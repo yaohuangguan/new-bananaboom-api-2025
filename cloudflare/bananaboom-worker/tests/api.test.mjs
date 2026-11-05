@@ -135,7 +135,8 @@ test('public likes count returns the old JSON shape and hides missing posts', as
   const id = '507f1f77bcf86cd799439011';
   const app = createApp({
     ...fakeRepository,
-    publicPostLikes: async (requested) => requested === id ? { _id: id, likes: 3 } : null
+    publicPostLikes: async (requested) => requested === id ? { _id: id, likes: 3 } : null,
+    changePostLikes: async () => ({ _id: id, likes: 4 })
   });
   await app.ready();
   const server = createServer(app.callback());
@@ -147,7 +148,9 @@ test('public likes count returns the old JSON shape and hides missing posts', as
   assert.deepEqual(await response.json(), { _id: id, likes: 3 });
   assert.equal(await (await fetch(base + '/api/posts/likes/507f1f77bcf86cd799439012')).json(), null);
   assert.equal((await fetch(base + '/api/posts/likes/invalid')).status, 404);
-  assert.equal((await fetch(base + '/api/posts/likes/' + id + '/add', { method: 'POST' })).status, 404);
+  const add = await fetch(base + '/api/posts/likes/' + id + '/add', { method: 'POST' });
+  assert.equal(add.status, 200);
+  assert.equal((await add.json()).likes, 4);
 });
 
 test('public menu GET preserves document shape and filters through repository', async (t) => {
@@ -173,4 +176,53 @@ test('public menu GET preserves document shape and filters through repository', 
   assert.deepEqual(queries, [{ category: undefined }, { category: 'dinner' }]);
   assert.equal((await fetch(base + '/api/menu?category=a&category=b')).status, 400);
   assert.equal((await fetch(base + '/api/menu', { method: 'POST' })).status, 405);
+});
+
+test('blog like writes preserve legacy add/remove response without changing other routes', async (t) => {
+  const id = '507f1f77bcf86cd799439011';
+  const calls = [];
+  let count = 2;
+  const repository = {
+    ...fakeRepository,
+    changePostLikes: async (postId, direction) => {
+      calls.push([postId, direction]);
+      if (postId !== id) return null;
+      if (direction === 'add') count++;
+      if (direction === 'remove' && count > 0) count--;
+      return { _id: id, likes: count };
+    }
+  };
+  const app = createApp(repository);
+  await app.ready();
+  const server = createServer(app.callback());
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const url = 'http://127.0.0.1:' + server.address().port + '/api/posts/likes/' + id;
+  const increment = await fetch(url + '/add', { method: 'POST' });
+  assert.equal(increment.status, 200);
+  assert.deepEqual(await increment.json(), { _id: id, likes: 3 });
+  const decrement = await fetch(url + '/remove', { method: 'POST' });
+  assert.equal(decrement.status, 200);
+  assert.deepEqual(await decrement.json(), { _id: id, likes: 2 });
+  assert.deepEqual(calls, [[id, 'add'], [id, 'remove']]);
+  assert.equal((await fetch(url + '/add', { method: 'GET' })).status, 405);
+  assert.equal((await fetch(url + '/reset', { method: 'POST' })).status, 404);
+  assert.equal(await (await fetch('http://127.0.0.1:' + server.address().port +
+    '/api/posts/likes/507f1f77bcf86cd799439012/add', { method: 'POST' })).json(), null);
+});
+
+test('blog like write error returns 503 and does not reveal internal Mongo errors', async (t) => {
+  const id = '507f1f77bcf86cd799439011';
+  const app = createApp({
+    ...fakeRepository,
+    changePostLikes: async () => { throw new Error('mongodb+srv://secret'); }
+  });
+  await app.ready();
+  const server = createServer(app.callback());
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const r = await fetch('http://127.0.0.1:' + server.address().port +
+    '/api/posts/likes/' + id + '/add', { method: 'POST' });
+  assert.equal(r.status, 503);
+  assert.doesNotMatch(await r.text(), /mongodb|secret/i);
 });

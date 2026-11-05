@@ -169,3 +169,76 @@ test('private rollout Worker errors continue to use Cloud Run fallback', async (
     globalThis.fetch = origFetch;
   }
 });
+
+test('only exact blog-like mutations are routed to Worker', async () => {
+  const { isWorkerLikeMutation } = await import('./src/index.js');
+  const p = '/api/posts/likes/507f1f77bcf86cd799439011';
+  assert.equal(isWorkerLikeMutation('POST', p + '/add'), true);
+  assert.equal(isWorkerLikeMutation('POST', p + '/remove'), true);
+  assert.equal(isWorkerLikeMutation('GET', p + '/add'), false);
+  assert.equal(isWorkerLikeMutation('DELETE', p + '/add'), false);
+  assert.equal(isWorkerLikeMutation('POST', p + '/reset'), false);
+  assert.equal(isWorkerLikeMutation('POST', '/api/posts/likes/not-valid/add'), false);
+  assert.equal(isWorkerLikeMutation('POST', '/api/posts/507f1f77bcf86cd799439011'), false);
+  assert.equal(isWorkerLikeMutation('POST', '/api/posts'), false);
+});
+
+test('blog-like POST goes to Worker once and never calls Cloud Run after ambiguous 5xx', async () => {
+  const { default: gateway } = await import('./src/index.js');
+  const path = '/api/posts/likes/507f1f77bcf86cd799439011/add';
+  const originalFetch = globalThis.fetch;
+  let upstream = 0, called = 0;
+  globalThis.fetch = async () => { upstream++; return new Response('legacy'); };
+  const env = {
+    ORIGIN_URL: 'https://upstream.example',
+    GENERAL_LIMITER: { limit: async () => ({ success: true }) },
+    LIKE_LIMITER: { limit: async () => ({ success: true }) },
+    BANANABOOM_CORE: {
+      fetch: async (request) => {
+        called++;
+        assert.equal(request.method, 'POST');
+        return new Response('unknown', { status: 503 });
+      }
+    }
+  };
+  try {
+    const reply = await gateway.fetch(new Request('https://api.samyao.me' + path, {
+      method: 'POST',
+      headers: { origin: 'https://samyao.me' }
+    }), env);
+    assert.equal(reply.status, 503);
+    assert.equal(reply.headers.get('access-control-allow-origin'), 'https://samyao.me');
+    assert.equal(reply.headers.get('x-bananaboom-origin'), null);
+    assert.equal(called, 1);
+    assert.equal(upstream, 0, 'Cloud Run must never replay a possibly committed mutation');
+
+    env.BANANABOOM_CORE.fetch = async () => { throw Error('network interrupted'); };
+    const failed = await gateway.fetch(new Request('https://api.samyao.me' + path, {
+      method: 'POST',
+      headers: { origin: 'https://samyao.me' }
+    }), env);
+    assert.equal(failed.status, 503);
+    assert.equal(upstream, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('blog like limit preserves 30/IP/min bucket and 429 response', async () => {
+  const { default: gateway } = await import('./src/index.js');
+  const env = {
+    GENERAL_LIMITER: { limit: async () => { throw Error('wrong bucket'); } },
+    LIKE_LIMITER: { limit: async ({ key }) => {
+      assert.match(key, /:likes$/);
+      return { success: false };
+    } }
+  };
+  const reply = await gateway.fetch(new Request(
+    'https://api.samyao.me/api/posts/likes/507f1f77bcf86cd799439011/add', {
+      method: 'POST',
+      headers: { 'cf-connecting-ip': '192.0.2.1' }
+    }
+  ), env);
+  assert.equal(reply.status, 429);
+  assert.match((await reply.json()).message, /手速太快/);
+});
