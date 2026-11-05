@@ -226,3 +226,44 @@ test('blog like write error returns 503 and does not reveal internal Mongo error
   assert.equal(r.status, 503);
   assert.doesNotMatch(await r.text(), /mongodb|secret/i);
 });
+
+test('public photos and resume reads preserve JSON shape without exposing Mongo lookup', async (t) => {
+  const calls = [];
+  const repo = {
+    ...fakeRepository,
+    publicPhotos: async () => [{ _id: 'photo1', url: 'https://assets.samyao.me/photo.png', order: 1 }],
+    publicResume: async (user) => {
+      calls.push(['detail', user]);
+      return user === 'missing' ? null : {
+        _id: 'resume1', slug: 'sample', user: 'owner@example.org', title: 'Sample'
+      };
+    },
+    publicResumeList: async (user) => {
+      calls.push(['list', user]);
+      return [{ _id: 'resume1', slug: 'sample', title: 'Sample', user: 'owner@example.org' }];
+    }
+  };
+  const app = createApp(repo);
+  await app.ready();
+  const server = createServer(app.callback());
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const url = 'http://127.0.0.1:' + server.address().port;
+  let r = await fetch(url + '/api/photos');
+  assert.equal(r.status, 200);
+  assert.deepEqual(await r.json(), [{
+    _id: 'photo1', url: 'https://assets.samyao.me/photo.png', order: 1
+  }]);
+  r = await fetch(url + '/api/resumes');
+  assert.equal(r.status, 200);
+  assert.equal((await r.json()).user, 'owner@example.org');
+  r = await fetch(url + '/api/resumes/list?user=sam');
+  assert.equal(r.status, 200);
+  assert.equal((await r.json()).length, 1);
+  assert.deepEqual(calls, [['detail', undefined], ['list', 'sam']]);
+  r = await fetch(url + '/api/resumes?user=missing');
+  assert.equal(r.status, 404);
+  assert.match((await r.json()).msg, /not found/);
+  r = await fetch(url + '/api/resumes/list?user=a&user=b');
+  assert.equal(r.status, 400);
+});

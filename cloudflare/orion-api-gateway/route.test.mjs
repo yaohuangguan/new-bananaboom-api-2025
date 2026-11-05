@@ -403,3 +403,17 @@ test('article mutation ambiguous 5xx, thrown error and missing binding NEVER rep
     assert.equal(cloudrun,0);
   } finally { globalThis.fetch = originalFetch; }
 });
+
+test('public resumes and photos GETs use Worker with validated narrow query allowlist', () => {
+  for (const path of ['/api/photos', '/api/resumes', '/api/resumes/list']) {
+    assert.equal(shouldRouteToCoreWorker('GET', path), true);
+    assert.equal(shouldRouteToCoreWorker('POST', path), false);
+    assert.equal(shouldRouteToCoreWorker('DELETE', path), false);
+  }
+  assert.equal(shouldRouteToCoreWorker('GET', '/api/resumes/list', '?user=sam'), true);
+  assert.equal(shouldRouteToCoreWorker('GET', '/api/resumes', '?user=jenny'), true);
+  assert.equal(shouldRouteToCoreWorker('GET', '/api/resumes', '?user=a&user=b'), false);
+  assert.equal(shouldRouteToCoreWorker('GET', '/api/photos', '?private=true'), false);
+  assert.equal(shouldRouteToCoreWorker('GET', '/api/resumes/export-pdf'), false);
+  assert.equal(shouldRouteToCoreWorker('GET', '/api/resumes/users'), false);
+});

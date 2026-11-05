@@ -47,6 +47,32 @@ export function createApp(repository = mongoRepository, options = {}) {
     return repository.logs().then(asLegacyJson);
   });
   app.get('/api/projects', async () => asLegacyJson(await repository.publicProjects()));
+  app.get('/api/photos', async () => asLegacyJson(await repository.publicPhotos()));
+  for (const [path, list] of [['/api/resumes', false], ['/api/resumes/list', true]]) {
+    app.get(path, async (ctx) => {
+      const user = ctx.query.user;
+      if (Array.isArray(user) || (user != null &&
+        (typeof user !== 'string' || user.length > 180))) {
+        ctx.status = 400;
+        return { message: 'Invalid resume identifier' };
+      }
+      try {
+        const data = list
+          ? await repository.publicResumeList(user || undefined)
+          : await repository.publicResume(user || undefined);
+        if (!list && !data) {
+          ctx.status = 404;
+          return { msg: `Resume for user '${user || 'yaob@miamioh.edu'}' not found` };
+        }
+        return asLegacyJson(data);
+      } catch (error) {
+        console.error('public-resume-read-error', error?.name || 'UnknownError');
+        ctx.status = 503; // Gateway falls back to Cloud Run for any reader.
+        return { error: 'Resume temporarily unavailable' };
+      }
+    });
+  }
+
   app.get('/api/menu', async (ctx) => {
     const category = ctx.query.category;
     if ((Array.isArray(category)) || (typeof category === 'string' && category.length > 100)) {

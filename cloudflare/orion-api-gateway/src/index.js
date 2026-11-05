@@ -27,7 +27,10 @@ const MIGRATED_PUBLIC_READ_PATHS = new Set([
   '/api/projects',
   '/api/menu',
   '/api/posts',
-  '/api/tags'
+  '/api/tags',
+  '/api/photos',
+  '/api/resumes',
+  '/api/resumes/list'
 ]);
 
 // Explicit path allowlist prevents private, write and admin routes from
@@ -139,6 +142,11 @@ export function shouldRouteToCoreWorker(method, path, search = '', headers = {})
   const query = new URLSearchParams(search);
   // Logged-in users can request private/all tags from the original authenticated
   // API. Never serve those queries from the public-only MongoDB RPC.
+  if (path === '/api/resumes' || path === '/api/resumes/list') {
+    const users = query.getAll('user');
+    return users.length <= 1 && (users.length === 0 || users[0].length <= 180);
+  }
+  if (path === '/api/photos') return !search;
   if (path === '/api/menu') {
     const categories = query.getAll('category');
     return categories.length <= 1 && (categories.length === 0 || categories[0].length <= 100);
