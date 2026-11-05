@@ -39,15 +39,41 @@ function hasLegacyCredentials(headers) {
   return Boolean(get('cookie'));
 }
 
+function isPrivateReadEligible(path, search, headers) {
+  if (path !== '/api/posts/private/posts') return false;
+  const get = (name) => typeof headers?.get === 'function'
+    ? headers.get(name) : headers?.[name] || headers?.[name.toLowerCase()] || null;
+  const hasJwt = Boolean(get('x-auth-token') ||
+    get('authorization')?.startsWith('Bearer ') ||
+    /(?:^|;)\s*orion_session=/.test(get('cookie') || ''));
+  if (!hasJwt || get('x-google-auth')) return false;
+  const params = new URLSearchParams(search);
+  for (const key of ['q', 'tag']) {
+    if (params.getAll(key).length > 1 || (params.get(key)?.length || 0) > 100) return false;
+  }
+  for (const [key, limit] of [['page', 1000], ['limit', 50]]) {
+    const values = params.getAll(key);
+    if (values.length > 1) return false;
+    if (values.length && (!/^\d+$/.test(values[0]) ||
+      Number(values[0]) < 1 || Number(values[0]) > limit)) return false;
+  }
+  return true;
+}
+
+export function shouldRoutePrivateRead(method, path, search = '', headers = {}, rolloutPercent = 0, sample = Math.random()) {
+  if (method !== 'GET' || !isPrivateReadEligible(path, search, headers)) return false;
+  const get = (name) => typeof headers?.get === 'function'
+    ? headers.get(name) : headers?.[name] || headers?.[name.toLowerCase()] || null;
+  if (get('x-orion-private-worker-canary') === '1') return true;
+  return Number.isFinite(rolloutPercent) && rolloutPercent > 0 &&
+    sample < Math.min(100, rolloutPercent) / 100;
+}
+
 export function shouldRouteToCoreWorker(method, path, search = '', headers = {}) {
   if (method !== 'GET') return false;
   if (path === '/api/posts/private/posts') {
-    const get = (name) => typeof headers?.get === 'function'
-      ? headers.get(name) : headers?.[name] || headers?.[name.toLowerCase()] || null;
-    const hasJwt = Boolean(get('x-auth-token') || get('authorization')?.startsWith('Bearer ') ||
-      /(?:^|;)\s*orion_session=/.test(get('cookie') || ''));
-    // Explicit, opt-in test path only. Regular private traffic stays on Cloud Run.
-    return get('x-orion-private-worker-canary') === '1' && hasJwt && !get('x-google-auth');
+    // No normal private routing without an explicit rollout decision.
+    return shouldRoutePrivateRead(method, path, search, headers, 0);
   }
   if (/^\/api\/posts\/likes\/[a-f\d]{24}$/i.test(path)) {
     return !hasLegacyCredentials(headers);
@@ -258,7 +284,12 @@ export default {
 
     // Internal service binding: no public workers.dev hop, no shared origin secret.
     // Keep Cloud Run as a per-request fallback if the new database path fails.
-    if (shouldRouteToCoreWorker(request.method, pathname, incomingUrl.search, request.headers) && env.BANANABOOM_CORE) {
+    const rolloutPercent = Number(env.PRIVATE_POST_READ_ROLLOUT_PERCENT || 0);
+    const routeToCore = pathname === '/api/posts/private/posts'
+      ? shouldRoutePrivateRead(request.method, pathname, incomingUrl.search, request.headers, rolloutPercent)
+      : shouldRouteToCoreWorker(request.method, pathname, incomingUrl.search, request.headers);
+
+    if (routeToCore && env.BANANABOOM_CORE) {
       try {
         const workerHeaders = new Headers(request.headers);
         workerHeaders.delete('host');
@@ -274,6 +305,9 @@ export default {
         if (workerResponse.status < 500) {
           const secured = withSecurityHeaders(workerResponse);
           secured.headers.set('x-bananaboom-origin', 'worker');
+          if (pathname === '/api/posts/private/posts') {
+            secured.headers.set('access-control-expose-headers', 'x-orion-private-canary-result, x-bananaboom-origin');
+          }
           if (privateCanary) {
             secured.headers.set('x-orion-private-canary-result', 'worker');
             secured.headers.set('access-control-expose-headers', 'x-orion-private-canary-result, x-bananaboom-origin');

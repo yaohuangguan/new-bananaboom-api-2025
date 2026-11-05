@@ -218,3 +218,30 @@ removed when private reads are fully validated. Ordinary responses are unchanged
 A forged-token canary returned 401 directly from Worker and reported
 `worker`; a canary without a JWT carrier was 401 from Cloud Run and
 reported `not-routed`. No general private-read traffic was migrated.
+
+## Private read 10% gradual production rollout
+
+After a real authenticated browser request was confirmed HTTP 200 with
+`x-bananaboom-origin: worker` and `x-orion-private-canary-result: worker`,
+the Gateway introduced `PRIVATE_POST_READ_ROLLOUT_PERCENT = 10`.
+
+- Sample applies only to authenticated `GET /api/posts/private/posts`.
+- No JWT carrier, `x-google-auth`, unsupported pagination/search, or
+  unrelated routes remain on Cloud Run.
+- `x-orion-private-worker-canary: 1` remains explicit opt-in.
+- Worker independently verifies JWT, MongoDB Session TTL and current role.
+- Worker 5xx and binding errors fall back to Cloud Run.
+- Rollback: set `PRIVATE_POST_READ_ROLLOUT_PERCENT = 0`, deploy Gateway only.
+- Sampling is per request, not a sticky user cohort. Do not infer
+  all authenticated reads use Workers or claim full private cutover.
+- Expand only after query-variant parity, permission downgrade/logout
+  and error/fallback telemetry are verified.
+
+## Private article read full rollout (2026-11-05)
+
+After signed-in browser confirmation of HTTP 200, x-bananaboom-origin=worker,
+and x-orion-private-canary-result=worker, upgraded eligible GET
+/api/posts/private/posts traffic from 10% to 100%. This is **not** all-backend
+cutover: remaining login, writes, private detail, media, backup, and Second Brain
+routes still rely on Cloud Run. Worker 5xx retains Cloud Run fallback. Immediate
+rollback: set PRIVATE_POST_READ_ROLLOUT_PERCENT=0 and redeploy only Gateway.
