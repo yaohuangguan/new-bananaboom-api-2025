@@ -62,3 +62,24 @@ if you need a new Cloud Run revision before the complete migration.
 
 These routes are read-only. Protected post details and all write endpoints stay
 on the existing Node backend until the authentication/permissions adapter is ready.
+
+## Authentication foundation (not yet live on Gateway)
+
+Private listing implementation validates signed HS256 JWTs, checks the matching
+`auth:<token>` record in MongoDB `sessions` (including 30-day expiration),
+loads current `users` and `roles` permissions, then checks `PRIVATE_POST:READ`.
+It accepts legacy `x-auth-token`, Bearer tokens and the `orion_session` cookie.
+
+**IMPORTANT:** `/api/posts/private/posts` intentionally stays routed to
+Cloud Run until the old short JWT key can be safely rotated, the Worker
+`SECRET_JWT` secret is configured, and a real signed-in session is regression
+tested. Do not allowlist this endpoint prematurely. Never commit signing keys.
+
+Public `GET /api/posts` now queries only the author fields used by the
+public UI (`_id`, `displayName`, `photoURL`). The Gateway independently
+redacts both Worker and fallback Cloud Run post-list/detail responses.
+
+## Anonymous public article details
+
+`GET /api/posts/:id` resolves only public Mongo posts and populates minimal
+author fields. Credentialed requests are delegated to Cloud Run for now.

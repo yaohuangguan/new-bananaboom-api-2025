@@ -97,7 +97,7 @@ test('public posts, tags and portfolio reads use only public repository surfaces
   assert.equal(posts.status, 200);
   assert.equal((await posts.json()).pagination.currentPage, 2);
   assert.deepEqual(calls[0], { page: 2, limit: 3, q: 'hello', tag: 'tech' });
-  assert.equal((await fetch(base + '/api/posts/private/posts')).status, 404);
+  assert.equal((await fetch(base + '/api/posts/private/posts')).status, 401);
   assert.equal((await fetch(base + '/api/posts', { method: 'POST' })).status, 405);
   const invalid = await fetch(base + '/api/posts?q=' + 'x'.repeat(101));
   assert.equal(invalid.status, 400);
@@ -108,4 +108,25 @@ test('portfolio defaults reproduce Mongoose for old MongoDB records', () => {
   assert.deepEqual(withProjectDefaults({ _id: 'y', category: 'tools', categories: ['mobile'] }), {
     _id: 'y', category: 'tools', categories: ['mobile']
   });
+});
+
+test('anonymous detail reads use only public post repository and hide missing IDs', async (t) => {
+  const id = '507f1f77bcf86cd799439011';
+  const repo = { ...fakeRepository,
+    publicPostById: async (requested) => requested === id
+      ? { _id: id, name: 'Public', isPrivate: false,
+          user: { _id: 'author', displayName: 'Sam', photoURL: '' } }
+      : null
+  };
+  const app = createApp(repo);
+  await app.ready();
+  const server = createServer(app.callback());
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const base = 'http://127.0.0.1:' + server.address().port;
+  const publicRes = await fetch(base + '/api/posts/' + id);
+  assert.equal(publicRes.status, 200);
+  assert.equal((await publicRes.json()).name, 'Public');
+  assert.equal((await fetch(base + '/api/posts/507f1f77bcf86cd799439012')).status, 404);
+  assert.equal((await fetch(base + '/api/posts/not-valid')).status, 404);
 });

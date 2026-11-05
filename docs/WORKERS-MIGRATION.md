@@ -56,3 +56,27 @@ Restore the last known good `orion-api-gateway` deployment from Wrangler or
 remove the newly allowed paths from `shouldRouteToCoreWorker`. Cloud Run still
 serves all paths and can recover the switched GET endpoints. Disable the
 Cloudflare Service binding only after restoring the gateway paths.
+
+## Phase 3: auth parity + public-post privacy
+
+- Prepare a Worker auth adapter: HS256 verification, session `auth:<token>` DB
+  allowlist and TTL, live user roles + extraPermissions, RBAC.
+- Prepare private-post listing, but keep Cloud Run as its production origin
+  until production JWT key rotation and end-to-end signed-in verification.
+- Cloud Run signing key (checked without revealing it) is shorter than the
+  new Worker's minimum security baseline. Do not copy or rotate in place.
+- Gateway redacts author records on public post list and detail, including
+  Cloud Run fallback responses. Only `_id`, `displayName`, `photoURL` survive.
+- Public post DB projection in the Worker now limits the author fields directly.
+
+## Anonymous public article detail cutover
+
+- `GET /api/posts/:id`, where `:id` is a 24-character Mongo ObjectId,
+  can run on Workers for requests **without** Cookie, Authorization,
+  `x-auth-token` or `x-google-auth` headers.
+- The Mongo query enforces `isPrivate: false`; absent/private posts return
+  404 for anonymous users.
+- Requests carrying credentials stay on Cloud Run; the private listing is
+  intentionally not in the Worker Gateway allowlist.
+- Six distinct real article detail responses were checked in local Wrangler
+  against sanitized production responses, with exact JSON equality.

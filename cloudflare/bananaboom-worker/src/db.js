@@ -13,5 +13,8 @@ export const repository = {
   logs: async () => (await mongo()).logs(),
   publicProjects: async () => (await mongo()).publicProjects(),
   publicTags: async () => (await mongo()).publicTags(),
-  publicPosts: async (options) => (await mongo()).publicPosts(options)
+  publicPosts: async (options) => (await mongo()).publicPosts(options),
+  authorizeSession: async (token) => (await mongo()).authorizeSession(token),
+  privatePosts: async (options) => (await mongo()).privatePosts(options),
+  publicPostById: async (id) => (await mongo()).publicPostById(id)
 };
