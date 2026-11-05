@@ -136,3 +136,13 @@ check for private deletion and an audit/outbox record. **The Gateway does not
 route these mutations to Core** until Socket.IO/Bark notification parity,
 idempotency, 50MB body compatibility and a real-user destructive-operation
 test are complete. See docs/WORKERS-MIGRATION.md.
+
+### Worker audit notifications
+
+The Core Worker provides an authenticated `/api/audit/worker-events` feed
+for administrators. It requires a verified live session and SYSTEM_LOGS:USE.
+Cloudflare Cron invokes a private MongoDB Durable Object RPC every minute
+to deliver pending `post_write_outbox` records to Bark using the optional
+`BARK_URL` secret. The outbox retries notification delivery without
+repeating user writes. Note: atomic transaction/idempotency are not yet
+implemented, so CRUD traffic remains on Cloud Run.

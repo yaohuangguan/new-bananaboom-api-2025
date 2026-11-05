@@ -256,3 +256,18 @@ test('blog CRUD must stay on Cloud Run until audit notifications and Bark delive
   }
   assert.equal(isWorkerLikeMutation('POST', '/api/posts/likes/' + id + '/add'), true);
 });
+
+test('worker audit feed is only eligible for valid legacy session carriers and safe cursors', () => {
+  const path = '/api/audit/worker-events';
+  const cookie = new Headers({ cookie: 'orion_session=signed-session' });
+  assert.equal(shouldRouteToCoreWorker('GET', path, '', cookie), true);
+  assert.equal(shouldRouteToCoreWorker('GET', path, '?after=507f1f77bcf86cd799439011', cookie), true);
+  assert.equal(shouldRouteToCoreWorker('GET', path, '', new Headers()), false);
+  assert.equal(shouldRouteToCoreWorker('POST', path, '', cookie), false);
+  assert.equal(shouldRouteToCoreWorker('GET', path, '', new Headers({
+    cookie: 'orion_session=signed-session', 'x-google-auth': 'google-legacy'
+  })), false);
+  assert.equal(shouldRouteToCoreWorker('GET', path, '?after=invalid', cookie), false);
+  assert.equal(shouldRouteToCoreWorker('GET', path, '?after=507f1f77bcf86cd799439011&after=507f1f77bcf86cd799439012', cookie), false);
+  assert.equal(shouldRouteToCoreWorker('GET', '/api/audit', '', cookie), false);
+});

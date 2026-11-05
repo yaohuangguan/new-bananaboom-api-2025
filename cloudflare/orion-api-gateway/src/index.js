@@ -76,6 +76,17 @@ export function shouldRoutePrivateRead(method, path, search = '', headers = {}, 
 
 export function shouldRouteToCoreWorker(method, path, search = '', headers = {}) {
   if (method !== 'GET') return false;
+  if (path === '/api/audit/worker-events') {
+    const get = (name) => typeof headers?.get === 'function'
+      ? headers.get(name) : headers?.[name] || headers?.[name.toLowerCase()] || null;
+    const hasJwt = Boolean(get('x-auth-token') ||
+      get('authorization')?.startsWith('Bearer ') ||
+      /(?:^|;)\s*orion_session=/.test(get('cookie') || ''));
+    const query = new URLSearchParams(search);
+    const after = query.getAll('after');
+    return hasJwt && !get('x-google-auth') &&
+      after.length <= 1 && (!after.length || /^[a-f0-9]{24}$/i.test(after[0]));
+  }
   if (path === '/api/posts/private/posts') {
     // No normal private routing without an explicit rollout decision.
     return shouldRoutePrivateRead(method, path, search, headers, 0);
