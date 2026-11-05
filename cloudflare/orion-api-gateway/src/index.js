@@ -144,7 +144,8 @@ export function shouldRouteToCoreWorker(method, path, search = '', headers = {})
   // API. Never serve those queries from the public-only MongoDB RPC.
   if (path === '/api/resumes' || path === '/api/resumes/list') {
     const users = query.getAll('user');
-    return users.length <= 1 && (users.length === 0 || users[0].length <= 180);
+    return [...query.keys()].every((key) => key === 'user') &&
+      users.length <= 1 && (users.length === 0 || users[0].length <= 180);
   }
   if (path === '/api/photos') return !search;
   if (path === '/api/menu') {

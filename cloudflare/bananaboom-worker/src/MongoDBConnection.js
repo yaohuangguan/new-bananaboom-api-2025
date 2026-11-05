@@ -79,9 +79,23 @@ export class MongoDBConnection extends DurableObject {
           { _id: resume.user }, { projection: { email: 1 } }
         )
       : null;
-    return JSON.parse(JSON.stringify({
-      ...resume, user: user?.email || (user ? resume.user : null)
-    }));
+    // Mongoose applies schema defaults to legacy MongoDB documents on read.
+    // In particular, older resumes omit interest headings and map styles.
+    const normalized = {
+      ...resume,
+      ...(resume.styleSettings && {
+        styleSettings: { customStyles: {}, ...resume.styleSettings }
+      }),
+      ...(resume.sectionTitles && {
+        sectionTitles: {
+          interest_zh: '兴趣爱好',
+          interest_en: 'Interests',
+          ...resume.sectionTitles
+        }
+      }),
+      user: user?.email || (user ? resume.user : null)
+    };
+    return JSON.parse(JSON.stringify(normalized));
   }
 
   async publicResume(userQuery) {
