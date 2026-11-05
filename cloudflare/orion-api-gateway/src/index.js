@@ -37,6 +37,15 @@ export function isWorkerLikeMutation(method, path) {
     /^\/api\/posts\/likes\/[a-f\d]{24}\/(?:add|remove)$/i.test(path);
 }
 
+// Retire publicly callable shared-secret recovery/verification before Cloud
+// Run gets rebuilt; a valid VIP role is no longer an anonymous password.
+export function isRetiredSecretEndpoint(method, path) {
+  return method === 'POST' && (
+    path === '/api/users/reset-by-secret' ||
+    path === '/api/auth/verify-secret'
+  );
+}
+
 function hasLegacyCredentials(headers) {
   const get = (name) => typeof headers?.get === 'function'
     ? headers.get(name) : headers?.[name] || headers?.[name.toLowerCase()] || null;
@@ -334,6 +343,25 @@ export default {
 
     const limited = await enforceRateLimit(request, env, pathname);
     if (limited) return withSecurityHeaders(limited);
+
+    if (isRetiredSecretEndpoint(request.method, pathname)) {
+      const response = withSecurityHeaders(new Response(JSON.stringify({
+        message: 'Shared admin passphrases are retired. Sign in with a verification code.'
+      }), {
+        status: 410,
+        headers: {
+          'content-type': 'application/json; charset=utf-8',
+          'cache-control': 'no-store'
+        }
+      }));
+      const origin = corsOrigin(request);
+      if (origin) {
+        response.headers.set('access-control-allow-origin', origin);
+        response.headers.set('access-control-allow-credentials', 'true');
+        response.headers.append('vary', 'Origin');
+      }
+      return response;
+    }
 
     const privateCanary = request.method === 'GET' &&
       pathname === '/api/posts/private/posts' &&

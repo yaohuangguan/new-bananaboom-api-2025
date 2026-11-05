@@ -22,7 +22,7 @@ async function populateCommentsManually(comments) {
   });
 
   // B. 查用户
-  const users = await User.find({ _id: { $in: Array.from(userIds) } }).select('displayName photoURL vip');
+  const users = await User.find({ _id: { $in: Array.from(userIds) } }).select('displayName photoURL role');
 
   const userMap = {};
   users.forEach((u) => (userMap[u._id.toString()] = u.toObject()));

@@ -3,7 +3,7 @@ import { jsonBody } from 'openmesh-node/plugins';
 import { repository as mongoRepository } from './db.js';
 import { hydrateR2References } from '../../../utils/r2Reference.js';
 import { authenticateLegacyRequest, canReadPrivatePosts, extractLegacyToken, hasPermission } from './auth.js';
-import { normalizePostInput, redactPostWriteError, matchesAdminSecret } from './postWrites.js';
+import { normalizePostInput, redactPostWriteError } from './postWrites.js';
 
 // Match legacy JSON serialization before applying its response hydration middleware.
 // Otherwise recursively traversing BSON ObjectId/Date would erase their values.
@@ -162,11 +162,6 @@ export function createApp(repository = mongoRepository, options = {}) {
   // These methods are staged *only* in the private Core Worker. The Gateway
   // does NOT forward article CRUD: audit Socket.IO and Bark dispatch must be
   // complete and production-verified before accepting public mutations.
-  const adminSecretProvider = options.adminSecretProvider || (async () => {
-    const { env } = await import('cloudflare:workers');
-    return env.ADMIN_RESET_SECRET;
-  });
-
   const trustedWriteOrigins = new Set([
     'https://samyao.me',
     'https://www.samyao.me',
@@ -246,23 +241,14 @@ export function createApp(repository = mongoRepository, options = {}) {
       ctx.status = 404;
       return { message: 'Post not found' };
     }
+    if (user.role !== 'super_admin') {
+      ctx.status = 403;
+      return { code: 'PERMISSION_DENIED', required: 'super_admin' };
+    }
     const post = await repository.getArticleForDeletion(id);
     if (!post) {
       ctx.status = 404;
       return { message: 'Post not found' };
-    }
-    if (post.isPrivate) {
-      // Never fall back to the legacy hardcoded "orion" passphrase.
-      const adminSecret = await adminSecretProvider();
-      if (typeof adminSecret !== 'string' || adminSecret.length < 16) {
-        ctx.status = 503;
-        return { error: 'Private deletion is not configured' };
-      }
-      const provided = ctx.requestBody?.secretKey;
-      if (!matchesAdminSecret(adminSecret, provided)) {
-        ctx.status = 403;
-        return { message: '暗号错误！删除私有日志需要超级权限。' };
-      }
     }
     const deleted = await repository.deleteArticle(id, user.id, sourceIp(ctx), post.isPrivate);
     if (!deleted) {

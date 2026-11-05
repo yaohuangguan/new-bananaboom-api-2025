@@ -8,17 +8,17 @@ export default async (req, res, next) => {
     }
 
     // 2. 去数据库查询最新的用户状态
-    // 我们只取 vip 字段，提高查询效率
-    const user = await User.findById(req.user.id).select('vip');
+    // 我们只取 role 字段，提高查询效率
+    const user = await User.findById(req.user.id).select('role');
 
-    // 3. 检查用户是否存在以及是否为 VIP
+    // 3. 检查用户是否存在以及是否为 super_admin
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    if (!user.vip) {
+    if (user.role !== 'super_admin') {
       // 403 Forbidden 表示已登录但权限不足
-      return res.status(403).json({ message: 'Access Denied: VIP only' });
+      return res.status(403).json({ message: 'Access Denied: super_admin only' });
     }
 
     // 4. 通过验证，放行

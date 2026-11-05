@@ -1,5 +1,3 @@
-import { createHash, timingSafeEqual } from 'node:crypto';
-
 // Strict, plain-data translation of the legacy Mongoose post write contract.
 // This does not grant authorization; the OpenMesh route verifies live RBAC first.
 export class PostInputError extends Error {
@@ -54,13 +52,4 @@ export function redactPostWriteError(error) {
   }
   // Do not return driver, auth, URI or stack internals to callers.
   return { status: 503, body: { error: 'Article operation status unknown. Check the article before retrying.' } };
-}
-
-
-// Compare fixed-length digests; never exit early based on passphrase characters.
-export function matchesAdminSecret(expected, supplied) {
-  if (typeof expected !== 'string' || expected.length < 16 ||
-    typeof supplied !== 'string') return false;
-  const digest = (value) => createHash('sha256').update(value).digest();
-  return timingSafeEqual(digest(expected), digest(supplied));
 }

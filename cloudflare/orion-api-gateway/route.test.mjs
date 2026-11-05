@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { shouldRouteToCoreWorker, isWorkerLikeMutation } from './src/index.js';
+import { shouldRouteToCoreWorker, isWorkerLikeMutation, isRetiredSecretEndpoint } from './src/index.js';
 
 test('only explicit public read routes use the Worker', () => {
   for (const path of ['/api/homepage', '/api/homepage/likes', '/api/homepage/projects', '/api/homepage/logs', '/api/projects', '/api/menu', '/api/posts', '/api/tags']) {
@@ -270,4 +270,36 @@ test('worker audit feed is only eligible for valid legacy session carriers and s
   assert.equal(shouldRouteToCoreWorker('GET', path, '?after=invalid', cookie), false);
   assert.equal(shouldRouteToCoreWorker('GET', path, '?after=507f1f77bcf86cd799439011&after=507f1f77bcf86cd799439012', cookie), false);
   assert.equal(shouldRouteToCoreWorker('GET', '/api/audit', '', cookie), false);
+});
+
+
+test('retired public shared-secret endpoints are blocked at Gateway before Cloud Run', async () => {
+  const { default: gateway } = await import('./src/index.js');
+  const originalFetch = globalThis.fetch;
+  let upstreamCalls = 0;
+  globalThis.fetch = async () => { upstreamCalls++; return new Response('legacy endpoint'); };
+  const env = {
+    AUTH_LIMITER: { limit: async () => ({ success: true }) },
+    GENERAL_LIMITER: { limit: async () => ({ success: true }) },
+  };
+  try {
+    for (const path of ['/api/users/reset-by-secret', '/api/auth/verify-secret']) {
+      assert.equal(isRetiredSecretEndpoint('POST', path), true);
+      const response = await gateway.fetch(new Request('https://api.samyao.me' + path, {
+        method: 'POST',
+        headers: { origin: 'https://samyao.me', 'content-type': 'application/json' },
+        body: '{}'
+      }), env);
+      assert.equal(response.status, 410);
+      assert.equal(response.headers.get('x-orion-edge'), 'cloudflare');
+      assert.equal(response.headers.get('access-control-allow-origin'), 'https://samyao.me');
+      assert.match((await response.json()).message, /retired/i);
+    }
+    assert.equal(upstreamCalls, 0);
+    assert.equal(isRetiredSecretEndpoint('POST', '/api/auth/send-otp'), false);
+    assert.equal(isRetiredSecretEndpoint('POST', '/api/users/reset-password'), false);
+    assert.equal(isRetiredSecretEndpoint('GET', '/api/users/reset-by-secret'), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

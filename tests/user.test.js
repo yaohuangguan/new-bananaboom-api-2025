@@ -15,7 +15,6 @@ const mockUser = {
   phone: '+8613800000000'
 };
 
-const adminSecret = process.env.ADMIN_RESET_SECRET || 'orion';
 
 /**
  * 辅助函数：获取 User ID
@@ -92,7 +91,7 @@ describe('👤 Users Module Full Coverage', () => {
       const adminId = getUserId(adminRes);
 
       // 提权
-      await User.findByIdAndUpdate(adminId, { role: 'admin' });
+      await User.findByIdAndUpdate(adminId, { role: 'super_admin' });
       // 🔥 关键：重新登录获取 Admin Token
       const token = await loginAndGetToken(adminEmail);
 
@@ -156,19 +155,19 @@ describe('👤 Users Module Full Coverage', () => {
   });
 
   describe('POST /api/users/reset-by-secret', () => {
-    it('Should reset', async () => {
+    it('Rejects the retired unauthenticated shared-secret password reset', async () => {
       await request(app).post('/api/users').send(mockUser);
       const res = await request(app)
         .post('/api/users/reset-by-secret')
-        .send({ email: mockUser.email, newPassword: 'New', secretKey: adminSecret });
-      expect(res.statusCode).toEqual(200);
+        .send({ email: mockUser.email, newPassword: 'NewPassword123', secretKey: 'orion' });
+      expect(res.statusCode).toEqual(410);
     });
   });
 
   // =================================================================
-  // 9. VIP 管理 (需修复 Token 过期问题)
+  // 9. super_admin management; old route names retained as aliases
   // =================================================================
-  describe('VIP Management', () => {
+  describe('super_admin Management', () => {
     it('Should grant VIP', async () => {
       // 1. Target
       const targetRes = await request(app).post('/api/users').send(mockUser);
@@ -186,7 +185,7 @@ describe('👤 Users Module Full Coverage', () => {
       const adminId = getUserId(adminReg);
 
       // 提权 + 🔥 刷新 Token
-      await User.findByIdAndUpdate(adminId, { role: 'admin' });
+      await User.findByIdAndUpdate(adminId, { role: 'super_admin' });
       const adminToken = await loginAndGetToken(adminEmail);
 
       // 3. Action
@@ -203,7 +202,7 @@ describe('👤 Users Module Full Coverage', () => {
       // 1. Target
       const regRes = await request(app).post('/api/users').send(mockUser);
       const targetId = getUserId(regRes);
-      await User.findByIdAndUpdate(targetId, { vip: true });
+      await User.findByIdAndUpdate(targetId, { role: 'super_admin' });
 
       // 2. Admin
       const adminEmail = 'admin@vip.com';
@@ -217,7 +216,7 @@ describe('👤 Users Module Full Coverage', () => {
       const adminId = getUserId(adminReg);
 
       // 提权 + 🔥 刷新 Token
-      await User.findByIdAndUpdate(adminId, { role: 'admin' });
+      await User.findByIdAndUpdate(adminId, { role: 'super_admin' });
       const adminToken = await loginAndGetToken(adminEmail);
 
       // 3. Action
@@ -228,6 +227,65 @@ describe('👤 Users Module Full Coverage', () => {
 
       expect(res.statusCode).toEqual(200);
       expect(res.body.user.vip).toBe(false);
+    });
+  });
+
+  describe('Super admin permissions', () => {
+    it('Rejects ordinary admin attempting to grant super_admin through legacy alias', async () => {
+      await request(app).post('/api/users').send(mockUser);
+      const adminEmail = 'ordinary-admin@example.com';
+      const reg = await request(app).post('/api/users')
+        .send({ ...mockUser, email: adminEmail, phone: undefined });
+      await User.findByIdAndUpdate(getUserId(reg), { role: 'admin' });
+      const token = await loginAndGetToken(adminEmail);
+      const reply = await request(app).put('/api/users/grant-vip')
+        .set('x-auth-token', token).send({ email: mockUser.email });
+      expect(reply.statusCode).toEqual(403);
+    });
+    it('Requires a logged-in super_admin to reset a nonadmin account', async () => {
+      await request(app).post('/api/users').send(mockUser);
+      const unauthorized = await request(app).post('/api/users/reset-password')
+        .send({ email: mockUser.email, newPassword: 'NewPassword123' });
+      expect(unauthorized.statusCode).toEqual(401);
+
+      const adminEmail = 'password-admin@example.com';
+      const reg = await request(app).post('/api/users')
+        .send({ ...mockUser, email: adminEmail, phone: undefined });
+      await User.findByIdAndUpdate(getUserId(reg), { role: 'super_admin' });
+      const token = await loginAndGetToken(adminEmail);
+      const reply = await request(app).post('/api/users/reset-password')
+        .set('x-auth-token', token)
+        .send({ email: mockUser.email, newPassword: 'NewPassword123' });
+      expect(reply.statusCode).toEqual(200);
+      const loggedIn = await loginAndGetToken(mockUser.email, 'NewPassword123');
+      expect(loggedIn).toBeTruthy();
+      // A super_admin must not be able to take over ANOTHER super_admin.
+      const peerEmail = 'peer-admin@example.com';
+      const peer = await request(app).post('/api/users')
+        .send({ ...mockUser, email: peerEmail, phone: undefined });
+      await User.findByIdAndUpdate(getUserId(peer), { role: 'super_admin' });
+      const rejected = await request(app).post('/api/users/reset-password')
+        .set('x-auth-token', token)
+        .send({ email: peerEmail, newPassword: 'AnotherPassword123' });
+      expect(rejected.statusCode).toEqual(403);
+      // Self-password reset remains supported without a shared passphrase.
+      const self = await request(app).post('/api/users/reset-password')
+        .set('x-auth-token', token)
+        .send({ email: adminEmail, newPassword: 'SelfPassword123' });
+      expect(self.statusCode).toEqual(200);
+    });
+  });
+
+  describe('single role authority', () => {
+    it('does not accept a stale persisted vip=true value as super_admin', async () => {
+      const registered = await request(app).post('/api/users').send(mockUser);
+      const userId = getUserId(registered);
+      await User.collection.updateOne({ _id: User.findById ? (await User.findById(userId))._id : userId },
+        { $set: { vip: true, role: 'user' } });
+      const loaded = await User.findById(userId);
+      expect(loaded.role).toEqual('user');
+      expect(loaded.vip).toBe(false);
+      expect(loaded.toJSON().vip).toBe(false);
     });
   });
 

@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import User from '../models/User.js';
+import Session from '../models/Session.js';
+import rateLimit from 'express-rate-limit';
 import bcryptjs from 'bcryptjs';
 import { del } from '../cache/session.js';
 import { getCurrentTime } from '../utils/dayjs.js';
@@ -43,7 +45,7 @@ router.get('/profile', async (req, res) => {
     userObj.permissions = permissionService.getUserMergedPermissions(user);
 
     // 🔥 2. VIP 彩蛋逻辑 (保持原样)
-    if (user.vip) {
+    if (user.role === 'super_admin') {
       userObj.private_token = 'ilovechenfangting';
     }
 
@@ -119,7 +121,7 @@ router.get('/', async (req, res) => {
     }
 
     // 3. 排序逻辑处理
-    const sortBy = req.query.sortBy; // 前端传来的排序字段
+    const sortBy = req.query.sortBy === 'vip' ? 'role' : req.query.sortBy; // 前端传来的排序字段
     const order = req.query.order === 'asc' ? 1 : -1;
 
     let users = [];
@@ -225,7 +227,10 @@ router.get('/', async (req, res) => {
 
     // 4. 返回结果
     res.json({
-      data: users,
+      data: users.map((entry) => {
+        const obj = typeof entry.toObject === 'function' ? entry.toObject() : entry;
+        return { ...obj, vip: obj.role === 'super_admin' };
+      }),
       pagination: {
         currentPage: page,
         limit: limit,
@@ -333,7 +338,7 @@ router.post(
         phone: cleanPhone, // 存入清洗后的手机号
         password, // 暂存明文，下一步加密
         date: getCurrentTime(),
-        vip: false
+        role: 'user'
       });
 
       // 5. 密码加密
@@ -565,57 +570,61 @@ router.put('/fitness-goal', async (req, res) => {
   }
 });
 
-// @route   POST /api/users/reset-by-secret
-router.post('/reset-by-secret', async (req, res) => {
-  const { email, newPassword, secretKey } = req.body;
+// Retired: a shared secret was an unsafe unauthenticated account-reset path.
+router.post('/reset-by-secret', (_req, res) => {
+  res.status(410).json({ message: 'Please sign in with an OTP. This reset method is retired.' });
+});
 
-  if (!email || !newPassword || !secretKey) {
-    return res.status(400).json({
-      message: '请填写邮箱、新密码和超级暗号'
-    });
+// super_admin may reset their own password or a nonadmin account.
+// A super_admin cannot reset another super_admin; guests are denied.
+const adminPasswordResetLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 5,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false
+});
+router.post('/reset-password', adminPasswordResetLimiter, async (req, res) => {
+  if (!req.user?.id) return res.status(401).json({ message: 'Please sign in' });
+  const origin = req.headers.origin;
+  if (origin && ![
+    'https://samyao.me', 'https://www.samyao.me',
+    'https://ps6.space', 'https://www.ps6.space', 'http://localhost:5173'
+  ].includes(origin)) {
+    return res.status(403).json({ message: 'Origin not allowed' });
   }
-
-  const ADMIN_SECRET = process.env.ADMIN_RESET_SECRET || 'orion';
-
-  if (secretKey !== ADMIN_SECRET) {
-    return res.status(403).json({
-      message: '暗号错误！你不是自己人。'
-    });
+  const { email, newPassword } = req.body || {};
+  if (typeof email !== 'string' || !email.trim() ||
+    typeof newPassword !== 'string' || !PASSWORD_REGEX.test(newPassword)) {
+    return res.status(400).json({ message: 'Provide an email and a password of 8+ letters and numbers' });
   }
-
   try {
-    const user = await User.findOne({
-      email
-    });
-    if (!user) {
-      return res.status(404).json({
-        message: '找不到这个邮箱的用户'
-      });
+    const actor = await User.findById(req.user.id).select('role').lean();
+    if (!actor || actor.role !== 'super_admin') {
+      return res.status(403).json({ message: 'Super admin required' });
+    }
+    const target = await User.findOne({ email: email.trim().toLowerCase() });
+    if (!target) return res.status(404).json({ message: 'User not found' });
+    if (String(target._id) !== String(req.user.id) &&
+      (target.role === 'super_admin')) {
+      return res.status(403).json({ message: 'Cannot reset another super_admin' });
     }
 
-    const salt = await bcryptjs.genSalt(10);
-    user.password = await bcryptjs.hash(newPassword, salt);
-
-    await user.save();
-    // 🔥 修复：判空处理，防止未登录时 req.user 报错
-    const operatorId = req.user ? req.user.id : user._id; // 如果没登录，就记录是用户自己重置的
-
+    target.password = await bcryptjs.hash(newPassword, 12);
+    await target.save();
+    // Revoke all previous sessions so a reset cannot leave a captured token active.
+    await Session.deleteMany({ value: String(target._id), key: /^auth:/ });
     logOperation({
-      operatorId: operatorId, // 注意：如果未登录调用此接口，req.user可能不存在，建议判空处理
-      action: 'RESET_BY_SECRET',
-      target: `密码已通过暗号强制重置 [${email}]`,
-      details: {},
+      operatorId: req.user.id,
+      action: 'RESET_PASSWORD_BY_ADMIN',
+      target: String(target._id),
+      details: { performedByAdmin: true },
       ip: req.ip,
       io: req.app.get('socketio')
     });
-
-    res.json({
-      success: true,
-      message: '密码已通过暗号强制重置！请直接登录。'
-    });
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('Server Error');
+    res.json({ success: true, message: 'Password updated. Existing login sessions revoked.' });
+  } catch (error) {
+    console.error('super_admin password reset failed:', error?.name || 'Error');
+    res.status(500).json({ message: 'Password reset failed' });
   }
 });
 
@@ -647,15 +656,15 @@ router.put('/grant-vip', async (req, res) => {
       });
     }
 
-    targetUser.vip = true;
+    targetUser.role = 'super_admin';
     await targetUser.save();
 
-    console.log(`User [${targetUser.displayName}] has been promoted to VIP by [${req.user.name}]`);
+    console.log(`User [${targetUser.displayName}] has been promoted to super_admin by [${req.user.name}]`);
 
     logOperation({
       operatorId: req.user.id,
       action: 'GRANT_VIP',
-      target: `User [${targetUser.displayName}] has been promoted to VIP by [${req.user.name}]`,
+      target: `User [${targetUser.displayName}] has been promoted to super_admin by [${req.user.name}]`,
       details: {},
       ip: req.ip,
       io: req.app.get('socketio')
@@ -703,11 +712,20 @@ router.put('/revoke-vip', async (req, res) => {
       });
     }
 
-    targetUser.vip = false;
+    if (targetUser.role === 'bot') {
+      return res.status(403).json({ message: 'Bot roles cannot be reassigned through this alias' });
+    }
+    if (String(targetUser._id) === String(req.user.id)) {
+      return res.status(403).json({ message: 'You cannot demote yourself via this legacy endpoint' });
+    }
+    if (targetUser.role !== 'super_admin') {
+      return res.status(409).json({ message: 'Target does not have super_admin role' });
+    }
+    targetUser.role = 'user';
     await targetUser.save();
 
     res.json({
-      message: `已成功取消用户 [${targetUser.displayName}] 的 VIP 权限`,
+      message: `已成功取消用户 [${targetUser.displayName}] 的 super_admin 权限`,
       user: {
         id: targetUser._id,
         email: targetUser.email,

@@ -39,11 +39,6 @@ const UserSchema = Schema({
     type: String,
     default: 'https://cdn3.iconfinder.com/data/icons/vector-icons-6/96/256-512.png'
   },
-  vip: {
-    type: Boolean,
-    default: false
-  },
-
   // --- 身体数据 ---
   height: {
     type: Number,
@@ -106,39 +101,12 @@ const UserSchema = Schema({
   }
 });
 
-// =========================================================
-// 🪝 Schema Hook: 自动同步 VIP 和 Role (Async 版)
-// =========================================================
-// 1. 注意：这里用了 async function()
-// 2. 注意：参数里完全不要写 next
-UserSchema.pre('save', async function () {
-  // 1. 机器人跳过
-  if (this.role === 'bot') {
-    return; // 直接 return 即可，不需要 next()
-  }
-
-  // 2. 场景 A: 修改了 Role
-  if (this.isModified('role')) {
-    if (this.role === 'super_admin') {
-      this.vip = true;
-    } else {
-      // 只要不是 super_admin，就强制取消 vip
-      this.vip = false;
-    }
-  }
-
-  // 3. 场景 B: 修改了 VIP (且 Role 没变)
-  else if (this.isModified('vip')) {
-    if (this.vip === true) {
-      this.role = 'super_admin';
-    } else {
-      if (this.role === 'super_admin') {
-        this.role = 'user';
-      }
-    }
-  }
-
-  // 函数结束自动代表成功，不需要调用 next()
+// Transitional read-only compatibility alias. Historical physical VIP
+// values are ignored; role is the single source of privilege.
+UserSchema.virtual('vip').get(function () {
+  return this.role === 'super_admin';
 });
+UserSchema.set('toJSON', { virtuals: true });
+UserSchema.set('toObject', { virtuals: true });
 
 export default model('users', UserSchema);

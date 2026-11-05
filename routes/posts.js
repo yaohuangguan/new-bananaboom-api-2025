@@ -10,6 +10,7 @@ const router = Router();
 
 // 引入依赖
 import Post from '../models/Post.js';
+import User from '../models/User.js';
 import { canReadPost } from '../utils/postAccess.js';
 import logOperation from '../utils/audit.js'; // 审计日志工具
 
@@ -255,18 +256,19 @@ router.put('/:id', async (req, res) => {
  * @desc    删除文章
  */
 router.delete('/:id', async (req, res) => {
-  const { secretKey } = req.body;
-  const ADMIN_SECRET = process.env.ADMIN_RESET_SECRET;
-
   try {
-    const post = await Post.findById(req.params.id);
-    if (!post) return res.status(404).json({ message: 'Post not found' });
-
-    if (post.isPrivate && (!ADMIN_SECRET || secretKey !== ADMIN_SECRET)) {
-      return res.status(403).json({ message: '暗号错误！删除私有日志需要超级权限。' });
+    // The super_admin role is authoritative. Recheck the database
+    // rather than accepting a stale role/permission claim from the JWT.
+    if (!req.user?.id) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+    const actor = await User.findById(req.user.id).select('role').lean();
+    if (!actor || actor.role !== 'super_admin') {
+      return res.status(403).json({ message: 'Super admin required' });
     }
 
-    await Post.findByIdAndDelete(req.params.id);
+    const post = await Post.findByIdAndDelete(req.params.id);
+    if (!post) return res.status(404).json({ message: 'Post not found' });
 
     logOperation({
       operatorId: req.user.id,

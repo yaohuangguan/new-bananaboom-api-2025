@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { SignJWT } from 'jose';
 import { createServer } from 'node:http';
 import { createApp } from '../src/app.js';
-import { normalizePostInput, PostInputError, matchesAdminSecret } from '../src/postWrites.js';
+import { normalizePostInput, PostInputError } from '../src/postWrites.js';
 
 const secret = 'a-long-test-only-secret-used-for-jwt-signing';
 const id = '507f1f77bcf86cd799439011';
@@ -78,56 +78,43 @@ test('CREATE and UPDATE emit proper values and block forged fields',async(t)=>{
   assert.equal(operations.length,2);
 });
 
-test('private DELETE never accepts missing admin secret or old hardcoded default',async(t)=>{
-  const token=await makeToken();let deletes=0;let privatePost=true;
-  const repo={
-    authorizeSession:async()=>writer,
-    getArticleForDeletion:async()=>({_id:article,isPrivate:privatePost,name:'Story'}),
-    deleteArticle:async(...args)=>{deletes++;return {_id:article,isPrivate:args[3]}},
-    publicPosts:async ({page})=>({data:[],pagination:{currentPage:page}}),
-    privatePosts:async ({page})=>({data:[],pagination:{currentPage:page}})
+test('DELETE accepts only live super_admin role, not the obsolete VIP flag or BLOG:MANAGE alone', async (t) => {
+  const token = await makeToken();
+  let role = { ...writer, vip: true };
+  let reads = 0;
+  let deletes = 0;
+  const repo = {
+    authorizeSession: async () => role,
+    getArticleForDeletion: async () => { reads++; return { _id: article, isPrivate: true, name: 'Private' }; },
+    deleteArticle: async () => { deletes++; return { _id: article, isPrivate: true }; },
+    privatePosts: async () => ({ data: [], pagination: { currentPage: 1 } })
   };
-  const {server,base}=await serve(repo);
-  t.after(()=>new Promise(resolve=>server.close(resolve)));
-  const url=base+'/api/posts/'+article+'?page=2';
-  let res=await fetch(url,req('DELETE',{secretKey:'orion'},token));
-  assert.equal(res.status,503);
-  assert.equal(deletes,0);
-  privatePost=false;
-  res=await fetch(url,req('DELETE',{},token));
-  assert.equal(res.status,200);
-  assert.equal((await res.json()).pagination.currentPage,2);
-  assert.equal(deletes,1);
+  const { server, base } = await serve(repo);
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const url = base + '/api/posts/' + article;
+
+  let response = await fetch(url, req('DELETE', { secretKey: 'orion' }, token));
+  assert.equal(response.status, 403);
+  assert.equal(reads, 0, 'Denied callers must not learn article existence');
+  assert.equal(deletes, 0);
+
+  role = { id, role: 'super_admin', permissions: [], vip: false };
+  response = await fetch(url, req('DELETE', {}, token));
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).pagination.currentPage, 1);
+  assert.equal(deletes, 1);
 });
 
-test('private DELETE checks configured secret and errors do not leak Mongo credentials',async(t)=>{
-  const token=await makeToken();let deletes=0;
-  const repo={
-    authorizeSession:async()=>writer,
-    getArticleForDeletion:async()=>({_id:article,isPrivate:true,name:'Private'}),
-    deleteArticle:async()=>{deletes++;throw Error('mongodb+srv://credentials.example')}
+test('DELETE write errors return 503 without exposing internal database info', async (t) => {
+  const token = await makeToken();
+  const repo = {
+    authorizeSession: async () => ({ id, role: 'super_admin', permissions: [] }),
+    getArticleForDeletion: async () => ({ _id: article, isPrivate: true }),
+    deleteArticle: async () => { throw Error('mongodb+srv://internal-credentials'); }
   };
-  const app=createApp(repo,{
-    secretProvider:async()=>secret,
-    adminSecretProvider:async()=> 'correct-strong-private-secret-more-than-16'
-  });
-  await app.ready();const server=createServer(app.callback());
-  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
-  t.after(()=>new Promise(resolve=>server.close(resolve)));
-  const url='http://127.0.0.1:'+server.address().port+'/api/posts/'+article;
-  assert.equal((await fetch(url,req('DELETE',{secretKey:'orion'},token))).status,403);
-  assert.equal(deletes,0);
-  const res=await fetch(url,req('DELETE',{
-    secretKey:'correct-strong-private-secret-more-than-16'
-  },token));
-  assert.equal(res.status,503);
-  assert.equal(deletes,1);
-  assert.doesNotMatch(await res.text(),/mongodb|credentials/i);
-});
-
-
-test('admin secret comparison does not accept prefixes or legacy default', () => {
-  assert.equal(matchesAdminSecret('a-strong-admin-secret-configuration','a-strong-admin-secret-configuration'), true);
-  assert.equal(matchesAdminSecret('a-strong-admin-secret-configuration','a-strong-admin-secret-configuratio'), false);
-  assert.equal(matchesAdminSecret(undefined,'orion'), false);
+  const { server, base } = await serve(repo);
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const response = await fetch(base + '/api/posts/' + article, req('DELETE', {}, token));
+  assert.equal(response.status, 503);
+  assert.doesNotMatch(await response.text(), /mongodb|internal-credentials/);
 });

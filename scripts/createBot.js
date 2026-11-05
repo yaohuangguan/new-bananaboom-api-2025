@@ -36,7 +36,6 @@ const createBot = async () => {
       password: hashedPassword,
       date: new Date().toISOString(),
       role: 'bot', // 🔥 关键：设置角色为 bot
-      vip: true, // 也可以设为 true，代表它拥有高级权限
       photoURL: 'https://cdn-icons-png.flaticon.com/512/4712/4712027.png', // 机器人头像
       height: 175, // 占位数据
       fitnessGoal: 'maintain'
