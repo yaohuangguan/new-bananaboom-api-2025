@@ -164,3 +164,81 @@ test('private canary reports query-store failure only after successful session a
   assert.equal(response.headers.get('x-orion-private-worker-stage'), 'query');
   assert.doesNotMatch(await response.text(), /sensitive query/);
 });
+
+test('authenticated detail handles public, authorized private, revoked and denied sessions', async (t) => {
+  const publicId = '507f1f77bcf86cd799439011';
+  const privateId = '507f1f77bcf86cd799439012';
+  const token = await sign();
+  let liveUser = { id, role: 'user', permissions: ['PRIVATE_POST:READ'] };
+  const calls = [];
+  const repo = {
+    authorizeSession: async (input) => input === token ? liveUser : null,
+    publicPostById: async (postId) => {
+      calls.push('public:' + postId);
+      return postId === publicId
+        ? { _id: publicId, isPrivate: false, name: 'Public article' } : null;
+    },
+    privatePostById: async (postId) => {
+      calls.push('private:' + postId);
+      return postId === privateId
+        ? { _id: privateId, isPrivate: true, name: 'Private journal' } : null;
+    }
+  };
+  const { server, url } = await serverFor(repo);
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+
+  assert.equal((await fetch(url + '/api/posts/' + privateId)).status, 404);
+  assert.equal((await fetch(url + '/api/posts/' + publicId)).status, 200);
+  assert.equal((await fetch(url + '/api/posts/' + privateId, {
+    headers: { cookie: 'orion_session=' + token }
+  })).status, 200);
+  assert.equal(calls.filter((x) => x === 'private:' + privateId).length, 1);
+
+  liveUser = { id, role: 'user', permissions: [] };
+  assert.equal((await fetch(url + '/api/posts/' + privateId, {
+    headers: { authorization: 'Bearer ' + token }
+  })).status, 404);
+  assert.equal(calls.filter((x) => x === 'private:' + privateId).length, 1,
+    'private repository must not be queried for unauthorized users');
+
+  liveUser = null;
+  assert.equal((await fetch(url + '/api/posts/' + privateId, {
+    headers: { 'x-auth-token': token }
+  })).status, 404);
+  assert.equal((await fetch(url + '/api/posts/' + publicId, {
+    headers: { 'x-auth-token': token }
+  })).status, 200);
+  assert.equal((await fetch(url + '/api/posts/' + publicId, {
+    headers: { 'x-auth-token': token + 'corrupted' }
+  })).status, 401);
+});
+
+test('authenticated detail allows live super_admin and safely falls back on database errors', async (t) => {
+  const privateId = '507f1f77bcf86cd799439012';
+  const token = await sign();
+  let fail = false;
+  const repo = {
+    authorizeSession: async () => ({ id, role: 'super_admin', permissions: [] }),
+    publicPostById: async () => {
+      if (fail) throw new Error('private db details');
+      return null;
+    },
+    privatePostById: async () => ({
+      _id: privateId, name: 'Private', isPrivate: true,
+      user: { _id: 'author', displayName: 'Sam', photoURL: '' }
+    })
+  };
+  const { server, url } = await serverFor(repo);
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const permitted = await fetch(url + '/api/posts/' + privateId, {
+    headers: { authorization: 'Bearer ' + token }
+  });
+  assert.equal(permitted.status, 200);
+  assert.equal((await permitted.json()).isPrivate, true);
+  fail = true;
+  const failed = await fetch(url + '/api/posts/' + privateId, {
+    headers: { authorization: 'Bearer ' + token }
+  });
+  assert.equal(failed.status, 503);
+  assert.doesNotMatch(await failed.text(), /private db details/);
+});

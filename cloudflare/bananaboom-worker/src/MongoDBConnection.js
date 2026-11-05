@@ -86,6 +86,27 @@ export class MongoDBConnection extends DurableObject {
     return JSON.parse(JSON.stringify(post));
   }
 
+  async privatePostById(id) {
+    // Called only AFTER the OpenMesh route has checked the live session and
+    // PRIVATE_POST:READ permission. Always constrain the DB query to private.
+    if (!/^[a-f0-9]{24}$/i.test(id)) return null;
+    await this.client.connect();
+    const db = this.client.db();
+    const post = await db.collection('posts').findOne({
+      _id: new ObjectId(id),
+      isPrivate: true
+    });
+    if (!post) return null;
+    if (post.user) {
+      const user = await db.collection('users').findOne(
+        { _id: post.user },
+        { projection: { _id: 1, displayName: 1, photoURL: 1 } }
+      );
+      post.user = user || null;
+    }
+    return JSON.parse(JSON.stringify(post));
+  }
+
   async publicPostById(id) {
     // A public detail response must never fetch a private post by ID.
     if (!/^[a-f0-9]{24}$/i.test(id)) return null;

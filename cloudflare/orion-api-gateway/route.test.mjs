@@ -27,14 +27,14 @@ test('authenticated or invalid list requests remain on original Cloud Run', () =
   assert.equal(shouldRouteToCoreWorker('GET', '/api/posts/507f1f77bcf86cd799439011'), true);
 });
 
-test('public post detail only goes to Worker for anonymous readers', () => {
+test('post detail routes through Worker for legacy session auth and anonymous readers', () => {
   const detail = '/api/posts/507f1f77bcf86cd799439011';
   assert.equal(shouldRouteToCoreWorker('GET', detail), true);
   assert.equal(shouldRouteToCoreWorker('HEAD', detail), false);
-  assert.equal(shouldRouteToCoreWorker('GET', detail, '', new Headers({ cookie: 'orion_session=token' })), false);
-  assert.equal(shouldRouteToCoreWorker('GET', detail, '', new Headers({ cookie: 'other=one; orion_session=token' })), false);
-  assert.equal(shouldRouteToCoreWorker('GET', detail, '', new Headers({ authorization: 'Bearer token' })), false);
-  assert.equal(shouldRouteToCoreWorker('GET', detail, '', new Headers({ 'x-auth-token': 'token' })), false);
+  assert.equal(shouldRouteToCoreWorker('GET', detail, '', new Headers({ cookie: 'orion_session=token' })), true);
+  assert.equal(shouldRouteToCoreWorker('GET', detail, '', new Headers({ cookie: 'other=one; orion_session=token' })), true);
+  assert.equal(shouldRouteToCoreWorker('GET', detail, '', new Headers({ authorization: 'Bearer token' })), true);
+  assert.equal(shouldRouteToCoreWorker('GET', detail, '', new Headers({ 'x-auth-token': 'token' })), true);
   assert.equal(shouldRouteToCoreWorker('GET', detail, '', new Headers({ 'x-google-auth': '{}' })), false);
   assert.equal(shouldRouteToCoreWorker('GET', '/api/posts/private/posts'), false);
   assert.equal(shouldRouteToCoreWorker('GET', '/api/posts/507f1f77bcf86cd799439011/stuff'), false);

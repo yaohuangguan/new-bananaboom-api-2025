@@ -245,3 +245,29 @@ and x-orion-private-canary-result=worker, upgraded eligible GET
 cutover: remaining login, writes, private detail, media, backup, and Second Brain
 routes still rely on Cloud Run. Worker 5xx retains Cloud Run fallback. Immediate
 rollback: set PRIVATE_POST_READ_ROLLOUT_PERCENT=0 and redeploy only Gateway.
+
+## Authenticated article detail on Workers
+
+The existing public-only `GET /api/posts/:id` path now also supports
+authenticated private detail reads for the legacy JWT-bearing clients.
+The Gateway still routes `x-google-auth` to Cloud Run.
+
+- A malformed or expired signed token is 401 (as in the legacy Soft Auth).
+- Missing/revoked live MongoDB Session is a guest: public post 200, private 404.
+- Only a current `PRIVATE_POST:READ` role/extraPermission or super_admin
+  can fetch an article with `isPrivate=true`. Others get a uniform 404,
+  indistinguishable from a missing article.
+- Auth/DB failures return 503 within the Worker so the Gateway can fall back
+  to Cloud Run; no error messages contain secret material or post contents.
+- The MongoDB Durable Object only selects a private post by an exact 24-digit
+  ObjectId AND `isPrivate: true`; its populated author fields remain
+  limited to `_id,displayName,photoURL` to preserve the Gateway's public
+  data privacy contract.
+- This is a GET-only route. Article writing, login, image uploads and
+  Second Brain continue to depend on Cloud Run.
+- If the new Durable Object RPC is not immediately available, use a controlled
+  `wrangler versions deploy <version>@100% --durable-objects-code-update-mode immediate`
+  before checking production.
+- Six public post detail JSON summaries were captured before cutover and must
+  match afterwards. An authenticated private detail still needs a real
+  signed-in UI regression check; local JWT/RBAC tests alone do not replace it.

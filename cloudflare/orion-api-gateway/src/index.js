@@ -79,9 +79,12 @@ export function shouldRouteToCoreWorker(method, path, search = '', headers = {})
     return !hasLegacyCredentials(headers);
   }
   if (/^\/api\/posts\/[a-f\d]{24}$/i.test(path)) {
-    // Existing identity semantics are preserved by routing credentialed readers
-    // to Cloud Run; the Worker serves only isPrivate=false articles.
-    return !hasLegacyCredentials(headers);
+    // The Worker now verifies live JWT/Session/RBAC for authenticated details.
+    // Keep the separate legacy Google identity header on Cloud Run.
+    const get = (name) => typeof headers?.get === 'function'
+      ? headers.get(name) : headers?.[name] || headers?.[name.toLowerCase()] || null;
+    return !get('x-google-auth') &&
+      (!get('authorization') || get('authorization').startsWith('Bearer '));
   }
   if (!MIGRATED_PUBLIC_READ_PATHS.has(path)) return false;
   const query = new URLSearchParams(search);
