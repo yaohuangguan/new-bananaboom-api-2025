@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { createApp } from '../src/app.js';
 import { ObjectId } from 'mongodb';
+import { withProjectDefaults } from '../src/projectDefaults.js';
 
 const homepages = [{ _id: 'home1', likes: 10 }];
 const projects = [{ _id: 'project1', title_en: 'Example' }];
@@ -35,7 +36,7 @@ test('OpenMesh public routes preserve legacy response shapes', async (t) => {
     assert.equal(response.status, 200, path);
     assert.deepEqual(await response.json(), expected, path);
   }
-  assert.equal((await fetch(base + '/api/posts', { method: 'POST' })).status, 404);
+  assert.equal((await fetch(base + '/api/posts', { method: 'POST' })).status, 405);
 });
 
 test('BSON values and persisted R2 references survive response hydration', async (t) => {
@@ -68,4 +69,43 @@ test('BSON values and persisted R2 references survive response hydration', async
     coverImage: 'https://assets.samyao.me/uploads/test-cover.png',
     createdAt: '2026-01-01T00:00:00.000Z'
   }]);
+});
+
+test('public posts, tags and portfolio reads use only public repository surfaces', async (t) => {
+  const calls = [];
+  const repository = {
+    ...fakeRepository,
+    publicProjects: async () => [{ _id: 'project-visible', isVisible: true }],
+    publicTags: async () => [{ name: 'tech', count: 2 }],
+    publicPosts: async (options) => {
+      calls.push(options);
+      return {
+        data: [{ _id: 'post1', isPrivate: false }],
+        pagination: { currentPage: options.page, perPage: options.limit, totalPosts: 1, totalPages: 1 }
+      };
+    }
+  };
+  const app = createApp(repository);
+  await app.ready();
+  const server = createServer(app.callback());
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const base = 'http://127.0.0.1:' + server.address().port;
+  assert.deepEqual(await (await fetch(base + '/api/projects')).json(), [{ _id: 'project-visible', isVisible: true }]);
+  assert.deepEqual(await (await fetch(base + '/api/tags')).json(), [{ name: 'tech', count: 2 }]);
+  const posts = await fetch(base + '/api/posts?page=2&limit=3&tag=tech&q=hello');
+  assert.equal(posts.status, 200);
+  assert.equal((await posts.json()).pagination.currentPage, 2);
+  assert.deepEqual(calls[0], { page: 2, limit: 3, q: 'hello', tag: 'tech' });
+  assert.equal((await fetch(base + '/api/posts/private/posts')).status, 404);
+  assert.equal((await fetch(base + '/api/posts', { method: 'POST' })).status, 405);
+  const invalid = await fetch(base + '/api/posts?q=' + 'x'.repeat(101));
+  assert.equal(invalid.status, 400);
+});
+
+test('portfolio defaults reproduce Mongoose for old MongoDB records', () => {
+  assert.deepEqual(withProjectDefaults({ _id: 'x' }), { _id: 'x', category: 'web', categories: [] });
+  assert.deepEqual(withProjectDefaults({ _id: 'y', category: 'tools', categories: ['mobile'] }), {
+    _id: 'y', category: 'tools', categories: ['mobile']
+  });
 });
