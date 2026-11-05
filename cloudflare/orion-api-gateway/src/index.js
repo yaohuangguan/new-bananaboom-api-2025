@@ -17,6 +17,19 @@ const ALLOWED_ORIGIN_SUFFIXES = [
 // Mutable Orion content is intentionally not edge-cached.
 // Correctness after create/update/delete is more important than saving a small number
 // of Cloud Run reads. Add routes here only when their staleness contract is explicit.
+const MIGRATED_PUBLIC_READ_PATHS = new Set([
+  '/api/homepage',
+  '/api/homepage/likes',
+  '/api/homepage/projects',
+  '/api/homepage/logs'
+]);
+
+// Explicit path allowlist prevents private, write and admin routes from
+// accidentally bypassing the legacy Cloud Run auth and permission checks.
+export function shouldRouteToCoreWorker(method, path) {
+  return method === 'GET' && MIGRATED_PUBLIC_READ_PATHS.has(path);
+}
+
 const PUBLIC_CACHE_RULES = [];
 
 const EXPENSIVE_PREFIXES = [
@@ -188,6 +201,38 @@ export default {
 
     const limited = await enforceRateLimit(request, env, pathname);
     if (limited) return withSecurityHeaders(limited);
+
+    // Internal service binding: no public workers.dev hop, no shared origin secret.
+    // Keep Cloud Run as a per-request fallback if the new database path fails.
+    if (shouldRouteToCoreWorker(request.method, pathname) && env.BANANABOOM_CORE) {
+      try {
+        const workerHeaders = new Headers(request.headers);
+        workerHeaders.delete('host');
+        workerHeaders.delete('x-forwarded-host');
+        workerHeaders.delete('x-orion-edge-secret');
+        const workerRequest = new Request(request.url, {
+          method: request.method,
+          headers: workerHeaders,
+          redirect: 'manual'
+        });
+        const workerResponse = await env.BANANABOOM_CORE.fetch(workerRequest);
+        if (workerResponse.status < 500) {
+          const secured = withSecurityHeaders(workerResponse);
+          secured.headers.set('x-bananaboom-origin', 'worker');
+          secured.headers.set('cache-control', 'no-store');
+          const allowedOrigin = corsOrigin(request);
+          if (allowedOrigin) {
+            secured.headers.set('access-control-allow-origin', allowedOrigin);
+            secured.headers.set('access-control-allow-credentials', 'true');
+            secured.headers.append('vary', 'Origin');
+          }
+          return secured;
+        }
+        console.error('BananaBoom Worker read returned', workerResponse.status, 'falling back to Cloud Run');
+      } catch (error) {
+        console.error('BananaBoom Worker read failed; falling back to Cloud Run', error?.message);
+      }
+    }
 
     const originUrl = new URL(pathname + incomingUrl.search, env.ORIGIN_URL);
     const headers = new Headers(request.headers);
