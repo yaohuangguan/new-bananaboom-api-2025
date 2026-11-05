@@ -3,19 +3,16 @@ import { vaultOAuthRouter } from './services/brain/oauth.js';
 import express, { json, urlencoded } from 'express';
 import connectDB from './config/db.js';
 import { initFirebase } from './services/firebaseAdmin.js';
-import { createServer } from 'http';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import compression from 'compression';
-import { Server } from 'socket.io';
 
 // ==========================================
 // 📦 引入自定义模块
 // ==========================================
 import permissionService from './services/permissionService.js';
 import corsConfig from './config/corsConfig.js';
-import socketHandler from './socket/socket.js';
 
 
 // 🔥 引入安检中间件 (核心改动)
@@ -64,7 +61,6 @@ import debaterRoutes from './routes/debater.js';
 import rpgRoutes from './routes/rpg.js';
 import drawingRoutes from './routes/drawing.js';
 import uploadRoutes from './routes/upload.js';
-import paymentsRoutes from './routes/payments.js';
 
 // 👇👇👇【新增】全局代理配置 (仅开发环境生效) 👇👇👇
 import { setGlobalDispatcher, ProxyAgent } from 'undici';
@@ -87,19 +83,7 @@ if (process.env.NODE_ENV !== 'production' && PROXY_URL) {
 // 🚀 初始化 App & Server
 // ==========================================
 const app = express();
-const server = createServer(app);
-
-// 1. 初始化 Socket.io
-const io = new Server(server, {
-  cors: {
-    origin: '*', // 生产环境建议改为具体的域名数组
-    methods: ['GET', 'POST']
-  }
-});
-
-// 2. 全局挂载 Socket (方便在 Controller 里使用 req.app.get('socketio'))
-app.set('socketio', io);
-
+// Native HTTP server only; Socket.IO human chat is retired.
 // 3. 信任反向代理 (部署到云平台/Nginx 后必需)
 app.set('trust proxy', 1);
 
@@ -129,16 +113,13 @@ app.options(/.*/, cors(corsConfig));
 app.use(cors(corsConfig));
 
 // Optional origin lock: enabled only when ORION_EDGE_SECRET is configured.
-// Exempts Stripe webhook and scheduler trigger so existing external callbacks keep working.
+// Legacy scheduler exception is retained until the Worker Cron migration.
 app.use('/api', originEdgeGuard);
 // Vault owns its bounded parsers and avoids public R2 response hydration.
 app.use(/^\/(?:authorize|token|register|revoke)(?:\/|$)|^\/\.well-known\/oauth-/, originEdgeGuard);
 app.use(vaultOAuthRouter());
 app.use('/api/brain/sync', brainSyncRouter());
 app.use('/api/brain', auth, globalGuard, finishBrainRouter(brainRoutes));
-
-// 🛡️ Stripe Webhook 专属通道 (必须在 bodyParser 和 auth 网关前解析出原始 Buffer 数据)
-app.use('/api/payments/webhook', express.raw({ type: 'application/json' }));
 
 // Body 解析 (支持大文件上传)
 app.use(json({ limit: '50mb' }));
@@ -159,11 +140,6 @@ app.use((_req, res, next) => {
   res.setHeader('X-Frame-Options', 'Deny');
   next();
 });
-
-// ==========================================
-// 🔌 启动 Socket & 任务调度
-// ==========================================
-socketHandler(io); // 启动 Socket 监听
 
 // ==========================================
 // 🌐 路由配置 (Routes)
@@ -222,7 +198,6 @@ app.use('/api/debater', debaterRoutes);
 app.use('/api/rpg', rpgRoutes);
 app.use('/api/drawing', drawingRoutes);
 app.use('/api/upload', uploadRoutes);
-app.use('/api/payments', paymentsRoutes);
 
 // ==========================================
 // 🏁 启动服务器
@@ -241,7 +216,7 @@ const startServer = async () => {
     await permissionService.load();
 
     // 3. 启动 HTTP 服务
-    server.listen(PORT, () => console.log(`🚀 Server listening on port ${PORT}`));
+    app.listen(PORT, () => console.log(`🚀 Server listening on port ${PORT}`));
   } catch (error) {
     console.error('❌ Failed to start server:', error);
     process.exit(1);

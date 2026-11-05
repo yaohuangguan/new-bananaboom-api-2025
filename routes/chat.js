@@ -2,7 +2,6 @@ import { Router } from 'express';
 const router = Router();
 import Chat from '../models/Chat.js';
 import Conversation from '../models/Conversation.js'; // 🔥 引用新模型
-import { Types } from 'mongoose';
 import { generateTitle } from '../utils/aiProvider.js';
 
 // =========================================================================
@@ -24,106 +23,8 @@ router.use((req, res, next) => {
   next();
 });
 
-// =========================================================================
-// 🛸 第一部分：原有星际聊天室接口 (LEGACY - 保持不动) 🛸
-// =========================================================================
-
-/**
- * @route   GET api/chat/public/:roomName
- * @desc    获取公共聊天室/群聊的历史记录
- * @access  Private
- */
-router.get('/public/:roomName', async (req, res) => {
-  try {
-    const { roomName } = req.params;
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
-    const skip = (page - 1) * limit;
-
-    const query = {
-      room: roomName,
-      toUser: null
-    };
-
-    const messages = await Chat.find(query)
-      .sort({
-        createdDate: -1
-      })
-      .skip(skip)
-      .limit(limit);
-
-    res.json(messages.reverse());
-  } catch (err) {
-    console.error('获取群聊记录失败:', err);
-    res.status(500).json({
-      msg: 'Server Error'
-    });
-  }
-});
-
-/**
- * @route   GET api/chat/private/:targetUserId
- * @desc    获取私聊历史记录
- * @access  Private
- */
-router.get('/private/:targetUserId', async (req, res) => {
-  try {
-    const targetUserId = req.params.targetUserId;
-    const currentUserId = (req.user && req.user.id) || req.userId;
-
-    if (!currentUserId)
-      return res.status(401).json({
-        msg: '用户未授权'
-      });
-    if (!Types.ObjectId.isValid(targetUserId))
-      return res.status(400).json({
-        msg: '无效ID'
-      });
-
-    const myId = new Types.ObjectId(currentUserId);
-    const targetId = new Types.ObjectId(targetUserId);
-
-    const query = {
-      room: 'private',
-      $or: [
-        {
-          'user.id': myId,
-          toUser: targetId
-        },
-        {
-          'user.id': targetId,
-          toUser: myId
-        }
-      ]
-    };
-
-    const messages = await Chat.find(query)
-      .sort({
-        createdDate: -1
-      })
-      .populate('toUser', 'displayName photoURL')
-      .populate('user.id', 'displayName photoURL');
-
-    // 数据清洗：确保 displayName 正确显示
-    const formattedMessages = messages.map((msg) => {
-      const m = msg.toObject();
-      if (m.user && m.user.id) {
-        const senderInfo = m.user.id;
-        m.user.displayName = senderInfo.displayName;
-        m.user.photoURL = senderInfo.photoURL;
-        m.user.id = senderInfo._id;
-      }
-      return m;
-    });
-
-    res.json(formattedMessages.reverse());
-  } catch (err) {
-    console.error('❌ 私聊接口报错:', err);
-    res.status(500).json({
-      msg: 'Server Error'
-    });
-  }
-});
+// Human chat and private messages have been retired. The /ai/* handlers
+// below remain in use by Orion's personal AI chat UI.
 
 // =========================================================================
 // 🧠 第二部分：AI 会话管理接口 (NEW & UPDATED) 🧠

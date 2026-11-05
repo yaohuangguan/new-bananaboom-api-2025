@@ -418,3 +418,41 @@ test('public resumes and photos GETs use Worker with validated narrow query allo
   assert.equal(shouldRouteToCoreWorker('GET', '/api/resumes/export-pdf'), false);
   assert.equal(shouldRouteToCoreWorker('GET', '/api/resumes/users'), false);
 });
+
+
+test('retired human chat/Stripe paths never reach Cloud Run; AI chat stays available', async () => {
+  const { default: gateway, isRetiredOrionFeature } = await import('./src/index.js');
+  const originalFetch = globalThis.fetch;
+  let upstreamCalls = 0;
+  globalThis.fetch = async () => {
+    upstreamCalls++;
+    return new Response('Unexpected Cloud Run call', { status: 200 });
+  };
+  const env = {
+    ORIGIN_URL: 'https://upstream.example',
+    GENERAL_LIMITER: { limit: async () => ({ success: true }) },
+    WRITE_LIMITER: { limit: async () => ({ success: true }) }
+  };
+  try {
+    for (const [method, path] of [
+      ['GET', '/socket.io/'], ['GET', '/socket.io'],
+      ['GET', '/api/chat/public/general'], ['GET', '/api/chat/private/123'],
+      ['POST', '/api/payments/create-checkout-session'],
+      ['POST', '/api/payments/webhook']
+    ]) {
+      assert.equal(isRetiredOrionFeature(path), true);
+      const response = await gateway.fetch(new Request('https://api.samyao.me' + path, {
+        method,
+        headers: { origin: 'https://samyao.me' }
+      }), env);
+      assert.equal(response.status, 410, path);
+      assert.equal(response.headers.get('access-control-allow-origin'), 'https://samyao.me');
+      assert.equal(response.headers.get('cache-control'), 'no-store');
+    }
+    assert.equal(upstreamCalls, 0);
+    for (const path of ['/api/chat/ai', '/api/chat/ai/save', '/api/chat/ai/conversations',
+      '/api/comments', '/api/brain/sync/v1/search']) {
+      assert.equal(isRetiredOrionFeature(path), false);
+    }
+  } finally { globalThis.fetch = originalFetch; }
+});
