@@ -47,6 +47,87 @@ export class MongoDBConnection extends DurableObject {
     return this.#read('logs', { sort: { version: 1 } });
   }
 
+  publicPhotos() {
+    return this.#read('photos', { sort: { order: 1 } });
+  }
+
+  async #resumeOwner(db, userQuery) {
+    if (!userQuery || typeof userQuery !== 'string') return null;
+    if (/^[a-f0-9]{24}$/i.test(userQuery)) return new ObjectId(userQuery);
+    // Replicate the original slug-prefix and email/phone lookup, while
+    // escaping regex metacharacters to avoid unwanted broad matches.
+    const at = userQuery.indexOf('@');
+    const name = (at !== -1
+      ? (userQuery.indexOf('-', at) === -1
+        ? userQuery : userQuery.slice(0, userQuery.indexOf('-', at)))
+      : userQuery.split('-')[0]);
+    const specials = new Set(['\\', '.', '*', '+', '?', '^', '$', '(', ')', '[', ']', '{', '}', '|']);
+    const escaped = [...name].map((ch) => specials.has(ch) ? String.fromCharCode(92) + ch : ch).join('');
+    const user = await db.collection('users').findOne({
+      $or: [
+        { email: { $regex: '^' + escaped + '$', $options: 'i' } },
+        { phone: name }
+      ]
+    }, { projection: { _id: 1 } });
+    return user?._id ?? null;
+  }
+
+  async #publicResumeUser(db, resume) {
+    if (!resume) return null;
+    const user = resume.user
+      ? await db.collection('users').findOne(
+          { _id: resume.user }, { projection: { email: 1 } }
+        )
+      : null;
+    return JSON.parse(JSON.stringify({
+      ...resume, user: user?.email || (user ? resume.user : null)
+    }));
+  }
+
+  async publicResume(userQuery) {
+    await this.client.connect();
+    const db = this.client.db();
+    let slug = userQuery;
+    if (!slug) {
+      const homepage = await db.collection('resumes').findOne({ isHomepage: true });
+      slug = homepage?.slug || 'yaob@miamioh.edu';
+    }
+    let resume = await db.collection('resumes').findOne({ slug });
+    if (!resume) {
+      const owner = await this.#resumeOwner(db, slug);
+      if (owner) {
+        resume = await db.collection('resumes').findOne({
+          user: owner, isHomepage: true
+        });
+      }
+    }
+    if (!resume) return null;
+    return this.#publicResumeUser(db, resume);
+  }
+
+  async publicResumeList(userQuery) {
+    await this.client.connect();
+    const db = this.client.db();
+    let owner = null;
+    if (!userQuery) {
+      const homepage = await db.collection('resumes').findOne({ isHomepage: true });
+      owner = homepage?.user || await this.#resumeOwner(db, 'yaob@miamioh.edu');
+    } else {
+      owner = await this.#resumeOwner(db, userQuery);
+    }
+    if (!owner) return [];
+    const rows = await db.collection('resumes').find(
+      { user: owner },
+      { projection: { slug: 1, title: 1, user: 1, isHomepage: 1, createdAt: 1 } }
+    ).sort({ createdAt: 1 }).toArray();
+    const user = await db.collection('users').findOne(
+      { _id: owner }, { projection: { email: 1 } }
+    );
+    return JSON.parse(JSON.stringify(rows.map((resume) => ({
+      ...resume, user: user?.email || (user ? resume.user : null)
+    }))));
+  }
+
   async authorizeSession(token) {
     // MongoDB TTL is eventually consistent. Reject sessions older than 30 days
     // even if the background TTL cleanup has not removed them yet.

@@ -452,3 +452,19 @@ database changes. See scripts/test-crud-replset.mjs.
 This is not full API migration or permission to shut down Cloud Run.
 See docs/CLOUD-RUN-RETIREMENT-READINESS.md for outstanding subsystems
 and retirement gates.
+
+## Phase 10: public resume and photo reads
+
+Moved three additional public GET endpoints to native Worker MongoDB RPCs:
+GET /api/resumes, GET /api/resumes/list, GET /api/photos. No related
+POST/PUT/DELETE methods are migrated in this phase. The resume query path
+resolves the public homepage slug and supported user parameter using the
+same legacy fallback rules, populating only the public owner email.
+The photo list uses the existing order ascending sort.
+
+The Gateway keeps a narrow URL and query allowlist. Suspicious duplicate
+or excessively long resume user parameters remain with Cloud Run.
+Authenticated or external callbacks are not changed. A pre-cutover JSON
+SHA-256 baseline for five real production requests was recorded locally
+for comparison after deployment. The baseline contains hashes only and
+is removed when verification finishes.
