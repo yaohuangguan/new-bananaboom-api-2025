@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { shouldRouteToCoreWorker } from './src/index.js';
+import { shouldRouteToCoreWorker, isWorkerLikeMutation } from './src/index.js';
 
 test('only explicit public read routes use the Worker', () => {
   for (const path of ['/api/homepage', '/api/homepage/likes', '/api/homepage/projects', '/api/homepage/logs', '/api/projects', '/api/menu', '/api/posts', '/api/tags']) {
@@ -241,4 +241,18 @@ test('blog like limit preserves 30/IP/min bucket and 429 response', async () => 
   ), env);
   assert.equal(reply.status, 429);
   assert.match((await reply.json()).message, /手速太快/);
+});
+
+test('blog CRUD must stay on Cloud Run until audit notifications and Bark delivery are migrated', () => {
+  const id = '507f1f77bcf86cd799439011';
+  for (const [method, path] of [
+    ['POST', '/api/posts'],
+    ['PUT', '/api/posts/' + id],
+    ['DELETE', '/api/posts/' + id],
+    ['PATCH', '/api/posts/' + id]
+  ]) {
+    assert.equal(shouldRouteToCoreWorker(method, path), false);
+    assert.equal(isWorkerLikeMutation(method, path), false);
+  }
+  assert.equal(isWorkerLikeMutation('POST', '/api/posts/likes/' + id + '/add'), true);
 });

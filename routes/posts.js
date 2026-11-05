@@ -256,13 +256,13 @@ router.put('/:id', async (req, res) => {
  */
 router.delete('/:id', async (req, res) => {
   const { secretKey } = req.body;
-  const ADMIN_SECRET = process.env.ADMIN_RESET_SECRET || 'orion';
+  const ADMIN_SECRET = process.env.ADMIN_RESET_SECRET;
 
   try {
     const post = await Post.findById(req.params.id);
     if (!post) return res.status(404).json({ message: 'Post not found' });
 
-    if (post.isPrivate && secretKey !== ADMIN_SECRET) {
+    if (post.isPrivate && (!ADMIN_SECRET || secretKey !== ADMIN_SECRET)) {
       return res.status(403).json({ message: '暗号错误！删除私有日志需要超级权限。' });
     }
 
