@@ -144,6 +144,12 @@ export class MongoDBConnection extends DurableObject {
     }));
   }
 
+  publicMenu({ category } = {}) {
+    const filter = { isActive: true };
+    if (category) filter.category = category;
+    return this.#read('menus', { filter, sort: { createdAt: -1 } });
+  }
+
   async publicProjects() {
     const rows = await this.#read('projects', {
       filter: { isVisible: true },

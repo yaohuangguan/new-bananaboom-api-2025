@@ -43,6 +43,22 @@ export function createApp(repository = mongoRepository, options = {}) {
     return repository.logs().then(asLegacyJson);
   });
   app.get('/api/projects', async () => asLegacyJson(await repository.publicProjects()));
+  app.get('/api/menu', async (ctx) => {
+    const category = ctx.query.category;
+    if ((Array.isArray(category)) || (typeof category === 'string' && category.length > 100)) {
+      ctx.status = 400;
+      return { error: 'Invalid category' };
+    }
+    try {
+      return asLegacyJson(await repository.publicMenu({ category: category || undefined }));
+    } catch (error) {
+      console.error('menu-read-error-safe', error?.name || 'UnknownError',
+        String(error?.message || '').replace(/mongodb(?:\+srv)?:\/\/\S+/gi, '[redacted-database-uri]').slice(0, 140));
+      ctx.status = 503;
+      return { error: 'Menu temporarily unavailable' };
+    }
+  });
+
   app.get('/api/tags', async () => asLegacyJson(await repository.publicTags()));
   app.get('/api/posts', async (ctx) => {
     const first = (value) => Array.isArray(value) ? value[0] : value;

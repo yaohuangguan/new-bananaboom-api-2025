@@ -12,6 +12,7 @@ export const repository = {
   projects: async () => (await mongo()).projects(),
   logs: async () => (await mongo()).logs(),
   publicProjects: async () => (await mongo()).publicProjects(),
+  publicMenu: async (options) => (await mongo()).publicMenu(options),
   publicTags: async () => (await mongo()).publicTags(),
   publicPosts: async (options) => (await mongo()).publicPosts(options),
   authorizeSession: async (token) => (await mongo()).authorizeSession(token),
