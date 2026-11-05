@@ -75,6 +75,96 @@ export class MongoDBConnection extends DurableObject {
     };
   }
 
+  async #auditPostWrite(operatorId, action, target, ip, postId) {
+    // Legacy AuditLog's collection name and TTL field are preserved.
+    // Best-effort audit is deliberately separate from the user write, matching
+    // the old logOperation() contract which never changes a successful response.
+    try {
+      const db = this.client.db();
+      const createdDate = new Date();
+      const result = await db.collection('audit_logs').insertOne({
+        operator: new ObjectId(operatorId),
+        action,
+        target,
+        ip: String(ip || '').slice(0, 128),
+        createdDate
+      });
+      // Durable notification outbox: Socket.IO / Bark fan-out is not yet
+      // migrated; do NOT enable CRUD traffic before dispatch is implemented.
+      await db.collection('post_write_outbox').insertOne({
+        auditLogId: result.insertedId,
+        postId: new ObjectId(postId),
+        operator: new ObjectId(operatorId),
+        action,
+        target,
+        createdAt: createdDate,
+        dispatchedAt: null
+      });
+    } catch (error) {
+      console.error('post-audit-write-failed', error?.name || 'UnknownError');
+    }
+  }
+
+  async createArticle(input, operatorId, ip) {
+    await this.client.connect();
+    const db = this.client.db();
+    const now = new Date();
+    const result = {
+      ...input,
+      user: new ObjectId(operatorId),
+      likes: 0,
+      comments: [],
+      tags: input.tags || [],
+      isPrivate: input.isPrivate ?? false,
+      createdAt: now,
+      updatedAt: now,
+      __v: 0
+    };
+    const inserted = await db.collection('posts').insertOne(result);
+    result._id = inserted.insertedId;
+    await this.#auditPostWrite(operatorId, 'CREATE_POST', result.name, ip, String(result._id));
+    return JSON.parse(JSON.stringify(result));
+  }
+
+  async updateArticle(id, input, operatorId, ip) {
+    if (!/^[a-f0-9]{24}$/i.test(id)) return null;
+    await this.client.connect();
+    const db = this.client.db();
+    // Mongoose's timestamps:true on findByIdAndUpdate always refreshes updatedAt.
+    const updated = await db.collection('posts').findOneAndUpdate(
+      { _id: new ObjectId(id) },
+      { $set: { ...input, updatedAt: new Date() } },
+      { returnDocument: 'after', includeResultMetadata: true }
+    );
+    const result = updated?.value;
+    if (!result) return null;
+    await this.#auditPostWrite(operatorId, 'UPDATE_POST', result.name, ip, id);
+    return JSON.parse(JSON.stringify(result));
+  }
+
+  async getArticleForDeletion(id) {
+    if (!/^[a-f0-9]{24}$/i.test(id)) return null;
+    await this.client.connect();
+    const post = await this.client.db().collection('posts').findOne(
+      { _id: new ObjectId(id) },
+      { projection: { _id: 1, name: 1, isPrivate: 1 } }
+    );
+    return post ? JSON.parse(JSON.stringify(post)) : null;
+  }
+
+  async deleteArticle(id, operatorId, ip, expectedPrivate) {
+    if (!/^[a-f0-9]{24}$/i.test(id)) return null;
+    await this.client.connect();
+    const db = this.client.db();
+    const post = await db.collection('posts').findOneAndDelete({
+      _id: new ObjectId(id),
+      isPrivate: expectedPrivate ? true : { $ne: true }
+    });
+    if (!post) return null;
+    await this.#auditPostWrite(operatorId, 'DELETE_POST', post.name, ip, id);
+    return JSON.parse(JSON.stringify({ _id: post._id, isPrivate: !!post.isPrivate, name: post.name }));
+  }
+
   async changePostLikes(id, direction) {
     // Match legacy Mongoose updates: atomic $inc and no updatedAt modification.
     // An absent post returns null; likes cannot be decremented below zero.

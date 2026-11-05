@@ -36,7 +36,7 @@ test('OpenMesh public routes preserve legacy response shapes', async (t) => {
     assert.equal(response.status, 200, path);
     assert.deepEqual(await response.json(), expected, path);
   }
-  assert.equal((await fetch(base + '/api/posts', { method: 'POST' })).status, 405);
+  assert.equal((await fetch(base + '/api/posts', { method: 'POST' })).status, 401);
 });
 
 test('BSON values and persisted R2 references survive response hydration', async (t) => {
@@ -98,7 +98,7 @@ test('public posts, tags and portfolio reads use only public repository surfaces
   assert.equal((await posts.json()).pagination.currentPage, 2);
   assert.deepEqual(calls[0], { page: 2, limit: 3, q: 'hello', tag: 'tech' });
   assert.equal((await fetch(base + '/api/posts/private/posts')).status, 401);
-  assert.equal((await fetch(base + '/api/posts', { method: 'POST' })).status, 405);
+  assert.equal((await fetch(base + '/api/posts', { method: 'POST' })).status, 401);
   const invalid = await fetch(base + '/api/posts?q=' + 'x'.repeat(101));
   assert.equal(invalid.status, 400);
 });

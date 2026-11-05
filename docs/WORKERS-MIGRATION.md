@@ -298,3 +298,53 @@ The Gateway still routes `x-google-auth` to Cloud Run.
   immediate`, then Gateway, then verify Worker response markers and counter
   parity. Never apply test mutations to production without checking and
   restoring the original count.
+
+## Phase 7: article CRUD implementation (staged, not routed)
+
+The Core Worker contains three **unexposed** article CRUD handlers:
+`POST /api/posts`, `PUT /api/posts/:id`, `DELETE /api/posts/:id`.
+The Gateway allowlist still routes all three to Cloud Run. This is
+intentional; **do not claim article CRUD has been cut over**.
+
+Implemented foundations:
+
+- Verify HS256 JWT, exact live MongoDB Session and current
+  `BLOG:MANAGE` role permission on each write. Ignore client-supplied
+  author ID, likes, `__v`, and timestamp fields.
+- Match the explicit Mongoose post data fields and string-tag splitting;
+  preserve the legacy create/update response shapes and post timestamps.
+- Cookie-authorized writes require an allowed `Origin` (CSRF boundary).
+- Private delete requires a configured `ADMIN_RESET_SECRET` (minimum 16
+  characters in the Worker), with digest-based comparison and **no default
+  passphrase**. Recheck the stored privacy flag at delete time; fail closed
+  if it changed since the permission/secret check.
+- Write an `audit_logs` record and a `post_write_outbox` delivery record,
+  using the same legacy audit collection and 30-day `createdDate` field.
+  **These are not a complete notification implementation yet.**
+- The legacy Cloud Run source also removes its insecure fallback
+  `ADMIN_RESET_SECRET || 'orion'`. A Git merge does NOT apply this
+  hardening to the existing Cloud Run production revision; it must be
+  deployed in a controlled future Cloud Run release.
+
+**Blocking parity work before CRUD traffic is enabled:**
+1. A reliable outbox dispatcher must deliver `NEW_OPERATION_LOG` to
+   connected admin UI clients and preserve Bark notifications (or the
+   UI must migrate to equivalent Cloudflare-native real-time delivery).
+   The current Cloud Run `utils/audit.js` emits Socket.IO and Bark;
+   dropping these would silently degrade real functionality.
+2. Implement retry-safe idempotency for create/update/delete writes, so a
+   timeout after MongoDB commit cannot be double-applied. Do not reuse
+   GET fallback semantics on mutations.
+3. Reconcile the remaining Mongoose validation/serialization differences,
+   especially large posts (legacy accepts up to 50MB, staged Worker
+   parser currently 2MB) and the post-write audit side effects.
+4. Configure and verify `ADMIN_RESET_SECRET` as a Worker secret without
+   placing it in Git or chat. Stage real authenticated create/edit/delete
+   end-to-end tests and a rollback drill.
+5. Only then change the Gateway explicit mutation allowlist and release
+   a small controlled cohort. Cloud Run must remain available until that
+   production verification succeeds.
+
+As of this stage the existing likes add/remove Workers routes and all
+previously migrated reads continue unchanged. This is *not* the point
+to delete the last Cloud Run service or Artifact Registry image.

@@ -1,7 +1,9 @@
 import openmesh from 'openmesh-node';
+import { jsonBody } from 'openmesh-node/plugins';
 import { repository as mongoRepository } from './db.js';
 import { hydrateR2References } from '../../../utils/r2Reference.js';
-import { authenticateLegacyRequest, canReadPrivatePosts, extractLegacyToken } from './auth.js';
+import { authenticateLegacyRequest, canReadPrivatePosts, extractLegacyToken, hasPermission } from './auth.js';
+import { normalizePostInput, redactPostWriteError, matchesAdminSecret } from './postWrites.js';
 
 // Match legacy JSON serialization before applying its response hydration middleware.
 // Otherwise recursively traversing BSON ObjectId/Date would erase their values.
@@ -30,6 +32,7 @@ function listOptions(query) {
 export function createApp(repository = mongoRepository, options = {}) {
   const secretProvider = options.secretProvider || runtimeJwtSecret;
   const app = openmesh({ service: 'bananaboom-core' });
+  app.use(jsonBody({ limit: 2 * 1024 * 1024 }));
   app.get('/health', () => 'OK');
   app.get('/', () => 'API Server is running...');
   app.get('/api/homepage', async () => asLegacyJson(await repository.homepages()));
@@ -155,6 +158,122 @@ export function createApp(repository = mongoRepository, options = {}) {
       return { error: 'Article detail temporarily unavailable' };
     }
   });
+
+  // These methods are staged *only* in the private Core Worker. The Gateway
+  // does NOT forward article CRUD: audit Socket.IO and Bark dispatch must be
+  // complete and production-verified before accepting public mutations.
+  const adminSecretProvider = options.adminSecretProvider || (async () => {
+    const { env } = await import('cloudflare:workers');
+    return env.ADMIN_RESET_SECRET;
+  });
+
+  const trustedWriteOrigins = new Set([
+    'https://samyao.me',
+    'https://www.samyao.me',
+    'https://ps6.space',
+    'https://www.ps6.space',
+    'http://localhost:5173'
+  ]);
+  const writeAuth = async (ctx) => {
+    if (!extractLegacyToken(ctx.headers)) {
+      return { ok: false, status: 401, body: { message: 'Unauthorized' } };
+    }
+    const fromCookie = !ctx.headers['x-auth-token'] &&
+      !(ctx.headers.authorization || '').startsWith('Bearer ');
+    if (fromCookie && !trustedWriteOrigins.has(ctx.headers.origin)) {
+      // Browser session cookies must not authorize cross-origin forged writes.
+      return { ok: false, status: 403, body: { message: 'ORIGIN_REJECTED' } };
+    }
+    const auth = await authenticateLegacyRequest(ctx.headers, repository, await secretProvider());
+    if (auth.kind === 'invalid') {
+      return { ok: false, status: 401, body: { code: auth.code, message: 'Unauthorized' } };
+    }
+    if (auth.kind !== 'authenticated') {
+      return { ok: false, status: 401, body: { message: 'Session expired or revoked' } };
+    }
+    if (!hasPermission(auth.user, 'BLOG:MANAGE')) {
+      return { ok: false, status: 403, body: { code: 'PERMISSION_DENIED', required: 'BLOG:MANAGE' } };
+    }
+    return { ok: true, user: auth.user };
+  };
+  const respondWrite = async (ctx, action) => {
+    ctx.set('Cache-Control', 'no-store');
+    let authorized;
+    try {
+      authorized = await writeAuth(ctx);
+    } catch (error) {
+      console.error('post-crud-auth-failed', error?.name || 'UnknownError');
+      ctx.status = 503;
+      return { error: 'Authentication temporarily unavailable' };
+    }
+    if (!authorized.ok) {
+      ctx.status = authorized.status;
+      return authorized.body;
+    }
+    try {
+      return await action(authorized.user);
+    } catch (error) {
+      const safe = redactPostWriteError(error);
+      if (safe.status >= 500) console.error('post-crud-write-failed', error?.name || 'UnknownError');
+      ctx.status = safe.status;
+      return safe.body;
+    }
+  };
+  const sourceIp = (ctx) => String(ctx.headers['cf-connecting-ip'] || '').slice(0, 128);
+  app.post('/api/posts', async (ctx) => respondWrite(ctx, async (user) => {
+    const input = normalizePostInput(ctx.requestBody, { create: true });
+    const data = await repository.createArticle(input, user.id, sourceIp(ctx));
+    ctx.status = 201;
+    return { success: true, data: asLegacyJson(data) };
+  }));
+  app.put('/api/posts/:id', async (ctx) => respondWrite(ctx, async (user) => {
+    const id = ctx.params.id;
+    if (!/^[a-f0-9]{24}$/i.test(id)) {
+      ctx.status = 404;
+      return { msg: '文章不存在' };
+    }
+    const input = normalizePostInput(ctx.requestBody);
+    const data = await repository.updateArticle(id, input, user.id, sourceIp(ctx));
+    if (!data) {
+      ctx.status = 404;
+      return { msg: '文章不存在' };
+    }
+    return { success: true, data: asLegacyJson(data) };
+  }));
+  app.delete('/api/posts/:id', async (ctx) => respondWrite(ctx, async (user) => {
+    const id = ctx.params.id;
+    if (!/^[a-f0-9]{24}$/i.test(id)) {
+      ctx.status = 404;
+      return { message: 'Post not found' };
+    }
+    const post = await repository.getArticleForDeletion(id);
+    if (!post) {
+      ctx.status = 404;
+      return { message: 'Post not found' };
+    }
+    if (post.isPrivate) {
+      // Never fall back to the legacy hardcoded "orion" passphrase.
+      const adminSecret = await adminSecretProvider();
+      if (typeof adminSecret !== 'string' || adminSecret.length < 16) {
+        ctx.status = 503;
+        return { error: 'Private deletion is not configured' };
+      }
+      const provided = ctx.requestBody?.secretKey;
+      if (!matchesAdminSecret(adminSecret, provided)) {
+        ctx.status = 403;
+        return { message: '暗号错误！删除私有日志需要超级权限。' };
+      }
+    }
+    const deleted = await repository.deleteArticle(id, user.id, sourceIp(ctx), post.isPrivate);
+    if (!deleted) {
+      ctx.status = 404;
+      return { message: 'Post not found' };
+    }
+    const options = listOptions(ctx.query);
+    return asLegacyJson(post.isPrivate
+      ? await repository.privatePosts(options)
+      : await repository.publicPosts(options));
+  }));
 
   // Authenticated private read is deliberately NOT in the Gateway allowlist.
   // Until real-user parity is checked, the existing Cloud Run endpoint remains live.

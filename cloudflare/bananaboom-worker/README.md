@@ -127,3 +127,12 @@ counter operation (remove requires `likes > 0`), do not modify
 `updatedAt`, and return the legacy like-count JSON. The Gateway enforces a
 30/IP/minute limit and MUST NOT replay ambiguous failed writes at Cloud Run.
 See `docs/WORKERS-MIGRATION.md`.
+
+### Staged article CRUD — not production-routed yet
+
+Core now has authenticated POST, PUT and DELETE for articles, with live
+BLOG:MANAGE, legacy field validation, CSRF-safe cookie writes, admin secret
+check for private deletion and an audit/outbox record. **The Gateway does not
+route these mutations to Core** until Socket.IO/Bark notification parity,
+idempotency, 50MB body compatibility and a real-user destructive-operation
+test are complete. See docs/WORKERS-MIGRATION.md.
