@@ -1,0 +1,11 @@
+name = "bananaboom-core"
+main = "src/index.js"
+compatibility_date = "2026-11-05"
+workers_dev = true
+preview_urls = false
+
+# Standalone origin during migration. Production api.samyao.me stays on Gateway.
+# Secret: MONGO_URI, configure with wrangler secret put.
+
+[vars]
+R2_PUBLIC_DOMAIN = "https://assets.samyao.me"
