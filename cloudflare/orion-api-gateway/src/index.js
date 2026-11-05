@@ -25,6 +25,7 @@ const MIGRATED_PUBLIC_READ_PATHS = new Set([
   '/api/homepage/projects',
   '/api/homepage/logs',
   '/api/projects',
+  '/api/menu',
   '/api/posts',
   '/api/tags'
 ]);
@@ -40,6 +41,14 @@ function hasLegacyCredentials(headers) {
 
 export function shouldRouteToCoreWorker(method, path, search = '', headers = {}) {
   if (method !== 'GET') return false;
+  if (path === '/api/posts/private/posts') {
+    const get = (name) => typeof headers?.get === 'function'
+      ? headers.get(name) : headers?.[name] || headers?.[name.toLowerCase()] || null;
+    const hasJwt = Boolean(get('x-auth-token') || get('authorization')?.startsWith('Bearer ') ||
+      /(?:^|;)\s*orion_session=/.test(get('cookie') || ''));
+    // Explicit, opt-in test path only. Regular private traffic stays on Cloud Run.
+    return get('x-orion-private-worker-canary') === '1' && hasJwt && !get('x-google-auth');
+  }
   if (/^\/api\/posts\/likes\/[a-f\d]{24}$/i.test(path)) {
     return !hasLegacyCredentials(headers);
   }
@@ -52,6 +61,10 @@ export function shouldRouteToCoreWorker(method, path, search = '', headers = {})
   const query = new URLSearchParams(search);
   // Logged-in users can request private/all tags from the original authenticated
   // API. Never serve those queries from the public-only MongoDB RPC.
+  if (path === '/api/menu') {
+    const categories = query.getAll('category');
+    return categories.length <= 1 && (categories.length === 0 || categories[0].length <= 100);
+  }
   if (path === '/api/tags') {
     const types = query.getAll('type');
     return types.length <= 1 && (types.length === 0 || types[0] === 'public');
@@ -246,6 +259,7 @@ export default {
         workerHeaders.delete('host');
         workerHeaders.delete('x-forwarded-host');
         workerHeaders.delete('x-orion-edge-secret');
+        workerHeaders.delete('x-orion-private-worker-canary');
         const workerRequest = new Request(request.url, {
           method: request.method,
           headers: workerHeaders,
@@ -281,6 +295,7 @@ export default {
     // Do not let clients choose the upstream host or spoof edge-only metadata.
     headers.delete('host');
     headers.delete('x-forwarded-host');
+    headers.delete('x-orion-private-worker-canary');
 
     const ttl = cacheTtlFor(request, pathname);
     const upstreamRequest = new Request(originUrl, {

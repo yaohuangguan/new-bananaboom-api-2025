@@ -2,8 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { shouldRouteToCoreWorker } from './src/index.js';
 
-test('only explicit public homepage read routes use the Worker', () => {
-  for (const path of ['/api/homepage', '/api/homepage/likes', '/api/homepage/projects', '/api/homepage/logs', '/api/projects', '/api/posts', '/api/tags']) {
+test('only explicit public read routes use the Worker', () => {
+  for (const path of ['/api/homepage', '/api/homepage/likes', '/api/homepage/projects', '/api/homepage/logs', '/api/projects', '/api/menu', '/api/posts', '/api/tags']) {
     assert.equal(shouldRouteToCoreWorker('GET', path), true);
     assert.equal(shouldRouteToCoreWorker('HEAD', path), false);
     assert.equal(shouldRouteToCoreWorker('POST', path), false);
@@ -49,4 +49,35 @@ test('anonymous likes GET is Worker-only, not writes or credentialed reads', () 
   assert.equal(shouldRouteToCoreWorker('GET', path, '', new Headers({ authorization: 'Bearer a' })), false);
   assert.equal(shouldRouteToCoreWorker('GET', path + '/add'), false);
   assert.equal(shouldRouteToCoreWorker('GET', '/api/posts/likes/nope'), false);
+});
+
+test('private post Worker canary is explicit and requires a legacy JWT carrier', () => {
+  const path = '/api/posts/private/posts';
+  const canary = 'x-orion-private-worker-canary';
+  assert.equal(shouldRouteToCoreWorker('GET', path), false);
+  assert.equal(shouldRouteToCoreWorker('GET', path, '', new Headers({ [canary]: '1' })), false);
+  assert.equal(shouldRouteToCoreWorker('GET', path, '', new Headers({
+    [canary]: '1', authorization: 'Bearer dummy'
+  })), true);
+  assert.equal(shouldRouteToCoreWorker('GET', path, '?page=2', new Headers({
+    [canary]: '1', cookie: 'orion_session=token'
+  })), true);
+  assert.equal(shouldRouteToCoreWorker('POST', path, '', new Headers({
+    [canary]: '1', authorization: 'Bearer dummy'
+  })), false);
+  assert.equal(shouldRouteToCoreWorker('GET', path, '', new Headers({
+    [canary]: '1', authorization: 'Bearer dummy', 'x-google-auth': '{}'
+  })), false);
+  assert.equal(shouldRouteToCoreWorker('GET', path, '', new Headers({
+    [canary]: 'wrong', authorization: 'Bearer dummy'
+  })), false);
+});
+
+test('public menu list is Worker-only; category duplicates and other menu endpoints remain on Cloud Run', () => {
+  assert.equal(shouldRouteToCoreWorker('GET', '/api/menu'), true);
+  assert.equal(shouldRouteToCoreWorker('GET', '/api/menu', '?category=dinner'), true);
+  assert.equal(shouldRouteToCoreWorker('GET', '/api/menu', '?category=a&category=b'), false);
+  assert.equal(shouldRouteToCoreWorker('GET', '/api/menu/draw'), false);
+  assert.equal(shouldRouteToCoreWorker('GET', '/api/menu/history'), false);
+  assert.equal(shouldRouteToCoreWorker('POST', '/api/menu'), false);
 });

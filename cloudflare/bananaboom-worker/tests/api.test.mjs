@@ -149,3 +149,28 @@ test('public likes count returns the old JSON shape and hides missing posts', as
   assert.equal((await fetch(base + '/api/posts/likes/invalid')).status, 404);
   assert.equal((await fetch(base + '/api/posts/likes/' + id + '/add', { method: 'POST' })).status, 404);
 });
+
+test('public menu GET preserves document shape and filters through repository', async (t) => {
+  const queries = [];
+  const app = createApp({
+    ...fakeRepository,
+    publicMenu: async (options) => {
+      queries.push(options);
+      return [{ _id: 'menu1', name: 'Rice', isActive: true, category: options.category || 'all' }];
+    }
+  });
+  await app.ready();
+  const server = createServer(app.callback());
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const base = 'http://127.0.0.1:' + server.address().port;
+  const all = await fetch(base + '/api/menu');
+  assert.equal(all.status, 200);
+  assert.equal((await all.json())[0].name, 'Rice');
+  const category = await fetch(base + '/api/menu?category=dinner');
+  assert.equal(category.status, 200);
+  assert.equal((await category.json())[0].category, 'dinner');
+  assert.deepEqual(queries, [{ category: undefined }, { category: 'dinner' }]);
+  assert.equal((await fetch(base + '/api/menu?category=a&category=b')).status, 400);
+  assert.equal((await fetch(base + '/api/menu', { method: 'POST' })).status, 405);
+});

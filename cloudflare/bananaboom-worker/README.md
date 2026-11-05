@@ -99,3 +99,13 @@ tests and live browser checks pass. See `docs/WORKERS-MIGRATION.md`.
 Anonymous `GET /api/posts/likes/:id` is now handled by the Worker with a
 public-post constraint. Authenticated reads and write operations remain
 on Cloud Run.
+
+## Public menu and private read canary
+
+`GET /api/menu` (including one optional `category` query) mirrors the
+legacy public menu list. Writes, draw and AI menu actions stay on Cloud Run.
+
+The Gateway has an opt-in header-based canary for
+`GET /api/posts/private/posts` only. This is not general private cutover.
+Server-side live session/RBAC verification and secret provisioning must pass
+before any authenticated read traffic is switched by default.

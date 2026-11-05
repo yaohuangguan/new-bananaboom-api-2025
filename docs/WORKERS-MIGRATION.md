@@ -148,3 +148,46 @@ and from `cloudflare/bananaboom-worker`, `npm test`.
   `x-bananaboom-origin: worker`.
 - Production Cloud Run's JWT signing mode/key were not modified. No additional
   Google Docker builds were created during this phase.
+
+## Phase 5: public menu read + private-read canary
+
+- Public `GET /api/menu` is served by Workers (both unfiltered and one category
+  query). Other menu actions, including random draw, AI recommendations,
+  create/update/delete, remain on Cloud Run. Category duplicates fall back.
+- Production database parity for this endpoint was verified against four query
+  variants: unfiltered (8 rows), evening (5), lunch (3) and random (0),
+  all exact HTTP/JSON matches.
+- `GET /api/posts/private/posts` has **only an explicit opt-in canary**:
+  request header `x-orion-private-worker-canary: 1` together with a legacy
+  JWT carrier (Bearer, x-auth-token or orion_session cookie), and without
+  x-google-auth. Regular traffic continues to Cloud Run.
+- The canary request is never enough for authorization: the Worker must still
+  verify the JWT signature and expiry, the live MongoDB session and current
+  user RBAC. A Worker 5xx falls back to Cloud Run.
+- The signing keys are **not yet provisioned in the Worker**. Until key
+  provisioning and signed-in end-to-end parity are verified, do not remove
+  the canary requirement or route private writes.
+- The external frontend requires no change for this step and stays on Vercel.
+
+### Durable Object rollout check
+
+On 2026-11-05 a new `MongoDBConnection.publicMenu()` RPC initially returned
+`The RPC receiver does not implement the method "publicMenu"` after the Worker
+upload. The existing Durable Object still served an older code version due to
+Cloudflare's deferred Durable Object code updates, introduced in October 2026.
+The Gateway's 5xx fallback correctly kept menus available through Cloud Run.
+
+**Verified fix:** Deploy the already-uploaded Worker Version at 100% with
+`--durable-objects-code-update-mode immediate`, then verify
+`x-bananaboom-origin: worker` AND exact JSON response parity. This is a
+one-time update strategy, not an excuse to recreate the Durable Object
+instance or delete its storage.
+
+Official documentation:
+https://developers.cloudflare.com/durable-objects/concepts/durable-object-lifecycle/
+https://developers.cloudflare.com/changelog/post/2026-10-30-durable-objects-deferred-code-updates/
+
+Post-cutover production verification: menu category variants (8/5/3/0 items)
+all returned HTTP 200 from Worker and matched their pre-cutover JSON SHA-256
+hashes. Private routes without authentication remain 401, and the canary
+with an invalid Bearer token was 401 via Cloud Run fallback.
