@@ -1,3 +1,24 @@
-# Keep Personal Memory Vault objects out of the Docker build context.
+# Do not bake credentials, keys or local artifacts into the production image.
+.git
+.git/**
+.github
+.github/**
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+keys
+keys/**
 .vault-data
 .vault-data/**
+node_modules
+node_modules/**
+cloudflare/**/node_modules
+cloudflare/**/.dev.vars
+.wrangler
+**/.wrangler/**
+coverage
+coverage/**
+*.log

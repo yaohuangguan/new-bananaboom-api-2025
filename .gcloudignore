@@ -1,0 +1,23 @@
+# Prevent source upload to Google Cloud Build from including private material.
+.git
+.git/**
+.github
+.github/**
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+keys
+keys/**
+.vault-data
+.vault-data/**
+node_modules
+node_modules/**
+**/node_modules/**
+.wrangler
+**/.wrangler/**
+coverage
+coverage/**
+*.log
