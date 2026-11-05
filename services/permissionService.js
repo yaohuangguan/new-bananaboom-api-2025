@@ -85,7 +85,7 @@ class PermissionService {
       email: user.email,
       phone: user.phone || '',
       photoURL: user.photoURL || '',
-      vip: user.vip || false,
+      vip: user.role === 'super_admin', // transitional read-only compatibility alias
       role: user.role || 'user',
       extraPermissions: user.extraPermissions || [],
       // 🔥 注入最新的合并权限数组

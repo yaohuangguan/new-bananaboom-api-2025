@@ -18,31 +18,9 @@ const otpLimiter = rateLimit({
     message: '请求验证码太频繁，请稍后再试'
   }
 });
-// 🔥 定义你的管理员密钥 (建议放在环境变量中，这里保留你的默认值)
-const ADMIN_SECRET = process.env.ADMIN_RESET_SECRET || 'orion';
-
-/**
- * POST /api/auth/verify-secret
- * 用于前端验证输入的口令是否正确
- * body: { "secret": "用户输入的字符串" }
- */
-router.post('/verify-secret', (req, res) => {
-  const { secret } = req.body;
-
-  // 简单的字符串比对
-  if (secret === ADMIN_SECRET) {
-    return res.json({
-      success: true,
-      code: 200,
-      message: '验证通过'
-    });
-  } else {
-    return res.status(401).json({
-      success: false,
-      code: 401,
-      message: '口令错误'
-    });
-  }
+// Retired: never expose a shared administrator passphrase verification API.
+router.post('/verify-secret', (_req, res) => {
+  res.status(410).json({ message: 'Shared admin passphrase verification retired' });
 });
 
 router.post('/subscribe', async (req, res) => {

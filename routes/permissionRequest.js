@@ -162,7 +162,7 @@ router.put('/:id/approve', async (req, res) => {
       }
 
       targetUser.role = newRole; // 修改角色
-      // (User Model 的 pre-save 钩子会自动处理 VIP 同步)
+      // (Only role is authoritative; no VIP pre-save hook)
     }
 
     // 分支 B: 如果是【权限申请】 (默认)

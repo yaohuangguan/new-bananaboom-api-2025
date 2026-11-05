@@ -19,6 +19,7 @@ const ROUTE_MAP = [
   // ============================================================
   { path: '/api/auth', method: 'ALL', public: true },
   { path: '/api/users/signin', method: 'POST', public: true },
+  { path: '/api/users/reset-password', method: 'POST', permission: K.SUPER_ADMIN },
   { path: '/api/users/reset-by-secret', method: 'POST', public: true },
   { path: '/api/users', method: 'POST', public: true }, // 注册
   { path: '/api/payments/webhook', method: 'POST', public: true },
@@ -62,7 +63,7 @@ const ROUTE_MAP = [
   // =================================================================
   { path: '/api/posts', method: 'POST', permission: K.BLOG_MANAGE },
   { regex: /^\/api\/posts\/[a-f\d]{24}$/, method: 'PUT', permission: K.BLOG_MANAGE },
-  { regex: /^\/api\/posts\/[a-f\d]{24}$/, method: 'DELETE', permission: K.BLOG_MANAGE },
+  { regex: /^\/api\/posts\/[a-f\d]{24}$/, method: 'DELETE', permission: K.SUPER_ADMIN },
 
   { path: '/api/comments', method: 'GET', public: true },
   { path: '/api/comments', method: 'ALL', permission: K.BLOG_INTERACT },
@@ -111,8 +112,8 @@ const ROUTE_MAP = [
     permission: K.SUPER_ADMIN
   },
 
-  { path: '/api/users/grant-vip', method: 'PUT', permission: K.USER_MANAGE },
-  { path: '/api/users/revoke-vip', method: 'PUT', permission: K.USER_MANAGE },
+  { path: '/api/users/grant-vip', method: 'PUT', permission: K.SUPER_ADMIN },
+  { path: '/api/users/revoke-vip', method: 'PUT', permission: K.SUPER_ADMIN },
 
   // 🔥 3. 踢人下线 (DELETE /api/users/:id/sessions) -> 🔒 管理员以上
   {

@@ -146,3 +146,11 @@ to deliver pending `post_write_outbox` records to Bark using the optional
 `BARK_URL` secret. The outbox retries notification delivery without
 repeating user writes. Note: atomic transaction/idempotency are not yet
 implemented, so CRUD traffic remains on Cloud Run.
+
+### Role-only delete policy (current staged implementation)
+
+The physical MongoDB `vip` property is deprecated. Only a current,
+persisted `super_admin` role permits deleting private or public articles.
+The extra ADMIN_RESET_SECRET challenge has been removed in this version.
+CRUD is not routed through the Gateway yet; legacy Cloud Run keeps its
+older behavior until its production revision is replaced or CRUD is cut over.

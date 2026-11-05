@@ -392,3 +392,27 @@ the current implementation is not end-to-end exactly-once. Large payload
 compatibility (legacy 50 MB parser vs Worker 2 MB), the private deletion
 secret, a real authenticated edit/create/delete rehearsal and a rollback
 drill also remain. Until then, all CRUD still routes to Cloud Run.
+
+## Role consolidation: super_admin is canonical (2026-11-05)
+
+The duplicated persisted `users.vip` value is no longer an authority for
+access control. The Mongoose schema has no writable `vip` path or
+bidirectional pre-save hook. Existing API consumers receive a temporary
+read-only `vip = role === 'super_admin'` compatibility alias.
+New frontend code checks `role` and removes the redundant VIP toggle.
+Historical MongoDB `vip` bytes are **not unset until both live backends and
+frontends are verified**: the existing Cloud Run revision may still use them.
+
+A logged-in `super_admin` role is required for privileged password reset and
+article deletion; the former anonymous shared-secret password reset and
+secret-verification endpoints are retired (410 at Gateway, no upstream call).
+A super_admin may change their own password or a non-super_admin account's,
+but not another super_admin account's. OTP login remains for account recovery.
+The separate delete/admin passphrase has been removed from the staged Core.
+The existing Cloud Run revision still needs replacing for its article
+DELETE implementation. The Gateway retains it on Cloud Run until Worker
+CRUD satisfies transactional outbox and idempotency requirements.
+
+Do not run a production `$unset: { vip: 1 }` while an old Cloud Run
+revision depends on `vip`. Verify active revisions and Mongoose role
+compatibility first, and capture a count/backup of the legacy field.
