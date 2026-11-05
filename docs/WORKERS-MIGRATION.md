@@ -348,3 +348,47 @@ Implemented foundations:
 As of this stage the existing likes add/remove Workers routes and all
 previously migrated reads continue unchanged. This is *not* the point
 to delete the last Cloud Run service or Artifact Registry image.
+
+## Phase 8: durable audit event feed and Bark delivery loop (2026-11-05)
+
+The MongoDB `post_write_outbox` created by staged Worker CRUD is now readable
+through an owner-scoped notification feed and deliverable via native
+Cloudflare Cron, without replaying article writes.
+
+- `GET /api/audit/worker-events?after=<24-hex-ObjectId>` is a narrow
+  Gateway allowlist to `bananaboom-core`. Both legacy signed JWT AND
+  current MongoDB Session are required. Only `SYSTEM_LOGS:USE` or a
+  privileged wildcard/super-admin role may list events. No anonymous
+  reads, arbitrary event query, or user-controlled database filters.
+- The event cursor is the outbox ObjectId; results are in ascending order,
+  max 30, returning only operation title, actor, action and audit reference.
+  The frontend can poll every ~8 seconds and resume from its last cursor;
+  its existing Socket.IO connection remains for chat and legacy messages.
+  Polling is near-real-time, not true WebSocket push.
+- `bananaboom-core` has a `* * * * *` Cron Trigger. The scheduled handler
+  directly calls the private Durable Object RPC; there is **no publicly
+  callable HTTP dispatch endpoint**.
+- A valid HTTPS `BARK_URL` Worker secret enables up to 12 pending
+  outbox deliveries each minute. Each record uses an atomic 30-second
+  lease, attempt counter, bounded exponential backoff (15 seconds–1 hour),
+  and `dispatchedAt` acknowledgement on successful HTTP response.
+  Missing secret leaves records untouched without opening MongoDB.
+  Delivery is at-least-once: a remote Bark success followed by a crash
+  before acknowledgement can result in a duplicate push.
+- Only notification delivery retries. A failed/ambiguous article mutation
+  is **never retried** by the delivery loop or forwarded to Cloud Run.
+- Bark was **not configured by this code change**; no key/value is
+  committed or transported through ChatGPT. An authorized operator must
+  configure it separately using `wrangler secret put BARK_URL
+  --name bananaboom-core` in the Cloudflare 7199 account.
+
+### Still blocking live article CRUD cutover
+
+The staged `#auditPostWrite` currently best-effort inserts the audit
+and outbox documents after a post operation. A failure between MongoDB
+writes can leave an article change without an event. **A MongoDB transaction
+and idempotency-key receipt are mandatory before enabling the CRUD routes**;
+the current implementation is not end-to-end exactly-once. Large payload
+compatibility (legacy 50 MB parser vs Worker 2 MB), the private deletion
+secret, a real authenticated edit/create/delete rehearsal and a rollback
+drill also remain. Until then, all CRUD still routes to Cloud Run.

@@ -5,4 +5,21 @@ import { createApp } from './app.js';
 const app = createApp();
 await app.ready();
 export { MongoDBConnection } from './MongoDBConnection.js';
-export default httpServerHandler(createServer(app.callback()));
+
+// Preserve the Node HTTP bridge while enabling a Cloudflare-native Cron Trigger.
+// No scheduled task can be initiated by an external HTTP request.
+const nodeHandler = httpServerHandler(createServer(app.callback()));
+export default {
+  fetch(request, env, ctx) {
+    return nodeHandler.fetch(request, env, ctx);
+  },
+  async scheduled(_controller, env) {
+    // No Bark secret means no delivery attempt and no MongoDB connection.
+    // Pending outbox records are retained until configuration is complete.
+    if (!env.BARK_URL) return;
+    const id = env.MONGODB_CONNECTION.idFromName('bananaboom-mongo');
+    const result = await env.MONGODB_CONNECTION.get(id, { locationHint: 'enam' })
+      .dispatchBarkOutbox();
+    if (result.claimed) console.log('post-outbox-dispatched', result.sent, 'of', result.claimed);
+  }
+};

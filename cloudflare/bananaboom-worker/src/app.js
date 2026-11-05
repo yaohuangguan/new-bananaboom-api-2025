@@ -275,6 +275,45 @@ export function createApp(repository = mongoRepository, options = {}) {
       : await repository.publicPosts(options));
   }));
 
+  // Worker CRUD outbox notifications are admin-only, even when the user
+  // knows an event cursor. The Gateway forwards only legacy JWT carriers.
+  app.get('/api/audit/worker-events', async (ctx) => {
+    ctx.set('Cache-Control', 'private, no-store');
+    const after = ctx.query.after;
+    if (Array.isArray(after) || (after && !/^[a-f0-9]{24}$/i.test(after))) {
+      ctx.status = 400;
+      return { error: 'Invalid event cursor' };
+    }
+    if (!extractLegacyToken(ctx.headers)) {
+      ctx.status = 401;
+      return { message: 'Unauthorized' };
+    }
+    let auth;
+    try {
+      auth = await authenticateLegacyRequest(ctx.headers, repository, await secretProvider());
+    } catch (error) {
+      console.error('post-events-auth-failed', error?.name || 'UnknownError');
+      ctx.status = 503;
+      return { error: 'Notification feed temporarily unavailable' };
+    }
+    if (auth.kind !== 'authenticated') {
+      ctx.status = 401;
+      return { message: 'Unauthorized' };
+    }
+    if (!hasPermission(auth.user, 'SYSTEM_LOGS:USE')) {
+      ctx.status = 403;
+      return { message: 'Permission denied' };
+    }
+    try {
+      const events = await repository.pollPostWriteEvents(after || null, 30);
+      return { events, cursor: events.length ? events.at(-1).id : after || null };
+    } catch (error) {
+      console.error('post-events-query-failed', error?.name || 'UnknownError');
+      ctx.status = 503;
+      return { error: 'Notification feed temporarily unavailable' };
+    }
+  });
+
   // Authenticated private read is deliberately NOT in the Gateway allowlist.
   // Until real-user parity is checked, the existing Cloud Run endpoint remains live.
   app.get('/api/posts/private/posts', async (ctx) => {

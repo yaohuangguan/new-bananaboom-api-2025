@@ -17,3 +17,7 @@ class_name = "MongoDBConnection"
 [[migrations]]
 tag = "mongodb-connection-v1"
 new_sqlite_classes = ["MongoDBConnection"]
+
+# Durable post-operation notifications. Worker-only scheduled invocation.
+[triggers]
+crons = ["* * * * *"]

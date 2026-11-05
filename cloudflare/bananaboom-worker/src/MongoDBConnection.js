@@ -1,6 +1,7 @@
 import { DurableObject } from 'cloudflare:workers';
 import { MongoClient, ObjectId } from 'mongodb';
 import { withProjectDefaults } from './projectDefaults.js';
+import { deliverBarkOutbox } from './postOutbox.js';
 
 /**
  * A single Durable Object owns the MongoDB connection.
@@ -10,6 +11,7 @@ import { withProjectDefaults } from './projectDefaults.js';
 export class MongoDBConnection extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
+    this.barkUrl = env.BARK_URL;
     this.client = new MongoClient(env.MONGO_URI, {
       maxPoolSize: 1,
       minPoolSize: 0,
@@ -75,6 +77,57 @@ export class MongoDBConnection extends DurableObject {
     };
   }
 
+  async pollPostWriteEvents(after, max = 30) {
+    // The OpenMesh handler MUST verify the current SYSTEM_LOGS:USE permission.
+    // No HTTP route exposes this Durable Object RPC directly.
+    await this.client.connect();
+    const cutoff = after
+      ? new ObjectId(after)
+      : ObjectId.createFromTime(Math.floor(Date.now() / 1000) - 10);
+    const db = this.client.db();
+    const events = await db.collection('post_write_outbox').find({
+      _id: { $gt: cutoff }
+    }, {
+      projection: {
+        _id: 1, auditLogId: 1, operator: 1, operatorName: 1,
+        action: 1, target: 1, createdAt: 1
+      }
+    }).sort({ _id: 1 }).limit(Math.min(50, Math.max(1, max))).toArray();
+    const operators = [...new Set(events.map((event) => String(event.operator)))];
+    const names = new Map();
+    if (operators.length > 0) {
+      const users = await db.collection('users').find({
+        _id: { $in: operators.map((id) => new ObjectId(id)) }
+      }, { projection: { displayName: 1, name: 1 } }).toArray();
+      for (const u of users) names.set(String(u._id), u.displayName || u.name || String(u._id));
+    }
+    return events.map((event) => {
+      const operatorId = String(event.operator);
+      const operatorName = event.operatorName || names.get(operatorId) || operatorId;
+      return {
+        id: String(event._id),
+        timestamp: event.createdAt?.toISOString() || new Date().toISOString(),
+        message: `[${operatorName}] 执行了 [${event.action}] - ${event.target || ''}`,
+        log: {
+          _id: String(event.auditLogId),
+          action: event.action,
+          target: event.target || '',
+          createdDate: event.createdAt?.toISOString() || new Date().toISOString(),
+          operator: { _id: operatorId, displayName: operatorName }
+        }
+      };
+    });
+  }
+
+  async dispatchBarkOutbox() {
+    // This is invoked ONLY by the private Worker scheduled handler, not HTTP.
+    if (!this.barkUrl) return { claimed: 0, sent: 0, deferred: 'bark-not-configured' };
+    await this.client.connect();
+    return deliverBarkOutbox(this.client.db().collection('post_write_outbox'), {
+      barkUrl: this.barkUrl
+    });
+  }
+
   async #auditPostWrite(operatorId, action, target, ip, postId) {
     // Legacy AuditLog's collection name and TTL field are preserved.
     // Best-effort audit is deliberately separate from the user write, matching
@@ -82,6 +135,10 @@ export class MongoDBConnection extends DurableObject {
     try {
       const db = this.client.db();
       const createdDate = new Date();
+      const author = await db.collection('users').findOne(
+        { _id: new ObjectId(operatorId) }, { projection: { displayName: 1, name: 1 } }
+      );
+      const operatorName = author?.displayName || author?.name || operatorId;
       const result = await db.collection('audit_logs').insertOne({
         operator: new ObjectId(operatorId),
         action,
@@ -95,9 +152,11 @@ export class MongoDBConnection extends DurableObject {
         auditLogId: result.insertedId,
         postId: new ObjectId(postId),
         operator: new ObjectId(operatorId),
+        operatorName,
         action,
         target,
         createdAt: createdDate,
+        attempts: 0,
         dispatchedAt: null
       });
     } catch (error) {
