@@ -3,6 +3,7 @@ import { MongoClient, ObjectId } from 'mongodb';
 import { withProjectDefaults } from './projectDefaults.js';
 import { deliverBarkOutbox, resolveBarkDestination } from './postOutbox.js';
 import { performArticleTransaction } from './articleTransaction.js';
+import { dispatchTodoReminders } from './todoReminders.js';
 
 /**
  * A single Durable Object owns the MongoDB connection.
@@ -213,6 +214,12 @@ export class MongoDBConnection extends DurableObject {
         }
       };
     });
+  }
+
+  async dispatchTodoReminders() {
+    // Only invoked by the Worker scheduled handler with the opt-in flag.
+    await this.client.connect();
+    return dispatchTodoReminders({ client: this.client, db: this.client.db(), enabled: true });
   }
 
   async dispatchBarkOutbox() {

@@ -20,5 +20,11 @@ export default {
     const result = await env.MONGODB_CONNECTION.get(id, { locationHint: 'enam' })
       .dispatchBarkOutbox();
     if (result.claimed) console.log('post-outbox-dispatched', result.sent, 'of', result.claimed);
+    // Legacy GCP Todo Scheduler is PAUSED: opt-in only, no overdue replay.
+    if (env.TODO_REMINDERS_ENABLED === '1') {
+      const todo = await env.MONGODB_CONNECTION.get(id, { locationHint: 'enam' })
+        .dispatchTodoReminders();
+      if (todo.claimed) console.log('todo-reminders', todo.completed, 'of', todo.claimed);
+    }
   }
 };
