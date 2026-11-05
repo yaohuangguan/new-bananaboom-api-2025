@@ -119,3 +119,53 @@ test('diagnostic header identifies private-canary fallback only, without exposin
     globalThis.fetch = originalFetch;
   }
 });
+
+test('private rollout is sampled only for signed-in eligible requests and can be instantly disabled', async () => {
+  const { shouldRoutePrivateRead } = await import('./src/index.js');
+  const path = '/api/posts/private/posts';
+  const cookie = new Headers({ cookie: 'other=1; orion_session=real-jwt' });
+  assert.equal(shouldRoutePrivateRead('GET', path, '?page=1&limit=5', cookie, 10, 0.01), true);
+  assert.equal(shouldRoutePrivateRead('GET', path, '?page=1&limit=5', cookie, 10, 0.99), false);
+  assert.equal(shouldRoutePrivateRead('GET', path, '?page=1&limit=5', cookie, 0, 0), false);
+  assert.equal(shouldRoutePrivateRead('GET', path, '?page=1&limit=5', new Headers({
+    cookie: 'orion_session=real-jwt', 'x-orion-private-worker-canary': '1'
+  }), 0, 1), true);
+  assert.equal(shouldRoutePrivateRead('GET', path, '', new Headers(), 100, 0), false);
+  assert.equal(shouldRoutePrivateRead('POST', path, '', cookie, 100, 0), false);
+  assert.equal(shouldRoutePrivateRead('GET', path, '', new Headers({ 'x-google-auth': 'token', cookie: 'orion_session=x' }), 100, 0), false);
+  assert.equal(shouldRoutePrivateRead('GET', path, '?limit=51', cookie, 100, 0), false);
+  assert.equal(shouldRoutePrivateRead('GET', path, '?page=0', cookie, 100, 0), false);
+  assert.equal(shouldRoutePrivateRead('GET', path, '?q=a&q=b', cookie, 100, 0), false);
+  assert.equal(shouldRoutePrivateRead('GET', '/api/posts', '', cookie, 100, 0), false);
+});
+
+test('private rollout Worker errors continue to use Cloud Run fallback', async () => {
+  const { default: gateway } = await import('./src/index.js');
+  const origFetch = globalThis.fetch;
+  const env = {
+    ORIGIN_URL: 'https://upstream.example',
+    PRIVATE_POST_READ_ROLLOUT_PERCENT: '100',
+    GENERAL_LIMITER: { limit: async () => ({ success: true }) },
+    BANANABOOM_CORE: { fetch: async () => new Response('unavailable', { status: 503 }) }
+  };
+  let received = false;
+  globalThis.fetch = async (request) => {
+    received = true;
+    assert.match(request.url, /upstream\.example\/api\/posts\/private\/posts/);
+    return new Response(JSON.stringify({ data: [] }), {
+      headers: { 'content-type': 'application/json' }
+    });
+  };
+  try {
+    const response = await gateway.fetch(new Request(
+      'https://api.samyao.me/api/posts/private/posts', {
+        headers: { cookie: 'orion_session=test-cookie' }
+      }
+    ), env);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.has('x-bananaboom-origin'), false);
+    assert.equal(received, true);
+  } finally {
+    globalThis.fetch = origFetch;
+  }
+});

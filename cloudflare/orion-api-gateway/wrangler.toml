@@ -5,6 +5,8 @@ workers_dev = true
 preview_urls = false
 
 [vars]
+# 0 disables automatic private-read migration; explicit canary remains available.
+PRIVATE_POST_READ_ROLLOUT_PERCENT = 100
 ORIGIN_URL = "https://bananaboom-api-242273127238.asia-east1.run.app"
 
 [[routes]]
