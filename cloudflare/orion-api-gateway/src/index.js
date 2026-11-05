@@ -251,6 +251,11 @@ export default {
     const limited = await enforceRateLimit(request, env, pathname);
     if (limited) return withSecurityHeaders(limited);
 
+    const privateCanary = request.method === 'GET' &&
+      pathname === '/api/posts/private/posts' &&
+      request.headers.get('x-orion-private-worker-canary') === '1';
+    let privateCanaryResult = 'not-routed';
+
     // Internal service binding: no public workers.dev hop, no shared origin secret.
     // Keep Cloud Run as a per-request fallback if the new database path fails.
     if (shouldRouteToCoreWorker(request.method, pathname, incomingUrl.search, request.headers) && env.BANANABOOM_CORE) {
@@ -269,6 +274,10 @@ export default {
         if (workerResponse.status < 500) {
           const secured = withSecurityHeaders(workerResponse);
           secured.headers.set('x-bananaboom-origin', 'worker');
+          if (privateCanary) {
+            secured.headers.set('x-orion-private-canary-result', 'worker');
+            secured.headers.set('access-control-expose-headers', 'x-orion-private-canary-result, x-bananaboom-origin');
+          }
           secured.headers.set('cache-control', 'no-store');
           const allowedOrigin = corsOrigin(request);
           if (allowedOrigin) {
@@ -278,9 +287,16 @@ export default {
           }
           return redactPublicPostResponse(request, secured);
         }
+        if (privateCanary) {
+          const stage = workerResponse.headers.get('x-orion-private-worker-stage');
+          privateCanaryResult = stage === 'auth' ? 'fallback-auth' :
+            stage === 'query' ? 'fallback-query' : 'fallback-5xx';
+        }
         console.error('BananaBoom Worker read returned', workerResponse.status, 'falling back to Cloud Run');
       } catch (error) {
-        console.error('BananaBoom Worker read failed; falling back to Cloud Run', error?.message);
+        if (privateCanary) privateCanaryResult = 'fallback-exception';
+        // Do not log credential-bearing request URLs or headers.
+        console.error('BananaBoom Worker read failed; falling back to Cloud Run', error?.name || 'UnknownError');
       }
     }
 
@@ -320,6 +336,10 @@ export default {
     );
 
     const secured = withSecurityHeaders(response);
+    if (privateCanary) {
+      secured.headers.set('x-orion-private-canary-result', privateCanaryResult);
+      secured.headers.set('access-control-expose-headers', 'x-orion-private-canary-result, x-bananaboom-origin');
+    }
 
     if (ttl > 0) {
       secured.headers.delete('set-cookie');

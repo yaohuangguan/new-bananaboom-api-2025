@@ -133,3 +133,34 @@ test('unknown key identifier and invalid v2 signing configuration fail closed', 
     /at least 32/
   );
 });
+
+test('private canary reports auth-store failure without returning private contents', async (t) => {
+  const token = await sign();
+  const repo = { authorizeSession: async () => {
+    throw new TypeError('secret internal database error');
+  } };
+  const { server, url } = await serverFor(repo);
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const response = await fetch(url + '/api/posts/private/posts', {
+    headers: { cookie: 'orion_session=' + token }
+  });
+  assert.equal(response.status, 503);
+  assert.equal(response.headers.get('x-orion-private-worker-stage'), 'auth');
+  assert.doesNotMatch(await response.text(), /secret internal/);
+});
+
+test('private canary reports query-store failure only after successful session and RBAC', async (t) => {
+  const token = await sign();
+  const repo = {
+    authorizeSession: async () => ({ id, role: 'user', permissions: ['PRIVATE_POST:READ'] }),
+    privatePosts: async () => { throw new TypeError('sensitive query details'); }
+  };
+  const { server, url } = await serverFor(repo);
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const response = await fetch(url + '/api/posts/private/posts', {
+    headers: { 'x-auth-token': token }
+  });
+  assert.equal(response.status, 503);
+  assert.equal(response.headers.get('x-orion-private-worker-stage'), 'query');
+  assert.doesNotMatch(await response.text(), /sensitive query/);
+});
