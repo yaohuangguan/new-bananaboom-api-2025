@@ -75,6 +75,23 @@ export class MongoDBConnection extends DurableObject {
     };
   }
 
+  async changePostLikes(id, direction) {
+    // Match legacy Mongoose updates: atomic $inc and no updatedAt modification.
+    // An absent post returns null; likes cannot be decremented below zero.
+    if (!/^[a-f0-9]{24}$/i.test(id) || !['add', 'remove'].includes(direction)) {
+      return null;
+    }
+    await this.client.connect();
+    const posts = this.client.db().collection('posts');
+    const objectId = new ObjectId(id);
+    const filter = direction === 'remove'
+      ? { _id: objectId, likes: { $gt: 0 } }
+      : { _id: objectId };
+    await posts.updateOne(filter, { $inc: { likes: direction === 'add' ? 1 : -1 } });
+    const post = await posts.findOne({ _id: objectId }, { projection: { likes: 1 } });
+    return post ? JSON.parse(JSON.stringify(post)) : null;
+  }
+
   async publicPostLikes(id) {
     if (!/^[a-f0-9]{24}$/i.test(id)) return null;
     await this.client.connect();

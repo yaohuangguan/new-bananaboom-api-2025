@@ -91,6 +91,26 @@ export function createApp(repository = mongoRepository, options = {}) {
     return asLegacyJson(await repository.publicPostLikes(id));
   });
 
+  // Only the exact add/remove paths are ever exposed through the Gateway.
+  // On failure the Gateway MUST NOT replay the mutation on Cloud Run.
+  for (const direction of ['add', 'remove']) {
+    app.post('/api/posts/likes/:id/' + direction, async (ctx) => {
+      const id = ctx.params.id;
+      if (!/^[a-f0-9]{24}$/i.test(id)) {
+        ctx.status = 404;
+        return { message: 'Post not found' };
+      }
+      ctx.set('Cache-Control', 'no-store');
+      try {
+        return asLegacyJson(await repository.changePostLikes(id, direction));
+      } catch (error) {
+        console.error('post-like-mutation-error', error?.name || 'UnknownError');
+        ctx.status = 503;
+        return { error: 'Like operation status unknown; refresh the count before retrying' };
+      }
+    });
+  }
+
   // Public details are readable without a session. Private details are
   // intentionally indistinguishable from missing posts without live RBAC.
   app.get('/api/posts/:id', async (ctx) => {

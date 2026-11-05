@@ -119,3 +119,11 @@ live MongoDB Session and live `PRIVATE_POST:READ` permission when the article
 is private; missing or disallowed articles return 404. Public article details
 remain readable without login. Writes and Google identity flows remain on
 Cloud Run.
+
+## Like mutations
+
+`POST /api/posts/likes/:id/add` and `.../remove` use an atomic MongoDB
+counter operation (remove requires `likes > 0`), do not modify
+`updatedAt`, and return the legacy like-count JSON. The Gateway enforces a
+30/IP/minute limit and MUST NOT replay ambiguous failed writes at Cloud Run.
+See `docs/WORKERS-MIGRATION.md`.
