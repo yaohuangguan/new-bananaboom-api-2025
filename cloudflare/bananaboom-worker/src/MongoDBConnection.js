@@ -1,7 +1,8 @@
 import { DurableObject } from 'cloudflare:workers';
 import { MongoClient, ObjectId } from 'mongodb';
 import { withProjectDefaults } from './projectDefaults.js';
-import { deliverBarkOutbox } from './postOutbox.js';
+import { deliverBarkOutbox, resolveBarkDestination } from './postOutbox.js';
+import { performArticleTransaction } from './articleTransaction.js';
 
 /**
  * A single Durable Object owns the MongoDB connection.
@@ -121,107 +122,87 @@ export class MongoDBConnection extends DurableObject {
 
   async dispatchBarkOutbox() {
     // This is invoked ONLY by the private Worker scheduled handler, not HTTP.
-    if (!this.barkUrl) return { claimed: 0, sent: 0, deferred: 'bark-not-configured' };
     await this.client.connect();
-    return deliverBarkOutbox(this.client.db().collection('post_write_outbox'), {
-      barkUrl: this.barkUrl
+    const db = this.client.db();
+    const barkUrl = await resolveBarkDestination(db.collection('users'), this.barkUrl);
+    if (!barkUrl) return { claimed: 0, sent: 0, deferred: 'bark-not-configured' };
+    return deliverBarkOutbox(db.collection('post_write_outbox'), { barkUrl });
+  }
+
+  // Each operation is committed as one MongoDB transaction alongside
+  // audit_logs, post_write_outbox and the unique request receipt.
+  async createArticle(input, operatorId, ip, idempotencyKey) {
+    await this.client.connect();
+    const db = this.client.db();
+    return performArticleTransaction({
+      client: this.client, db, operatorId, ip, idempotencyKey,
+      action: 'CREATE_POST', input,
+      mutate: async ({ session }) => {
+        const now = new Date();
+        const post = {
+          ...input,
+          user: new ObjectId(operatorId),
+          likes: 0,
+          comments: [],
+          tags: input.tags || [],
+          isPrivate: input.isPrivate ?? false,
+          createdAt: now,
+          updatedAt: now,
+          __v: 0
+        };
+        const inserted = await db.collection('posts').insertOne(post, { session });
+        post._id = inserted.insertedId;
+        return {
+          result: post,
+          event: { target: post.name, postId: String(post._id) }
+        };
+      }
     });
   }
 
-  async #auditPostWrite(operatorId, action, target, ip, postId) {
-    // Legacy AuditLog's collection name and TTL field are preserved.
-    // Best-effort audit is deliberately separate from the user write, matching
-    // the old logOperation() contract which never changes a successful response.
-    try {
-      const db = this.client.db();
-      const createdDate = new Date();
-      const author = await db.collection('users').findOne(
-        { _id: new ObjectId(operatorId) }, { projection: { displayName: 1, name: 1 } }
-      );
-      const operatorName = author?.displayName || author?.name || operatorId;
-      const result = await db.collection('audit_logs').insertOne({
-        operator: new ObjectId(operatorId),
-        action,
-        target,
-        ip: String(ip || '').slice(0, 128),
-        createdDate
-      });
-      // Durable notification outbox: Socket.IO / Bark fan-out is not yet
-      // migrated; do NOT enable CRUD traffic before dispatch is implemented.
-      await db.collection('post_write_outbox').insertOne({
-        auditLogId: result.insertedId,
-        postId: new ObjectId(postId),
-        operator: new ObjectId(operatorId),
-        operatorName,
-        action,
-        target,
-        createdAt: createdDate,
-        attempts: 0,
-        dispatchedAt: null
-      });
-    } catch (error) {
-      console.error('post-audit-write-failed', error?.name || 'UnknownError');
-    }
-  }
-
-  async createArticle(input, operatorId, ip) {
-    await this.client.connect();
-    const db = this.client.db();
-    const now = new Date();
-    const result = {
-      ...input,
-      user: new ObjectId(operatorId),
-      likes: 0,
-      comments: [],
-      tags: input.tags || [],
-      isPrivate: input.isPrivate ?? false,
-      createdAt: now,
-      updatedAt: now,
-      __v: 0
-    };
-    const inserted = await db.collection('posts').insertOne(result);
-    result._id = inserted.insertedId;
-    await this.#auditPostWrite(operatorId, 'CREATE_POST', result.name, ip, String(result._id));
-    return JSON.parse(JSON.stringify(result));
-  }
-
-  async updateArticle(id, input, operatorId, ip) {
+  async updateArticle(id, input, operatorId, ip, idempotencyKey) {
     if (!/^[a-f0-9]{24}$/i.test(id)) return null;
     await this.client.connect();
     const db = this.client.db();
-    // Mongoose's timestamps:true on findByIdAndUpdate always refreshes updatedAt.
-    const updated = await db.collection('posts').findOneAndUpdate(
-      { _id: new ObjectId(id) },
-      { $set: { ...input, updatedAt: new Date() } },
-      { returnDocument: 'after', includeResultMetadata: true }
-    );
-    const result = updated?.value;
-    if (!result) return null;
-    await this.#auditPostWrite(operatorId, 'UPDATE_POST', result.name, ip, id);
-    return JSON.parse(JSON.stringify(result));
-  }
-
-  async getArticleForDeletion(id) {
-    if (!/^[a-f0-9]{24}$/i.test(id)) return null;
-    await this.client.connect();
-    const post = await this.client.db().collection('posts').findOne(
-      { _id: new ObjectId(id) },
-      { projection: { _id: 1, name: 1, isPrivate: 1 } }
-    );
-    return post ? JSON.parse(JSON.stringify(post)) : null;
-  }
-
-  async deleteArticle(id, operatorId, ip, expectedPrivate) {
-    if (!/^[a-f0-9]{24}$/i.test(id)) return null;
-    await this.client.connect();
-    const db = this.client.db();
-    const post = await db.collection('posts').findOneAndDelete({
-      _id: new ObjectId(id),
-      isPrivate: expectedPrivate ? true : { $ne: true }
+    return performArticleTransaction({
+      client: this.client, db, operatorId, ip, idempotencyKey,
+      action: 'UPDATE_POST', targetId: id, input,
+      mutate: async ({ session }) => {
+        const updated = await db.collection('posts').findOneAndUpdate(
+          { _id: new ObjectId(id) },
+          { $set: { ...input, updatedAt: new Date() } },
+          { session, returnDocument: 'after', includeResultMetadata: true }
+        );
+        const post = updated?.value ?? null;
+        return {
+          result: post,
+          event: post ? { target: post.name, postId: id } : null
+        };
+      }
     });
-    if (!post) return null;
-    await this.#auditPostWrite(operatorId, 'DELETE_POST', post.name, ip, id);
-    return JSON.parse(JSON.stringify({ _id: post._id, isPrivate: !!post.isPrivate, name: post.name }));
+  }
+
+  async deleteArticle(id, operatorId, ip, idempotencyKey) {
+    if (!/^[a-f0-9]{24}$/i.test(id)) return null;
+    await this.client.connect();
+    const db = this.client.db();
+    return performArticleTransaction({
+      client: this.client, db, operatorId, ip, idempotencyKey,
+      action: 'DELETE_POST', targetId: id,
+      mutate: async ({ session }) => {
+        const deleted = await db.collection('posts').findOneAndDelete(
+          { _id: new ObjectId(id) },
+          { session, includeResultMetadata: true }
+        );
+        const post = deleted?.value ?? null;
+        return {
+          result: post
+            ? { _id: post._id, isPrivate: !!post.isPrivate, name: post.name }
+            : null,
+          event: post ? { target: post.name, postId: id } : null
+        };
+      }
+    });
   }
 
   async changePostLikes(id, direction) {

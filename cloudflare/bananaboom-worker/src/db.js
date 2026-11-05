@@ -22,9 +22,8 @@ export const repository = {
   privatePostById: async (id) => (await mongo()).privatePostById(id),
   publicPostLikes: async (id) => (await mongo()).publicPostLikes(id),
   changePostLikes: async (id, direction) => (await mongo()).changePostLikes(id, direction),
-  createArticle: async (input, operatorId, ip) => (await mongo()).createArticle(input, operatorId, ip),
-  updateArticle: async (id, input, operatorId, ip) => (await mongo()).updateArticle(id, input, operatorId, ip),
-  getArticleForDeletion: async (id) => (await mongo()).getArticleForDeletion(id),
-  deleteArticle: async (id, operatorId, ip, expectedPrivate) =>
-    (await mongo()).deleteArticle(id, operatorId, ip, expectedPrivate)
+  createArticle: async (input, operatorId, ip, key) => (await mongo()).createArticle(input, operatorId, ip, key),
+  updateArticle: async (id, input, operatorId, ip, key) => (await mongo()).updateArticle(id, input, operatorId, ip, key),
+    deleteArticle: async (id, operatorId, ip, key) =>
+    (await mongo()).deleteArticle(id, operatorId, ip, key)
 };

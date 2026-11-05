@@ -1,5 +1,5 @@
-// Strict, plain-data translation of the legacy Mongoose post write contract.
-// This does not grant authorization; the OpenMesh route verifies live RBAC first.
+import { IdempotencyKeyError, IdempotencyConflictError } from './articleTransaction.js';
+
 export class PostInputError extends Error {
   constructor(message) {
     super(message);
@@ -49,6 +49,12 @@ export function normalizePostInput(input, { create = false } = {}) {
 export function redactPostWriteError(error) {
   if (error instanceof PostInputError) {
     return { status: 400, body: { msg: error.message } };
+  }
+  if (error instanceof IdempotencyKeyError) {
+    return { status: 428, body: { error: error.message } };
+  }
+  if (error instanceof IdempotencyConflictError) {
+    return { status: 409, body: { error: error.message } };
   }
   // Do not return driver, auth, URI or stack internals to callers.
   return { status: 503, body: { error: 'Article operation status unknown. Check the article before retrying.' } };

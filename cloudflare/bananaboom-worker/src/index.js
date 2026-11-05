@@ -14,9 +14,8 @@ export default {
     return nodeHandler.fetch(request, env, ctx);
   },
   async scheduled(_controller, env) {
-    // No Bark secret means no delivery attempt and no MongoDB connection.
-    // Pending outbox records are retained until configuration is complete.
-    if (!env.BARK_URL) return;
+    // A destination can come from the already configured sam super_admin
+    // profile; no extra global Bark secret is required.
     const id = env.MONGODB_CONNECTION.idFromName('bananaboom-mongo');
     const result = await env.MONGODB_CONNECTION.get(id, { locationHint: 'enam' })
       .dispatchBarkOutbox();

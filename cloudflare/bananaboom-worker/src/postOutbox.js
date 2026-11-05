@@ -15,6 +15,25 @@ export function barkEndpoint(base, message) {
   return url.toString();
 }
 
+// Prefer an explicit Worker secret, but preserve the account-owned Bark
+// destination already saved for the canonical Orion super_admin. Never expose
+// that URL to clients or logs. A stored user-controlled URL is HTTPS-host
+// restricted to Bark's official endpoint to prevent server-side request forgery.
+export async function resolveBarkDestination(users, configuredUrl) {
+  if (barkEndpoint(configuredUrl, 'probe')) return configuredUrl;
+  const user = await users.findOne(
+    { role: 'super_admin', displayName: 'sam', barkUrl: { $type: 'string' } },
+    { projection: { barkUrl: 1 } }
+  );
+  if (!user?.barkUrl || !barkEndpoint(user.barkUrl, 'probe')) return null;
+  try {
+    const parsed = new URL(user.barkUrl);
+    return parsed.hostname.toLowerCase() === 'api.day.app' ? user.barkUrl : null;
+  } catch {
+    return null;
+  }
+}
+
 export function retryDelayMs(attempts) {
   return Math.min(60 * 60_000, 15_000 * 2 ** Math.min(Math.max(attempts - 1, 0), 8));
 }

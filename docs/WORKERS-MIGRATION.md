@@ -416,3 +416,39 @@ CRUD satisfies transactional outbox and idempotency requirements.
 Do not run a production `$unset: { vip: 1 }` while an old Cloud Run
 revision depends on `vip`. Verify active revisions and Mongoose role
 compatibility first, and capture a count/backup of the legacy field.
+
+## Phase 9: atomic article CRUD and stable retry keys
+
+The Worker now uses a MongoDB replica-set transaction to commit business
+article updates, audit_logs, post_write_outbox and post_write_receipts as
+one unit. Receipts are unique by authenticated actor + request UUID; an
+identical repeat returns the first result while reusing the same key for
+another payload returns HTTP 409. A malformed or missing key returns 428.
+Unknown transaction commit outcomes are resolved by reading the
+majority-committed receipt. Durable Object RPCs and REST handlers require
+the key and never retry a mutated request on Cloud Run.
+
+The frontend persists only the SHA-256 payload fingerprint and stable
+random operation UUID in sessionStorage for up to 24 hours, not journal
+contents or credentials. It retains the key after a timeout and clears
+it on confirmed success.
+
+The Gateway ARTICLE_WRITE_CUTOVER switch is 0 by default and accepts an
+explicit signed-in canary request. No random per-request rollout is used
+for mutations because retry affinity must not change. The request body
+is forwarded only for exact eligible article CRUD endpoints. Worker 5xx
+and Service Binding errors produce 503 without Cloud Run mutation replay.
+Setting cutover=1 routes all eligible JWT + idempotency requests to Core;
+Google-only auth and old clients without keys still need Cloud Run.
+
+Bark dispatch can use the existing sam super_admin user Bark address with
+a strict official api.day.app hostname check when no explicit BARK_URL
+secret exists. The address stays in MongoDB, not source code or a response.
+
+An isolated local replica set validated real transactions, read-after-
+write deduplication and forced audit/outbox rollback with no production
+database changes. See scripts/test-crud-replset.mjs.
+
+This is not full API migration or permission to shut down Cloud Run.
+See docs/CLOUD-RUN-RETIREMENT-READINESS.md for outstanding subsystems
+and retirement gates.

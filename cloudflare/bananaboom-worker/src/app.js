@@ -4,6 +4,7 @@ import { repository as mongoRepository } from './db.js';
 import { hydrateR2References } from '../../../utils/r2Reference.js';
 import { authenticateLegacyRequest, canReadPrivatePosts, extractLegacyToken, hasPermission } from './auth.js';
 import { normalizePostInput, redactPostWriteError } from './postWrites.js';
+import { requireMutationKey } from './articleTransaction.js';
 
 // Match legacy JSON serialization before applying its response hydration middleware.
 // Otherwise recursively traversing BSON ObjectId/Date would erase their values.
@@ -205,8 +206,15 @@ export function createApp(repository = mongoRepository, options = {}) {
       ctx.status = authorized.status;
       return authorized.body;
     }
+    let key;
     try {
-      return await action(authorized.user);
+      key = requireMutationKey(ctx.headers['x-idempotency-key']);
+    } catch {
+      ctx.status = 428;
+      return { error: 'X-Idempotency-Key is required for article writes' };
+    }
+    try {
+      return await action(authorized.user, key);
     } catch (error) {
       const safe = redactPostWriteError(error);
       if (safe.status >= 500) console.error('post-crud-write-failed', error?.name || 'UnknownError');
@@ -215,27 +223,27 @@ export function createApp(repository = mongoRepository, options = {}) {
     }
   };
   const sourceIp = (ctx) => String(ctx.headers['cf-connecting-ip'] || '').slice(0, 128);
-  app.post('/api/posts', async (ctx) => respondWrite(ctx, async (user) => {
+  app.post('/api/posts', async (ctx) => respondWrite(ctx, async (user, key) => {
     const input = normalizePostInput(ctx.requestBody, { create: true });
-    const data = await repository.createArticle(input, user.id, sourceIp(ctx));
+    const data = await repository.createArticle(input, user.id, sourceIp(ctx), key);
     ctx.status = 201;
     return { success: true, data: asLegacyJson(data) };
   }));
-  app.put('/api/posts/:id', async (ctx) => respondWrite(ctx, async (user) => {
+  app.put('/api/posts/:id', async (ctx) => respondWrite(ctx, async (user, key) => {
     const id = ctx.params.id;
     if (!/^[a-f0-9]{24}$/i.test(id)) {
       ctx.status = 404;
       return { msg: '文章不存在' };
     }
     const input = normalizePostInput(ctx.requestBody);
-    const data = await repository.updateArticle(id, input, user.id, sourceIp(ctx));
+    const data = await repository.updateArticle(id, input, user.id, sourceIp(ctx), key);
     if (!data) {
       ctx.status = 404;
       return { msg: '文章不存在' };
     }
     return { success: true, data: asLegacyJson(data) };
   }));
-  app.delete('/api/posts/:id', async (ctx) => respondWrite(ctx, async (user) => {
+  app.delete('/api/posts/:id', async (ctx) => respondWrite(ctx, async (user, key) => {
     const id = ctx.params.id;
     if (!/^[a-f0-9]{24}$/i.test(id)) {
       ctx.status = 404;
@@ -245,18 +253,15 @@ export function createApp(repository = mongoRepository, options = {}) {
       ctx.status = 403;
       return { code: 'PERMISSION_DENIED', required: 'super_admin' };
     }
-    const post = await repository.getArticleForDeletion(id);
-    if (!post) {
-      ctx.status = 404;
-      return { message: 'Post not found' };
-    }
-    const deleted = await repository.deleteArticle(id, user.id, sourceIp(ctx), post.isPrivate);
+    // Do not read the article before the transactional delete. A retry of a
+    // committed DELETE must find its receipt even though the post is gone.
+    const deleted = await repository.deleteArticle(id, user.id, sourceIp(ctx), key);
     if (!deleted) {
       ctx.status = 404;
       return { message: 'Post not found' };
     }
     const options = listOptions(ctx.query);
-    return asLegacyJson(post.isPrivate
+    return asLegacyJson(deleted.isPrivate
       ? await repository.privatePosts(options)
       : await repository.publicPosts(options));
   }));
