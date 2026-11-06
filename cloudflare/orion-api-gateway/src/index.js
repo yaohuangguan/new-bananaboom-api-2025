@@ -174,6 +174,17 @@ export function isFootprintReadCandidate(method, path, search = '', headers = {}
   return Boolean(cutover || get('x-orion-footprint-read-canary') === '1');
 }
 
+export function isFootprintDetailCandidate(method, path, search = '', headers = {}, cutover = false) {
+  if (method !== 'GET' || !/^\/api\/footprints\/[a-f0-9]{24}$/i.test(path) || search) return false;
+  const get = (name) => typeof headers?.get === 'function'
+    ? headers.get(name) : headers?.[name] || headers?.[name.toLowerCase()] || null;
+  const signed = get('x-auth-token') ||
+    get('authorization')?.startsWith('Bearer ') ||
+    /(?:^|;)\s*orion_session=/.test(get('cookie') || '');
+  if (!signed || get('x-google-auth')) return false;
+  return Boolean(cutover || get('x-orion-footprint-detail-canary') === '1');
+}
+
 export function shouldRouteToCoreWorker(method, path, search = '', headers = {}) {
   if (method !== 'GET') return false;
   if (path === '/api/audit/worker-events') {
@@ -432,6 +443,27 @@ function articleWriteFailure(request) {
   return response;
 }
 
+function footprintDetailFailure(request, status = 503) {
+  // A failed owner-validation check must NEVER fall back to the legacy
+  // Cloud Run by-ID endpoint; that would bypass the ownership control.
+  const response = withSecurityHeaders(new Response(JSON.stringify({
+    message: status === 401 ? 'Signed-in session required for footprint detail' :
+      'Footprint detail temporarily unavailable'
+  }), {
+    status, headers: {
+      'content-type': 'application/json; charset=utf-8',
+      'cache-control': 'no-store'
+    }
+  }));
+  const origin = corsOrigin(request);
+  if (origin) {
+    response.headers.set('access-control-allow-origin', origin);
+    response.headers.set('access-control-allow-credentials', 'true');
+    response.headers.append('vary', 'Origin');
+  }
+  return response;
+}
+
 function likeWriteFailure(request) {
   // The Worker might have committed an increment before its connection failed.
   // Never retry or fall back to Cloud Run, or we can double-count the same click.
@@ -605,7 +637,16 @@ export default {
     const footprintRead = isFootprintReadCandidate(
       request.method, pathname, incomingUrl.search, request.headers,
       String(env.FOOTPRINT_READ_CUTOVER || '0') === '1');
-    const routeToCore = likeWrite || articleWrite || profileRead || todoRead || footprintRead
+    const footprintDetailCutover = String(env.FOOTPRINT_DETAIL_CUTOVER || '0') === '1';
+    const footprintDetailRead = isFootprintDetailCandidate(
+      request.method, pathname, incomingUrl.search, request.headers, footprintDetailCutover);
+    if (footprintDetailCutover && ['GET', 'HEAD'].includes(request.method) &&
+        pathname.startsWith('/api/footprints/') && !footprintDetailRead) {
+      // Reject legacy Google-only, invalid, or absent credentials rather
+      // than let an alternate URL/auth form bypass the owner scope.
+      return footprintDetailFailure(request, 401);
+    }
+    const routeToCore = likeWrite || articleWrite || profileRead || todoRead || footprintRead || footprintDetailRead
       ? true : pathname === '/api/posts/private/posts'
       ? shouldRoutePrivateRead(request.method, pathname, incomingUrl.search, request.headers, rolloutPercent)
       : shouldRouteToCoreWorker(request.method, pathname, incomingUrl.search, request.headers);
@@ -621,6 +662,7 @@ export default {
         workerHeaders.delete('x-orion-profile-canary');
         workerHeaders.delete('x-orion-todo-read-canary');
         workerHeaders.delete('x-orion-footprint-read-canary');
+        workerHeaders.delete('x-orion-footprint-detail-canary');
         const body = articleWrite ? request.body : undefined;
         const workerRequest = new Request(request.url, {
           method: request.method,
@@ -649,6 +691,10 @@ export default {
           }
           return redactPublicPostResponse(request, secured);
         }
+        if (footprintDetailRead) {
+          console.error('Footprint detail owner validation failed; no Cloud Run fallback');
+          return footprintDetailFailure(request);
+        }
         if (articleWrite) {
           console.error('BananaBoom article write returned 5xx; never retry via Cloud Run');
           return articleWriteFailure(request);
@@ -664,6 +710,10 @@ export default {
         }
         console.error('BananaBoom Worker read returned', workerResponse.status, 'falling back to Cloud Run');
       } catch (error) {
+        if (footprintDetailRead) {
+          console.error('Footprint detail Core error; no Cloud Run fallback', error?.name || 'Error');
+          return footprintDetailFailure(request);
+        }
         if (articleWrite) {
           console.error('BananaBoom article write exception; not replaying', error?.name || 'UnknownError');
           return articleWriteFailure(request);
@@ -678,6 +728,7 @@ export default {
       }
     }
 
+    if (footprintDetailRead) return footprintDetailFailure(request); // Fail closed without core.
     if (articleWrite) return articleWriteFailure(request); // No core binding -> never replay.
     const originUrl = new URL(pathname + incomingUrl.search, env.ORIGIN_URL);
     const headers = new Headers(request.headers);
@@ -693,6 +744,8 @@ export default {
     headers.delete('x-orion-private-worker-canary');
     headers.delete('x-orion-article-write-canary');
     headers.delete('x-orion-profile-canary');
+    headers.delete('x-orion-footprint-read-canary');
+    headers.delete('x-orion-footprint-detail-canary');
     headers.delete('x-orion-pdf-canary');
 
     const ttl = cacheTtlFor(request, pathname);

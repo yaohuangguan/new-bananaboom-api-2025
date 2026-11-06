@@ -24,6 +24,7 @@ export const repository = {
   ownerProfile: async (user) => (await mongo()).ownerProfile(user),
   ownerTodos: async (user, query) => (await mongo()).ownerTodos(user, query),
   ownerFootprints: async (user, query) => (await mongo()).ownerFootprints(user, query),
+  ownerFootprintDetail: async (user, id) => (await mongo()).ownerFootprintDetail(user, id),
   ownerAiStatus: async (user) => (await mongo()).ownerAiStatus(user),
   privatePosts: async (options) => (await mongo()).privatePosts(options),
   pollPostWriteEvents: async (after, max) => (await mongo()).pollPostWriteEvents(after, max),

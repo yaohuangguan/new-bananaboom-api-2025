@@ -541,3 +541,21 @@ connection/refresh tokens are modified by this read-only stage.
   Google-only token or unrelated route is migrated.
 - Do not enable all-user cutover until authenticated JSON parity is confirmed
   with visited/planned, mixed and empty histories. Retain Cloud Run fallback.
+
+
+## Phase 14: exact footprint-detail Worker GET (2026-11-06)
+
+- GET /api/footprints/:24hexID resolves through the private Core Worker only
+  for verified JWT + live Mongo Session + FOOTPRINT:USE. Fixed MongoDB query
+  includes both _id and the authenticated owner's user ObjectId; missing and
+  foreign records are identical 404.
+- Gateway FOOTPRINT_DETAIL_CUTOVER=0 by default; explicit
+  x-orion-footprint-detail-canary: 1 allows owner-authenticated tests.
+- Unlike regular read routes, Core failure, missing service binding or timeout
+  gives 503 **without returning to the legacy Cloud Run detail handler**.
+  When globally enabled, legacy Google-only, missing-auth, encoded-ID and
+  unsupported HEAD detail requests are blocked, never transparently forwarded.
+- Do not globally enable until owner and foreign-ID cases are signed-in
+  production-verified, and Google-only login dependence is evaluated.
+- The legacy PUT/DELETE methods are not migrated by this step. The source-side
+  owner restrictions still require a controlled live rollout or safe replacement.
