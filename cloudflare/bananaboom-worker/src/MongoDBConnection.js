@@ -7,6 +7,7 @@ import { dispatchTodoReminders } from './todoReminders.js';
 import { createDatabaseBackup } from './databaseBackup.js';
 import { getPublicComments } from './commentReads.js';
 import { getOwnerProfile, getOwnerAiStatus } from './ownerProfile.js';
+import { listOwnerTodos } from './todoReads.js';
 
 /**
  * A single Durable Object owns the MongoDB connection.
@@ -151,6 +152,11 @@ export class MongoDBConnection extends DurableObject {
     return JSON.parse(JSON.stringify(rows.map((resume) => ({
       ...resume, user: user?.email || (user ? resume.user : null)
     }))));
+  }
+
+  async ownerTodos(user, query) {
+    await this.client.connect();
+    return listOwnerTodos(this.client.db(), user, query);
   }
 
   async ownerProfile(user) {
