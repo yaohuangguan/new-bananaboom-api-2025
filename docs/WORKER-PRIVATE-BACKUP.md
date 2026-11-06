@@ -107,3 +107,9 @@ The 16 MiB canary still hit the document limit. MongoDB rethrows can discard
 custom Error properties, so the encoded byte length now travels as a strictly
 numeric internal error code before it is parsed and logged by the Core Worker.
 Never include document contents, IDs, credentials or raw MongoDB messages.
+
+
+The Durable Object logs numeric size and cap directly at the overflow check,
+before MongoDB/RPC error propagation. Read only this safety metric in Cloudflare
+tail; no record contents or identifiers are logged. Keep the existing caps
+until actual sizes and memory safety are known.
