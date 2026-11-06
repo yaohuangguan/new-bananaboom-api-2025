@@ -2,7 +2,9 @@ import { BSON } from 'mongodb';
 const { EJSON } = BSON;
 
 const CHUNK_MAX_BYTES = 2 * 1024 * 1024;
-const MAX_SINGLE_DOCUMENT_BYTES = 512 * 1024;
+// MongoDB BSON documents max out at 16 MiB. Canonical EJSON can be larger
+// than the original BSON; keep a bounded 16 MiB exported-document safeguard.
+const MAX_SINGLE_DOCUMENT_BYTES = 16 * 1024 * 1024;
 // Keep a safety margin under the Cloudflare isolate memory budget.
 const MAX_STAGED_BYTES = 48 * 1024 * 1024;
 const UPLOAD_CONCURRENCY = 4;
@@ -55,12 +57,13 @@ function logBackupDiagnostic(stage, error, docs = 0, bytes = 0, parts = 0, elaps
 // This crosses the Durable Object RPC boundary without exposing raw errors.
 export function parseBackupDiagnostic(error) {
   const m = String(error?.message || '').match(
-    /ORION_BACKUP_DIAG\|(snapshot|r2-chunks|manifest)\|([A-Za-z0-9_-]{1,80})\|(\d{1,8})\|(\d{1,12})\|(\d{1,8})\|(\d{1,8})/
+    /ORION_BACKUP_DIAG\|(snapshot|r2-chunks|manifest)\|([A-Za-z0-9_-]{1,80})\|(\d{1,8})\|(\d{1,12})\|(\d{1,8})\|(\d{1,8})(?:\|(\d{1,12}))?/
   );
   return m ? {
     stage:m[1], reason:m[2],
     documents:Number(m[3]), bytes:Number(m[4]),
-    parts:Number(m[5]), elapsedMs:Number(m[6])
+    parts:Number(m[5]), elapsedMs:Number(m[6]),
+    exportedDocumentBytes:Number(m[7] || 0)
   } : null;
 }
 
@@ -104,6 +107,7 @@ export async function createDatabaseBackup({
   clock = () => Date.now(),
   maxTotalBytes = MAX_BACKUP_BYTES,
   maxStagedBytes = MAX_STAGED_BYTES,
+  maxSingleDocumentBytes = MAX_SINGLE_DOCUMENT_BYTES,
   maxDocuments = MAX_DOCUMENTS
 }) {
   if (!bucket || typeof bucket.put !== 'function') {
@@ -200,8 +204,10 @@ export async function createDatabaseBackup({
           if (++totalDocuments > maxDocuments) throw new Error('Backup exceeded document limit');
           const line = EJSON.stringify(doc, { relaxed: false }) + '\n';
           const length = encoder.encode(line).byteLength;
-          if (length > MAX_SINGLE_DOCUMENT_BYTES) {
-            throw new Error('Document too large for safe export');
+          if (length > maxSingleDocumentBytes) {
+            const error = new Error('Document too large for safe export');
+            error.exportedBytes = length;
+            throw error;
           }
           if (totalBytes + length > maxTotalBytes) throw new Error('Backup exceeded size limit');
           if (totalBytes + length > maxStagedBytes) {
@@ -284,7 +290,8 @@ export async function createDatabaseBackup({
       'ORION_BACKUP_DIAG', stage, reason,
       snapshot?.totalDocuments || 0,
       snapshot?.totalBytes || 0,
-      uploaded.length, elapsed
+      uploaded.length, elapsed,
+      Number.isSafeInteger(error?.exportedBytes) ? error.exportedBytes : 0
     ].join('|'));
   }
 }

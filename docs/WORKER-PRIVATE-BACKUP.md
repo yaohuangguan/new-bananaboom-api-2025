@@ -19,7 +19,7 @@ Never copy these files to the public orion-assets bucket.
 
 A single snapshot read transaction spans all collections. Chunk uploads to
 R2 happen while the snapshot remains open. Backup aborts after 40 seconds,
-50k documents, 60 MiB uncompressed, or 512 KiB individual document, with no
+50k documents, 60 MiB uncompressed, or 16 MiB exported EJSON document, with no
 completed manifest. Incomplete chunks are deleted best effort. Cloudflare
 Workers Free CPU and MongoDB transaction expiration may be stricter.
 MongoDB forbids listIndexes in transactions, so index metadata is enumerated
@@ -74,7 +74,7 @@ NDJSON parts to private R2 with four concurrent writes. The manifest is
 written LAST. Partial failure cleans up the manifest first.
 
 Limits: 48 MiB staging memory, 60 MiB uncompressed data, 50,000 documents,
-512 KiB per document and 40 seconds by default. Oversized backups fail
+16 MiB per exported EJSON document and 40 seconds by default. Oversized backups fail
 explicitly; no partial backup is represented as complete. Test production
 and restore into a truly isolated empty database before enabling cutover.
 
@@ -88,3 +88,14 @@ backup, including R2 uploads, has a **120-second** limit. This does not extend
 the database transaction to 120 seconds. A sanitized stage and numeric counters
 cross the Durable Object RPC boundary for actionable diagnostics without
 exposing private document values or raw connection strings.
+
+
+## Large AI/notes documents (2026-11-07)
+
+Live production canary reached the snapshot after about 20 seconds but
+found a canonical Extended JSON record exceeding the original 512 KiB
+per-document limit. The limit is raised to 16 MiB of exported EJSON per
+document. R2 chunk target stays at 2 MiB, but a single larger record is
+placed in one part to preserve an unbroken NDJSON line; the per-document
+and 48 MiB total staging memory limits remain mandatory. An over-limit
+error now logs ONLY the record's encoded byte length, never its contents.
