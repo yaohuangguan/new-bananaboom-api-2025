@@ -70,6 +70,15 @@ export async function createDatabaseBackup({
   }
   if (collections.length === 0) throw new Error('No database collections to back up');
 
+  // MongoDB forbids listIndexes inside a transaction. Capture the collection
+  // catalog before the first snapshot read; document data remains read
+  // consistently in the transaction that follows.
+  const indexesByCollection = new Map(await Promise.all(collections.map(async (name) => {
+    const collection = db.collection(name);
+    return [name, collection.listIndexes ? await collection.listIndexes().toArray() : []];
+  })));
+
+
   const uploaded = [];
   let totalBytes = 0;
   let totalDocuments = 0;
@@ -87,8 +96,7 @@ export async function createDatabaseBackup({
       await session.withTransaction(async () => {
         for (const name of collections) {
           const collection = db.collection(name);
-          const rawIndexes = collection.listIndexes
-            ? await collection.listIndexes().toArray() : [];
+          const rawIndexes = indexesByCollection.get(name) || [];
           const col = {
             name, count: 0, parts: [],
             options: metadata.get(name)?.options || {},
