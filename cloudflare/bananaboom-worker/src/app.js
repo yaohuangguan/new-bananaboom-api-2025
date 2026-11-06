@@ -6,6 +6,7 @@ import { authenticateLegacyRequest, canReadPrivatePosts, extractLegacyToken, has
 import { normalizePostInput, redactPostWriteError } from './postWrites.js';
 import { requireMutationKey } from './articleTransaction.js';
 import { classifyBackupFailure, parseBackupDiagnostic } from './databaseBackup.js';
+import { registerBrainReadRoutes } from './brainHttp.js';
 import { legacyAuthCookie, passwordLoginInput } from './passwordSession.js';
 
 // Match legacy JSON serialization before applying its response hydration middleware.
@@ -36,6 +37,7 @@ export function createApp(repository = mongoRepository, options = {}) {
   const secretProvider = options.secretProvider || runtimeJwtSecret;
   const app = openmesh({ service: 'bananaboom-core' });
   app.use(jsonBody({ limit: 2 * 1024 * 1024 }));
+  registerBrainReadRoutes(app, repository, options.brainReadOptions || {});
   // Password session migration is behind an explicit Gateway flag/canary.
   // Do not alter live Firebase/Google or Second Brain OAuth sessions.
   const trustedAuthOrigins = new Set([

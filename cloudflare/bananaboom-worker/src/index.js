@@ -1,6 +1,8 @@
 import { createServer } from 'node:http';
 import { httpServerHandler } from 'cloudflare:node';
 import { createApp } from './app.js';
+import { repository } from './db.js';
+import { handleBrainMcpRequest } from './brainMcp.js';
 
 const app = createApp();
 await app.ready();
@@ -11,6 +13,12 @@ export { MongoDBConnection } from './MongoDBConnection.js';
 const nodeHandler = httpServerHandler(createServer(app.callback()));
 export default {
   fetch(request, env, ctx) {
+    // Official MCP SDK Web Standards transport; no Express/Node HTTP
+    // bridge or new session IDs are needed in the read-only canary.
+    if (new URL(request.url).pathname === '/api/brain/sync/mcp') {
+      const origins=String(env.BRAIN_ALLOWED_ORIGINS || '').split(',').map(x=>x.trim()).filter(Boolean);
+      return handleBrainMcpRequest(request,repository,{allowedOrigins:origins});
+    }
     return nodeHandler.fetch(request, env, ctx);
   },
   async scheduled(_controller, env) {

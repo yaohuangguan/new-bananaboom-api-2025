@@ -29,6 +29,9 @@ PDF_BROWSER_CUTOVER = "1"
 # Password signin/logout Worker implementation; keep old production path
 # until signed-in browser parity is proven. Google/Firebase remains legacy.
 PASSWORD_AUTH_CUTOVER = "0"
+# Only the token-authenticated Brain REST search/read paths can be globally
+# enabled in a later rollout. MCP remains canary-only until sync write parity.
+BRAIN_READ_CUTOVER = "0"
 BACKUP_R2_CUTOVER = "1"
 # Category/method-only Cloud Run upstream observation for retirement.
 # No paths, IDs, cookies, IPs, query strings, tokens or body data.

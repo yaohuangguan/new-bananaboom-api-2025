@@ -8,6 +8,7 @@ import { createDatabaseBackup } from './databaseBackup.js';
 import { getPublicComments } from './commentReads.js';
 import { getOwnerProfile, getOwnerAiStatus } from './ownerProfile.js';
 import { createPasswordSession, revokePasswordSession } from './passwordSession.js';
+import { BrainReadError, brainAccessScopes, searchBrainMemories, readBrainMemory } from './brainRead.js';
 import { readOwnerFootprints, readOwnerFootprint } from './footprintReads.js';
 import { listOwnerTodos } from './todoReads.js';
 
@@ -179,6 +180,31 @@ export class MongoDBConnection extends DurableObject {
   async ownerAiStatus(user) {
     await this.client.connect();
     return getOwnerAiStatus(this.client.db(), user);
+  }
+
+  async #brainResult(operation) {
+    await this.client.connect();
+    try {
+      return { ok: true, data: await operation(this.client.db()) };
+    } catch (error) {
+      // Known validation errors stay sanitized across Durable Object RPC.
+      if (error instanceof BrainReadError) {
+        return { ok: false, status: error.status, code: error.message };
+      }
+      throw error;
+    }
+  }
+
+  brainVaultScopes(token, resource) {
+    return this.#brainResult(db => brainAccessScopes(db, token, resource));
+  }
+
+  brainVaultSearch(token, input, resource) {
+    return this.#brainResult(db => searchBrainMemories(db, token, input, resource));
+  }
+
+  brainVaultRead(token, id, resource) {
+    return this.#brainResult(db => readBrainMemory(db, token, id, resource));
   }
 
   async passwordSignIn(credentials) {
