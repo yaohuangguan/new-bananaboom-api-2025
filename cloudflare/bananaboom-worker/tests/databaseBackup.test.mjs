@@ -188,3 +188,88 @@ test('failure codes cannot echo secret-bearing raw messages', () => {
   assert.equal(classifyBackupFailure({codeName:'OperationNotSupportedInTransaction'}),
     'mongodb-OperationNotSupportedInTransaction');
 });
+
+
+test('all R2 side effects occur after transaction succeeds, with manifest uploaded last', async () => {
+  let transactionActive = false;
+  let transactionAttempts = 0;
+  const source = fakeSource({
+    posts: [{_id:new ObjectId(), title:'A'}],
+    users: [{_id:new ObjectId(), email:'safe@example.invalid'}]
+  });
+  source.client.withSession = async (fn) => fn({
+    withTransaction: async (run) => {
+      transactionActive = true;
+      transactionAttempts++;
+      try {
+        // Driver's first callback can be retried after transient error.
+        await run();
+        return await run();
+      } finally {
+        transactionActive = false;
+      }
+    }
+  });
+  const b = bucket(), puts = [];
+  const originalPut = b.put;
+  b.put = async (key, bytes, options) => {
+    assert.equal(transactionActive, false, 'R2 must not run inside Mongo snapshot');
+    puts.push(key);
+    return originalPut(key, bytes, options);
+  };
+  const snapshot = await createDatabaseBackup({...source, bucket:b});
+  assert.equal(transactionAttempts, 1);
+  assert.equal(snapshot.documents, 2, 'transaction retry must not double count');
+  assert.equal(snapshot.collections, 2);
+  assert.equal(puts.length, 3);
+  assert.equal(puts.at(-1), snapshot.manifestKey);
+  const manifest = JSON.parse(new TextDecoder().decode(b.map.get(snapshot.manifestKey)));
+  assert.equal(manifest.totals.documents, 2);
+  assert.equal(manifest.totals.parts, 2);
+});
+
+test('staging memory cap fails before any R2 PUT, without partial backup', async () => {
+  const b = bucket();
+  await assert.rejects(createDatabaseBackup({
+    ...fakeSource({ users: [{_id:new ObjectId(), name:'large-memory-record'}] }),
+    bucket:b, maxStagedBytes:1
+  }), /memory staging limit/);
+  assert.equal(b.map.size, 0);
+});
+
+test('failed concurrent chunk upload waits for all in-flight writes then cleans them up', async () => {
+  const b = bucket();
+  const originalPut = b.put;
+  b.put = async (key, bytes, options) => {
+    if (key.includes('/users/')) throw new Error('simulated upload interruption');
+    return originalPut(key, bytes, options);
+  };
+  await assert.rejects(createDatabaseBackup({
+    ...fakeSource({
+      users:[{_id:new ObjectId(),name:'Sam'}],
+      posts:[{_id:new ObjectId(),title:'Private'}]
+    }), bucket:b
+  }), /simulated upload interruption/);
+  assert.equal(b.map.size,0,'no chunks or false-complete manifest should remain');
+});
+
+test('ambiguous manifest upload is removed before already uploaded chunks', async () => {
+  const b=bucket();
+  const originalPut=b.put;
+  const deletes=[];
+  const originalDelete=b.delete;
+  b.delete=async (key) => {
+    deletes.push(key);
+    return originalDelete(key);
+  };
+  b.put=async (key,bytes,options) => {
+    await originalPut(key,bytes,options);
+    if (key.endsWith('/manifest.json')) throw new Error('response lost after manifest write');
+  };
+  await assert.rejects(createDatabaseBackup({
+    ...fakeSource({posts:[{_id:new ObjectId(),title:'A'}]}),
+    bucket:b
+  }), /response lost/);
+  assert.equal(b.map.size,0);
+  assert.ok(deletes[0].endsWith('/manifest.json'),'remove completion marker before chunks');
+});

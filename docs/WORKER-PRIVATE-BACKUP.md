@@ -63,3 +63,17 @@ numeric document/byte/part/timing counters, without raw MongoDB/R2 errors or
 private values. Use the next controlled canary to identify the failure phase.
 Do not turn off the legacy backup before a completed private manifest and
 independent isolated restore both succeed.
+
+## Staged snapshot workflow (2026-11-07)
+
+MongoDB transaction callbacks may retry automatically. Previously each
+callback uploaded R2 objects, extending the transaction and duplicating
+remote side effects on retry. The new runner buffers one consistent snapshot
+into bounded memory, commits the read transaction, and then uploads 2 MiB
+NDJSON parts to private R2 with four concurrent writes. The manifest is
+written LAST. Partial failure cleans up the manifest first.
+
+Limits: 48 MiB staging memory, 60 MiB uncompressed data, 50,000 documents,
+512 KiB per document and 40 seconds by default. Oversized backups fail
+explicitly; no partial backup is represented as complete. Test production
+and restore into a truly isolated empty database before enabling cutover.
