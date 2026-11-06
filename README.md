@@ -1,131 +1,114 @@
-# Orion API
+# Orion API — Cloudflare migration
 
-**The production backend behind Orion.**
+Orion is the API and personal-data backend for [samyao.me](https://samyao.me), a public digital garden plus the private Captain's Cabin. **This is a hybrid production system undergoing a controlled migration to Cloudflare Workers; it is not yet Cloudflare-only.**
 
-Orion API is a modular Node.js service for [samyao.me](https://samyao.me). It owns authentication, role-based access, journals, projects, résumé data, R2 media, realtime chat, personal records, audit logs and AI-assisted workflows.
+**Architecture:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · **Cutover / shutdown checklist:** [docs/CLOUD-RUN-RETIREMENT-READINESS.md](docs/CLOUD-RUN-RETIREMENT-READINESS.md) · **R2 backup acceptance:** [docs/WORKER-PRIVATE-BACKUP.md](docs/WORKER-PRIVATE-BACKUP.md) · [Frontend repository](https://github.com/yaohuangguan/orion-frontend)
 
-[Orion](https://samyao.me) · [Health check](https://bananaboom-api-242273127238.asia-east1.run.app/health) · [Frontend repository](https://github.com/yaohuangguan/orion-frontend)
-
-## 已实现
-
-- **身份与权限：** JWT 会话、Firebase 身份接入、角色与细粒度权限、权限申请及全局路由守卫。
-- **内容平台：** 公开/私密日志、评论、标签、主页配置、双语简历、Web / Full Stack / Mobile 项目目录。
-- **媒体服务：** multipart 上传、Cloudflare R2、图片处理和安全的远程媒体地址。
-- **个人模块：** 待办、健身、照片、生理周期、足迹、阅读记录和定时任务。
-- **AI 工具：** Gemini 与专用 AI 路由、流式响应、第二大脑上下文、辩论、RPG、绘图和语音地图服务。
-- **实时通信：** Socket.IO 聊天和服务端事件。
-- **运维能力：** 审计日志、备份、速率限制、安全响应头、压缩、健康检查和 Google Cloud Run 容器部署。
-- **支付：** Stripe webhook 与产品价格配置。
-
-## 请求路径
+## Production topology (verified 2026-11-07)
 
 ```mermaid
-flowchart LR
-  Client[Orion frontend] --> Express[Express 5]
-  Express --> Auth[JWT identity]
-  Auth --> Guard[RBAC global guard]
-  Guard --> Routes[Feature routes]
-  Routes --> Mongo[(MongoDB)]
-  Routes --> R2[(Cloudflare R2)]
-  Routes --> Realtime[Socket.IO]
-  Routes --> Providers[AI / Email / Stripe]
+flowchart TD
+    U["Browser / Orion PWA"] --> F["Orion Frontend · samyao.me · Vercel"]
+    U --> G["API Gateway · api.samyao.me · Cloudflare Worker"]
+    G -->|"Migrated routes / service binding"| C["Core Worker · bananaboom-core"]
+    G -->|"Unmigrated routes / legacy origin"| L["Express 5 · Cloud Run"]
+    C --> DO["MongoDBConnection Durable Object"]
+    DO --> DB[("Existing MongoDB")]
+    L --> DB
+    C --> R2[("Cloudflare R2 · private backup")]
+    L --> Media[("R2 media / integrations")]
+    U --> Auth["Firebase / Google sign-in"]
 ```
 
-所有 `/api` 请求先经过温和身份解析，再由全局权限表决定公开访问、本人访问或管理员能力。公开文章详情仍会在数据层拒绝私密记录。
+**Browser API address:** `https://api.samyao.me`. Core Worker has no public workers.dev endpoint; the API Gateway uses a Cloudflare Service Binding. The old Cloud Run service **is still required**, and some Worker read failures safely fall back to it. The frontend remains on **Vercel** as of this review, **not Cloudflare Pages**. The target is a Cloudflare-native frontend + API stack, without a container or Cloud Run.
 
-## 本地开发
+### Production route ownership
 
-需要 Node.js 22+ 与 pnpm 9+，以及可用的 MongoDB。
+| Surface | Current production behavior | Status |
+| --- | --- | --- |
+| Public homepage, posts, projects, tags, menu, photos, résumés | Gateway → Core for explicitly approved GET paths, with read-only fallback where implemented | Migrated subset |
+| Public comments GET / article likes, selected private post reads | Implemented Worker paths subject to routing and permission rules; verify per route | Partial |
+| Profile, Todo and footprint GET | Worker implementations exist; global cutover flags are `0`; explicit canaries only | **Not globally cut over** |
+| Article create/update/delete | Transactional Worker implementation with idempotency; normal cutover flag `0` | **Not globally cut over** |
+| Database `POST /api/backup/database` | Gateway → Core → MongoDB snapshot → private R2 | **Production cutover complete** |
+| Public résumé PDF | Gateway Browser Run; `PDF_BROWSER_CUTOVER=1` | Cut over |
+| Login / registration / Google OAuth / sessions and admin writes | Mostly Cloud Run | **Blocking retirement** |
+| Second Brain API, sync/import/export/restore, MCP/OAuth | Legacy Cloud Run dependency remains | **Blocking retirement** |
+| Personal writes, R2 upload/asset management, AI tools/history | Cloud Run for unmigrated paths | **Blocking retirement** |
+| Todo reminders | Core Cron code exists but `TODO_REMINDERS_ENABLED=0`; old GCP job paused | **Not activated** |
+| Human chat and old Stripe checkout | Gateway returns HTTP 410; AI chat history is retained | Intentionally retired |
 
-```bash
-git clone https://github.com/yaohuangguan/new-bananaboom-api-2025.git
-cd new-bananaboom-api-2025
-pnpm install
-pnpm dev
-```
+The Gateway controls the exact route allowlist and feature flags in `cloudflare/orion-api-gateway/src/index.js` and `wrangler.toml`. **Do not mistake an implemented Core endpoint or a passing canary for a globally enabled route.**
 
-开发命令使用 Node 原生 `--env-file=.env`。至少配置：
+### Production backup milestone
 
-```dotenv
-NODE_ENV=development
-PORT=5000
-MONGO_URI=mongodb://127.0.0.1:27017/orion
-SECRET_JWT=replace-with-a-long-random-secret
-FRONTEND_URL=http://localhost:5173
-```
+On 2026-11-07, `BACKUP_R2_CUTOVER=1` was deployed and the normal authenticated *Backup to Cloud (R2)* button succeeded without a canary header. Independent R2 reads verified **32/32 SHA-256 data parts**, **7,220,817 bytes**, **36 collections** and **1,271 documents**. An isolated local MongoDB Replica Set restored all **1,271 documents** and checked **65 secondary indexes**. The production database was not modified during restore. See [backup runbook](docs/WORKER-PRIVATE-BACKUP.md).
 
-按启用的模块再配置 Firebase、R2、Resend、Gemini、Stripe 等变量。不要提交 `.env`、服务账户 JSON、访问密钥或生产数据库地址。
+## Product scope and decisions
 
-## 常用可选配置
+**Retain:** public journal/portfolio/comments, private login and permissions, personal notes, Second Brain/MCP, AI apps and AI conversation history, photo media, footprints, fitness, Todo, period tracking, menus, private data export/recovery and necessary scheduled tasks.
 
-```dotenv
-FIREBASE_SERVICE_ACCOUNT=...
-R2_ACCOUNT_ID=...
-R2_ACCESS_KEY_ID=...
-R2_SECRET_ACCESS_KEY=...
-R2_BUCKET_NAME=...
-R2_PUBLIC_DOMAIN=https://assets.samyao.me
-R2_NATIVE_PUBLIC_DOMAIN=https://pub-xxxxxxxx.r2.dev
-# Optional: GitHub → Portfolio import (private repos)
-GITHUB_PORTFOLIO_TOKEN=github_pat_read_only_metadata_contents
-# GitHub → Portfolio AI analysis + optional cover generation.
-# Uses Workers AI free allocation first; R2_ACCOUNT_ID is reused as the Cloudflare account id.
-CLOUDFLARE_AI_TOKEN=cloudflare_workers_ai_token
-# Optional model overrides
-CLOUDFLARE_PORTFOLIO_TEXT_MODEL=@cf/zai-org/glm-4.7-flash
-CLOUDFLARE_PORTFOLIO_IMAGE_MODEL=@cf/black-forest-labs/flux-1-schnell
-RESEND_API_KEY=...
-EMAIL_FROM=...
-GEMINI_API_KEY=...
-STRIPE_SECRET_KEY=...
-STRIPE_WEBHOOK_SECRET=...
-CRON_SECRET=...
-```
+**Retire:** human group/private chat and Socket.IO presence, obsolete Stripe checkout/subscriptions/webhook endpoints, unused PDF generation in Express (once replacement acceptance is complete). Keep existing personal data; do not delete collections just because an endpoint is retired.
 
-## 质量验证
+**Non-goals:** moving MongoDB to D1, adding a container or Cloud Run compatibility service, replacing user identity with a new provider, making private R2 backups publicly accessible.
 
-```bash
-pnpm lint
-pnpm test -- --runInBand
-```
-
-测试使用 Jest、Supertest 和 `mongodb-memory-server`，覆盖注册登录、会话载荷、全局权限、用户管理、公开/私密文章读取、健身数据隔离、补剂记录以及项目分类验证。测试数据库与生产数据库完全分离。
-
-## 目录结构
+## Repository layout
 
 ```text
-config/                 数据库、CORS、静态权限与服务配置
-middleware/             身份解析、全局权限守卫和校验
-models/                 Mongoose 数据模型
-routes/                 业务与系统 API
-services/               Firebase、权限、邮件和领域服务
-socket/                 Socket.IO 事件处理
-utils/                  AI、审计、上传和通用工具
-tests/                  隔离的 API 与权限回归测试
-index.js                Express / HTTP / Socket.IO 入口
-Dockerfile              Cloud Run 容器构建
+cloudflare/
+  orion-api-gateway/         Custom-domain API gateway; route ownership and cutover flags
+  bananaboom-worker/         Cloudflare Core Worker, MongoDB DO, R2 backup, Cron
+  orion-ai-gateway/          Separate Workers AI integration
+config/ middleware/ models/  Existing Express/Mongoose auth and data structures
+routes/ services/ socket/    Cloud Run compatibility code still needed by unmigrated features
+tests/                      Legacy integration tests
+scripts/                    Migration and independent private R2 restore verifier
+docs/
+  ARCHITECTURE.md           Current vs target design, trust boundaries and remaining blockers
+  CLOUD-RUN-RETIREMENT-READINESS.md
+  WORKER-PRIVATE-BACKUP.md
 ```
 
-Node.js 22 · Express 5 · MongoDB / Mongoose · Socket.IO · Cloudflare R2 · Firebase Admin · Gemini · Stripe · Resend · Jest · Supertest。
+## Development and verification
 
-## 安全与数据边界
-
-- Helmet 与自定义安全头限制嵌入、MIME 猜测和来源泄漏。
-- CORS 使用显式配置；生产部署应只允许可信前端域名。
-- 权限由后端执行，不能依赖前端隐藏按钮。
-- Stripe webhook 在 JSON body parser 之前保留原始请求体用于签名校验。
-- R2、Firebase、邮件、AI 和支付密钥只存在于服务端环境变量。
-- 备份、日志和个人模块可能包含敏感数据；生产访问应遵循最小权限原则。
-
-## 部署
-
-仓库包含 Dockerfile，可部署到 Google Cloud Run 或其他支持 Node 容器的平台：
+Legacy Express backend: Node.js 22+, pnpm 9+, MongoDB. Install using `pnpm install`, run `pnpm dev`; do not commit local `.env`, secrets, production database connections or downloaded backup objects.
 
 ```bash
-docker build -t orion-api .
-docker run --env-file .env -p 5000:5000 orion-api
+# Core Worker tests (Node.js 24 runtime in current WSL)
+node --test cloudflare/bananaboom-worker/tests/*.test.mjs
+
+# Gateway routing, security and migration tests
+node --test cloudflare/orion-api-gateway/*.test.mjs
+
+# Validate the deployment config without changing live routes
+cd cloudflare/orion-api-gateway
+npx wrangler deploy --dry-run
 ```
 
-部署后使用 `/health` 作为存活检查，并把 `FRONTEND_URL`、CORS、回调地址和公开 R2 域名设置为正式环境值。
+Private backup verification:
 
-这是 Orion 的配套服务。欢迎提交 issue 或 pull request；提交前请运行 lint 与完整测试，并确保变更不会扩大任何私密数据的访问范围。
+```bash
+node scripts/verifyorionr2restore.mjs db-backups/<verified-backup-id>/manifest.json
+```
+
+The verifier uses authenticated read-only private R2 CLI access, validates every part's checksum, restores solely to an ephemeral localhost `orion_restore_test_` database and cleans up. **Backup data must never be committed, logged, placed in public R2 or checked into a CI artifact.**
+
+## Deployment / production safety
+
+- `api.samyao.me` is a Cloudflare custom domain served by `orion-api-gateway`; `BANANABOOM_CORE` is an internal Service Binding.
+- Migrated authentication checks require verified JWT signatures, **live MongoDB sessions**, current role/permissions and owner-scoped queries. A browser-supplied canary header must not grant authorization.
+- Never automatically replay a **write, backup or delete** on Cloud Run after a Core Worker failure; the first attempt may already have committed.
+- Cloudflare Workers Cron dispatches the post notification outbox; Todo reminders remain disabled until their migration is verified without flooding overdue notifications.
+- The legacy Cloud Run source still contains unported routes; do not disable its service or delete its database/image until [the shutdown gate](docs/CLOUD-RUN-RETIREMENT-READINESS.md) has passed.
+- Keep secrets in Worker/Cloud Run secrets. The production private R2 backup bucket `orion-private-db-backups` must remain without a public domain.
+
+## One end-state, not endless isolated PRs
+
+The next delivery should be treated as **one integrated Cloud Run retirement milestone**, not as a succession of individually celebrated canary flips. Its definition of done is:
+
+1. Build a route/method/auth ownership inventory (including frontend network calls, Second Brain clients, webhooks and scheduled jobs), and explicitly classify each as keep / retire / replace.
+2. Implement remaining retained owner-facing auth, private CRUD, media, Second Brain/MCP and AI paths on Worker/DO/R2, preserving existing data and user sessions; wire frontend to the final endpoints.
+3. Confirm complete production parity for retained flows, recovery and observability; move the Vercel frontend to Cloudflare Pages only after checking redirects, PWA, cache and CSP.
+4. Measure **zero** necessary Cloud Run requests for a representative period including infrequent jobs, rehearse rollback, then disable Cloud Run reversibly. Delete obsolete GCP resources only after the gate succeeds.
+
+**Current assessment:** backup migration is done, **full Cloud Run retirement is not**. This README describes current production, not a claimed future deployment.
