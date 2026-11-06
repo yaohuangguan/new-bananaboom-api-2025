@@ -97,6 +97,46 @@ export function createApp(repository = mongoRepository, options = {}) {
     });
   }
 
+  // Authenticated profile read: caller must supply a signed JWT backed by
+  // a live MongoDB Session. No claimed roles or user IDs are trusted.
+  for (const [path, getter] of [
+    ['/api/users/profile', 'ownerProfile'],
+    ['/api/users/ai-status', 'ownerAiStatus']
+  ]) {
+    app.get(path, async (ctx) => {
+      ctx.set('Cache-Control', 'private, no-store');
+      const token = extractLegacyToken(ctx.headers);
+      if (!token) {
+        ctx.status = 401;
+        return { success:false, message:'Unauthorized: Please login first', message_cn:'请先登录' };
+      }
+      let auth;
+      try {
+        auth = await authenticateLegacyRequest(ctx.headers, repository, await secretProvider());
+      } catch (error) {
+        console.error('profile-read-auth-failure', error?.name || 'Error');
+        ctx.status = 503;
+        return { message: 'Profile authentication unavailable' };
+      }
+      if (auth.kind !== 'authenticated') {
+        ctx.status = 401;
+        return { success:false, message:'Unauthorized: Please login first', message_cn:'请先登录' };
+      }
+      try {
+        const response = await repository[getter](auth.user);
+        if (response === null) {
+          ctx.status = 404;
+          return { message:'User not found' };
+        }
+        return asLegacyJson(response);
+      } catch (error) {
+        console.error('profile-read-query-failure', error?.name || 'Error');
+        ctx.status = 503;
+        return { message:'Profile temporarily unavailable' };
+      }
+    });
+  }
+
   app.get('/api/menu', async (ctx) => {
     const category = ctx.query.category;
     if ((Array.isArray(category)) || (typeof category === 'string' && category.length > 100)) {
