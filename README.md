@@ -2,7 +2,7 @@
 
 Orion is the API and personal-data backend for [samyao.me](https://samyao.me), a public digital garden plus the private Captain's Cabin. **This is a hybrid production system undergoing a controlled migration to Cloudflare Workers; it is not yet Cloudflare-only.**
 
-**Architecture:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · **Cutover / shutdown checklist:** [docs/CLOUD-RUN-RETIREMENT-READINESS.md](docs/CLOUD-RUN-RETIREMENT-READINESS.md) · **R2 backup acceptance:** [docs/WORKER-PRIVATE-BACKUP.md](docs/WORKER-PRIVATE-BACKUP.md) · [Frontend repository](https://github.com/yaohuangguan/orion-frontend)
+**Architecture:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · **Cutover / shutdown checklist:** [docs/CLOUD-RUN-RETIREMENT-READINESS.md](docs/CLOUD-RUN-RETIREMENT-READINESS.md) · **R2 backup acceptance:** [docs/WORKER-PRIVATE-BACKUP.md](docs/WORKER-PRIVATE-BACKUP.md) · [Frontend repository](https://github.com/orion-ai-club/orion-frontend)
 
 ## Production topology (verified 2026-11-07)
 
@@ -20,7 +20,7 @@ flowchart TD
     U --> Auth["Firebase / Google sign-in"]
 ```
 
-**Browser API address:** `https://api.samyao.me`. Core Worker has no public workers.dev endpoint; the API Gateway uses a Cloudflare Service Binding. The old Cloud Run service **is still required**, and some Worker read failures safely fall back to it. The frontend remains on **Vercel** as of this review, **not Cloudflare Pages**. The target is a Cloudflare-native frontend + API stack, without a container or Cloud Run.
+**Browser API address:** `https://api.samyao.me`. Core Worker has no public workers.dev endpoint; the API Gateway uses a Cloudflare Service Binding. The old Cloud Run service **is still required**, and some Worker read failures safely fall back to it. The frontend remains on **Vercel** as of this review, **not Cloudflare Pages**. The target is Cloudflare-native **backend APIs only**: retain the existing Vercel frontend and remove Cloud Run/containers.
 
 ### Production route ownership
 
@@ -50,7 +50,7 @@ On 2026-11-07, `BACKUP_R2_CUTOVER=1` was deployed and the normal authenticated *
 
 **Retire:** human group/private chat and Socket.IO presence, obsolete Stripe checkout/subscriptions/webhook endpoints, unused PDF generation in Express (once replacement acceptance is complete). Keep existing personal data; do not delete collections just because an endpoint is retired.
 
-**Non-goals:** moving MongoDB to D1, adding a container or Cloud Run compatibility service, replacing user identity with a new provider, making private R2 backups publicly accessible.
+**Non-goals:** moving MongoDB to D1, adding a container or Cloud Run compatibility service, replacing user identity with a new provider, making private R2 backups publicly accessible, moving the existing Vercel site to Pages, or deleting the owner-authored historical Express source.
 
 ## Repository layout
 
@@ -108,7 +108,11 @@ The next delivery should be treated as **one integrated Cloud Run retirement mil
 
 1. Build a route/method/auth ownership inventory (including frontend network calls, Second Brain clients, webhooks and scheduled jobs), and explicitly classify each as keep / retire / replace.
 2. Implement remaining retained owner-facing auth, private CRUD, media, Second Brain/MCP and AI paths on Worker/DO/R2, preserving existing data and user sessions; wire frontend to the final endpoints.
-3. Confirm complete production parity for retained flows, recovery and observability; move the Vercel frontend to Cloudflare Pages only after checking redirects, PWA, cache and CSP.
+3. Confirm complete backend parity for retained flows, recovery and observability; keep the existing Vercel frontend, URL and build/CDN pipeline unchanged.
 4. Measure **zero** necessary Cloud Run requests for a representative period including infrequent jobs, rehearse rollback, then disable Cloud Run reversibly. Delete obsolete GCP resources only after the gate succeeds.
 
 **Current assessment:** backup migration is done, **full Cloud Run retirement is not**. This README describes current production, not a claimed future deployment.
+
+**Preserve original source:** Once Cloud Run is retired, leave the historical Express routes/models/services in Git. They are the owner-created codebase, not disposable migration debris. Only remove newly created temporary files or redundant deployed infrastructure.
+
+**Working inventory:** [docs/LEGACY-ROUTE-INVENTORY.md](docs/LEGACY-ROUTE-INVENTORY.md). Password login/logout has a Worker canary (global cutover still OFF); Google/Firebase and MCP OAuth remain legacy until E2E acceptance.

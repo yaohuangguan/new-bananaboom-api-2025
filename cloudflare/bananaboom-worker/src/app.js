@@ -6,6 +6,7 @@ import { authenticateLegacyRequest, canReadPrivatePosts, extractLegacyToken, has
 import { normalizePostInput, redactPostWriteError } from './postWrites.js';
 import { requireMutationKey } from './articleTransaction.js';
 import { classifyBackupFailure, parseBackupDiagnostic } from './databaseBackup.js';
+import { legacyAuthCookie, passwordLoginInput } from './passwordSession.js';
 
 // Match legacy JSON serialization before applying its response hydration middleware.
 // Otherwise recursively traversing BSON ObjectId/Date would erase their values.
@@ -35,6 +36,63 @@ export function createApp(repository = mongoRepository, options = {}) {
   const secretProvider = options.secretProvider || runtimeJwtSecret;
   const app = openmesh({ service: 'bananaboom-core' });
   app.use(jsonBody({ limit: 2 * 1024 * 1024 }));
+  // Password session migration is behind an explicit Gateway flag/canary.
+  // Do not alter live Firebase/Google or Second Brain OAuth sessions.
+  const trustedAuthOrigins = new Set([
+    'https://samyao.me','https://www.samyao.me',
+    'https://ps6.space','https://www.ps6.space',
+    'https://bananaboom-frontend.vercel.app','http://localhost:5173'
+  ]);
+  const rejectAuthOrigin = (ctx) => {
+    const origin = ctx.headers.origin;
+    return !!(origin && !trustedAuthOrigins.has(origin)) ||
+      !!(ctx.headers.cookie && (!origin || !trustedAuthOrigins.has(origin)));
+  };
+  app.post('/api/users/signin', async (ctx) => {
+    ctx.set('Cache-Control','no-store');
+    if (rejectAuthOrigin(ctx)) {
+      ctx.status=403;
+      return {message:'Untrusted login origin'};
+    }
+    if (!passwordLoginInput(ctx.requestBody)) {
+      ctx.status=400;
+      return {message:'Invalid login request'};
+    }
+    try {
+      const result=await repository.passwordSignIn(ctx.requestBody);
+      if (result.kind!=='success') {
+        ctx.status=result.kind==='bad-input'?400:401;
+        return result.kind==='bad-input' ?
+          {message:'Invalid login request'} :
+          {message:'Invalid credentials',message_cn:'账号不存在或密码错误'};
+      }
+      ctx.set('Set-Cookie',legacyAuthCookie(result.token));
+      return {token:result.token,user:result.user};
+    } catch (error) {
+      console.error('worker-password-login-failed',error?.name || 'Error');
+      ctx.status=503;
+      return {message:'Login temporarily unavailable'};
+    }
+  });
+  app.post('/api/users/logout', async (ctx) => {
+    ctx.set('Cache-Control','no-store');
+    if (rejectAuthOrigin(ctx)) {
+      ctx.status=403;
+      return {message:'Untrusted logout origin'};
+    }
+    const token=extractLegacyToken(ctx.headers);
+    try {
+      if (token) await repository.passwordLogout(token);
+      ctx.set('Set-Cookie',legacyAuthCookie('',{clear:true}));
+      return {success:true,msg:'已成功安全退出'};
+    } catch (error) {
+      // Do not falsely signal logout success if server-side revocation failed.
+      console.error('worker-password-logout-failed',error?.name || 'Error');
+      ctx.status=503;
+      return {message:'Logout temporarily unavailable'};
+    }
+  });
+
   app.get('/health', () => 'OK');
   app.get('/', () => 'API Server is running...');
   app.get('/api/homepage', async () => asLegacyJson(await repository.homepages()));

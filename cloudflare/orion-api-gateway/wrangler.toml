@@ -26,7 +26,13 @@ PDF_BROWSER_CUTOVER = "1"
 # Production R2 database backup verified on 2026-11-07:
 # normal admin request + all private chunk SHA-256 + isolated restore passed.
 # Set to 0 only for a controlled rollback to Cloud Run backup.
+# Password signin/logout Worker implementation; keep old production path
+# until signed-in browser parity is proven. Google/Firebase remains legacy.
+PASSWORD_AUTH_CUTOVER = "0"
 BACKUP_R2_CUTOVER = "1"
+# Category/method-only Cloud Run upstream observation for retirement.
+# No paths, IDs, cookies, IPs, query strings, tokens or body data.
+LEGACY_UPSTREAM_AUDIT = "1"
 
 [[routes]]
 pattern = "api.samyao.me"

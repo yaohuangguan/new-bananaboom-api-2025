@@ -37,7 +37,7 @@ remain off. An implemented Worker handler alone is not acceptance.
 
 Critical path: live login/OAuth, Second Brain MCP and sync,
 owner-scoped personal CRUD, media uploading, AI/history streaming, native
-Todo Cron without duplicate reminders, and frontend move to Pages.
+Todo Cron without duplicate reminders. The Vercel frontend remains unchanged.
 Record a complete route/method/auth inventory and a representative zero-
 required-upstream observation period before the Cloud Run off switch.
 
@@ -87,3 +87,18 @@ BACKUP_R2_CUTOVER=1, with NO retry to Cloud Run on a Worker failure.
 The old Cloud Run backup implementation may still exist as emergency fallback,
 but normal API Gateway traffic no longer uses it. Preserve Cloud Run for other
 routes and do not claim whole-service migration complete.
+
+
+## Safe Cloud Run dependency observation (2026-11-07)
+
+Gateway now emits an aggregate-category log ONLY when it actually forwards an
+API request to Cloud Run: orion-legacy-upstream + category + HTTP method.
+It does not log path IDs, query strings, user IDs, cookies, tokens, bodies,
+sessions or IPs. LEGACY_UPSTREAM_AUDIT=1 enables this metric.
+An actual read fallback to Cloud Run is counted; a Worker-successful request
+is not. A short empty log cannot prove zero legacy dependencies: observe
+enough time to cover rarely used OAuth, MCP, administrative and scheduled jobs.
+
+## Owner-scoped infrastructure decision
+
+The React/Vite frontend stays on Vercel and keeps its edge CDN and deployment pipeline. The final target replaces only Cloud Run execution with Cloudflare Workers. Historical owner-written Express code stays in Git, even after Cloud Run has no live traffic. PASSWORD_AUTH_CUTOVER remains 0 until real-user browser E2E parity; Google/Firebase and Second Brain OAuth cannot be dropped or silently re-authenticated.
