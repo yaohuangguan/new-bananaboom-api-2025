@@ -6,6 +6,7 @@ import { performArticleTransaction } from './articleTransaction.js';
 import { dispatchTodoReminders } from './todoReminders.js';
 import { createDatabaseBackup } from './databaseBackup.js';
 import { getPublicComments } from './commentReads.js';
+import { getOwnerProfile, getOwnerAiStatus } from './ownerProfile.js';
 
 /**
  * A single Durable Object owns the MongoDB connection.
@@ -150,6 +151,16 @@ export class MongoDBConnection extends DurableObject {
     return JSON.parse(JSON.stringify(rows.map((resume) => ({
       ...resume, user: user?.email || (user ? resume.user : null)
     }))));
+  }
+
+  async ownerProfile(user) {
+    await this.client.connect();
+    return getOwnerProfile(this.client.db(), user);
+  }
+
+  async ownerAiStatus(user) {
+    await this.client.connect();
+    return getOwnerAiStatus(this.client.db(), user);
   }
 
   async authorizeSession(token) {

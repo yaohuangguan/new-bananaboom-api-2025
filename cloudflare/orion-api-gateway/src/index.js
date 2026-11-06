@@ -120,6 +120,18 @@ export function shouldRoutePrivateRead(method, path, search = '', headers = {}, 
     sample < Math.min(100, rolloutPercent) / 100;
 }
 
+export function isAuthenticatedProfileCandidate(method, path, search = '', headers = {}, cutover = false) {
+  if (method !== 'GET' || !['/api/users/profile', '/api/users/ai-status'].includes(path) ||
+      search) return false;
+  const get = (key) => typeof headers?.get === 'function'
+    ? headers.get(key) : headers?.[key] || headers?.[key.toLowerCase()] || null;
+  const session = Boolean(get('x-auth-token') ||
+    get('authorization')?.startsWith('Bearer ') ||
+    /(?:^|;)\s*orion_session=/.test(get('cookie') || ''));
+  if (!session || get('x-google-auth')) return false;
+  return cutover || get('x-orion-profile-canary') === '1';
+}
+
 export function shouldRouteToCoreWorker(method, path, search = '', headers = {}) {
   if (method !== 'GET') return false;
   if (path === '/api/audit/worker-events') {
@@ -542,7 +554,10 @@ export default {
     const likeWrite = isWorkerLikeMutation(request.method, pathname);
     const articleWrite = routeArticleWrite(request.method, pathname, request.headers,
       String(env.ARTICLE_WRITE_CUTOVER || '0') === '1');
-    const routeToCore = likeWrite || articleWrite ? true : pathname === '/api/posts/private/posts'
+    const profileRead = isAuthenticatedProfileCandidate(
+      request.method, pathname, incomingUrl.search, request.headers,
+      String(env.PROFILE_READ_CUTOVER || '0') === '1');
+    const routeToCore = likeWrite || articleWrite || profileRead ? true : pathname === '/api/posts/private/posts'
       ? shouldRoutePrivateRead(request.method, pathname, incomingUrl.search, request.headers, rolloutPercent)
       : shouldRouteToCoreWorker(request.method, pathname, incomingUrl.search, request.headers);
 
@@ -554,6 +569,7 @@ export default {
         workerHeaders.delete('x-orion-edge-secret');
         workerHeaders.delete('x-orion-private-worker-canary');
         workerHeaders.delete('x-orion-article-write-canary');
+        workerHeaders.delete('x-orion-profile-canary');
         const body = articleWrite ? request.body : undefined;
         const workerRequest = new Request(request.url, {
           method: request.method,
@@ -625,6 +641,7 @@ export default {
     headers.delete('x-forwarded-host');
     headers.delete('x-orion-private-worker-canary');
     headers.delete('x-orion-article-write-canary');
+    headers.delete('x-orion-profile-canary');
     headers.delete('x-orion-pdf-canary');
 
     const ttl = cacheTtlFor(request, pathname);

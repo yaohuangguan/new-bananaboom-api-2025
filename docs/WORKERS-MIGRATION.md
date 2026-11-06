@@ -487,3 +487,23 @@ back to Cloud Run.
 
 Four pre-cutover production JSON hashes were recorded, including one
 article with a historical reply; compare after deployment.
+
+## Phase 12: authenticated profile and AI status (staged)
+
+Core now supports GET /api/users/profile and GET /api/users/ai-status
+using signed JWT verification plus the already-tested live MongoDB
+Session whitelist. The database query always resolves the verified
+session subject, never a user ID from URL/query/JWT role claims.
+The returned profile uses a fixed field whitelist and does not return
+password, reset tokens or the old fixed private_token value. The VIP
+flag is only a computed read-only super_admin alias.
+
+Gateway PROFILE_READ_CUTOVER=0 by default. A JWT-authenticated request
+may explicitly canary with x-orion-profile-canary: 1. The old Google
+identity header remains Cloud Run until the Google login/session path
+is migrated. Normal authenticated profile traffic also remains Cloud
+Run until real signed-in JSON parity has been reviewed. Worker read
+failure safely falls back to the existing Cloud Run service.
+
+No existing login credentials, OAuth client records, or Second Brain
+connection/refresh tokens are modified by this read-only stage.
