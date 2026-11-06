@@ -359,3 +359,22 @@ test('oversized EJSON documents fail safely with numeric-only size diagnostic',a
   });
   assert.equal(b.map.size,0);
 });
+
+
+test('document byte count survives Mongo transaction Error reconstruction',async()=>{
+  const source=fakeSource({notes:[{_id:new ObjectId(),content:'confidential'}]});
+  source.client.withSession=async(fn)=>fn({
+    withTransaction:async(run)=>{
+      try{return await run();}catch(error){throw new Error(error.message);}
+    }
+  });
+  await assert.rejects(createDatabaseBackup({
+    ...source,bucket:bucket(),maxSingleDocumentBytes:32
+  }),error=>{
+    const diag=parseBackupDiagnostic(error);
+    assert.equal(diag?.reason,'single-document-limit');
+    assert.ok(diag?.exportedDocumentBytes>32);
+    assert.equal(error.message.includes('confidential'),false);
+    return true;
+  });
+});

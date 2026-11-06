@@ -99,3 +99,11 @@ document. R2 chunk target stays at 2 MiB, but a single larger record is
 placed in one part to preserve an unbroken NDJSON line; the per-document
 and 48 MiB total staging memory limits remain mandatory. An over-limit
 error now logs ONLY the record's encoded byte length, never its contents.
+
+
+## Exact exported-size-only diagnostic
+
+The 16 MiB canary still hit the document limit. MongoDB rethrows can discard
+custom Error properties, so the encoded byte length now travels as a strictly
+numeric internal error code before it is parsed and logged by the Core Worker.
+Never include document contents, IDs, credentials or raw MongoDB messages.
