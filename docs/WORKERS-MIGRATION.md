@@ -507,3 +507,21 @@ failure safely falls back to the existing Cloud Run service.
 
 No existing login credentials, OAuth client records, or Second Brain
 connection/refresh tokens are modified by this read-only stage.
+
+
+## Phase 12: authenticated Todo list GET canary (2026-11-06)
+
+- `GET /api/todos` is staged on `bananaboom-core` with mandatory
+  verified legacy JWT **and** live MongoDB Session plus `TODO:USE` permission. A regular user sees only
+  their own tasks, while `super_admin` sees all `super_admin` household tasks.
+- Output retains legacy `data`/`pagination`, sorted by
+  `order:-1, createdAt:-1`, including populated owner and notifyUsers with
+  projections that do not expose role permissions or Bark credentials.
+- Gateway `TODO_READ_CUTOVER=0` by default; explicit
+  `x-orion-todo-read-canary: 1` opt-in allows authenticated read-only parity.
+  Only bounded page/limit/type/keyword/isActive queries qualify. Other query
+  forms, Google-only sessions, mutations and reminder sends stay with Cloud Run.
+- Worker read failure may fall back to Cloud Run; no writes are replayed.
+  **Do not enable global cutover** until signed-in production JSON comparisons
+  for regular and `super_admin` users succeed (including empty, filtered and
+  paginated responses). Preserve Cloud Run rollback through that verification.

@@ -22,6 +22,7 @@ export const repository = {
   publicPosts: async (options) => (await mongo()).publicPosts(options),
   authorizeSession: async (token) => (await mongo()).authorizeSession(token),
   ownerProfile: async (user) => (await mongo()).ownerProfile(user),
+  ownerTodos: async (user, query) => (await mongo()).ownerTodos(user, query),
   ownerAiStatus: async (user) => (await mongo()).ownerAiStatus(user),
   privatePosts: async (options) => (await mongo()).privatePosts(options),
   pollPostWriteEvents: async (after, max) => (await mongo()).pollPostWriteEvents(after, max),

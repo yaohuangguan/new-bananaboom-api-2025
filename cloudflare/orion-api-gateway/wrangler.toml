@@ -14,6 +14,8 @@ ARTICLE_WRITE_CUTOVER = "0"
 # Authenticated profile and AI-status reads require a real owner session parity
 # check before global cutover. Explicit signed-in canary remains available.
 PROFILE_READ_CUTOVER = "0"
+# Authenticated Todo list GET only; keep writes and reminders unchanged.
+TODO_READ_CUTOVER = "0"
 # 0: old Cloud Run PDF, explicit x-orion-pdf-canary: 1 tests new Browser Run.
 # Switch to 1 only after a production PDF is generated and inspected.
 PDF_BROWSER_CUTOVER = "1"

@@ -132,6 +132,31 @@ export function isAuthenticatedProfileCandidate(method, path, search = '', heade
   return cutover || get('x-orion-profile-canary') === '1';
 }
 
+export function isTodoListReadCandidate(method, path, search = '', headers = {}, cutover = false) {
+  if (method !== 'GET' || path !== '/api/todos') return false;
+  const get = (key) => typeof headers?.get === 'function'
+    ? headers.get(key) : headers?.[key] || headers?.[key.toLowerCase()] || null;
+  const session = get('x-auth-token') ||
+    get('authorization')?.startsWith('Bearer ') ||
+    /(?:^|;)\s*orion_session=/.test(get('cookie') || '');
+  if (!session || get('x-google-auth')) return false;
+  const allowed = new Set(['page', 'limit', 'type', 'keyword', 'isActive']);
+  const params = new URLSearchParams(search);
+  for (const key of params.keys()) {
+    if (!allowed.has(key) || params.getAll(key).length !== 1) return false;
+  }
+  const numeric = [['page', 1000], ['limit', 100]];
+  for (const [name, max] of numeric) {
+    const value = params.get(name);
+    if (value !== null && (!/^[1-9]\d{0,3}$/.test(value) || Number(value) > max)) return false;
+  }
+  if (params.has('type') && !['wish', 'routine'].includes(params.get('type'))) return false;
+  if (params.has('isActive') && !['true', 'false'].includes(params.get('isActive'))) return false;
+  if (params.has('keyword') && (params.get('keyword').length > 100 ||
+    params.get('keyword').includes('\0'))) return false;
+  return Boolean(cutover || get('x-orion-todo-read-canary') === '1');
+}
+
 export function shouldRouteToCoreWorker(method, path, search = '', headers = {}) {
   if (method !== 'GET') return false;
   if (path === '/api/audit/worker-events') {
@@ -557,7 +582,10 @@ export default {
     const profileRead = isAuthenticatedProfileCandidate(
       request.method, pathname, incomingUrl.search, request.headers,
       String(env.PROFILE_READ_CUTOVER || '0') === '1');
-    const routeToCore = likeWrite || articleWrite || profileRead ? true : pathname === '/api/posts/private/posts'
+    const todoRead = isTodoListReadCandidate(
+      request.method, pathname, incomingUrl.search, request.headers,
+      String(env.TODO_READ_CUTOVER || '0') === '1');
+    const routeToCore = likeWrite || articleWrite || profileRead || todoRead ? true : pathname === '/api/posts/private/posts'
       ? shouldRoutePrivateRead(request.method, pathname, incomingUrl.search, request.headers, rolloutPercent)
       : shouldRouteToCoreWorker(request.method, pathname, incomingUrl.search, request.headers);
 
@@ -570,6 +598,7 @@ export default {
         workerHeaders.delete('x-orion-private-worker-canary');
         workerHeaders.delete('x-orion-article-write-canary');
         workerHeaders.delete('x-orion-profile-canary');
+        workerHeaders.delete('x-orion-todo-read-canary');
         const body = articleWrite ? request.body : undefined;
         const workerRequest = new Request(request.url, {
           method: request.method,

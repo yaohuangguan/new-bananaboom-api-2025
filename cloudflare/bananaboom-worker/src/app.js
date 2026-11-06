@@ -97,6 +97,48 @@ export function createApp(repository = mongoRepository, options = {}) {
     });
   }
 
+  // Todo reads use exactly the same JWT + live Session as private profile.
+  // Mutation routes and the paused reminder scheduler remain unchanged.
+  app.get('/api/todos', async (ctx) => {
+    ctx.set('Cache-Control', 'private, no-store');
+    if (!extractLegacyToken(ctx.headers)) {
+      ctx.status = 401;
+      return { message: 'Unauthorized' };
+    }
+    let auth;
+    try {
+      auth = await authenticateLegacyRequest(ctx.headers, repository, await secretProvider());
+    } catch (error) {
+      console.error('todo-read-auth-error', error?.name || 'Error');
+      ctx.status = 503;
+      return { message: 'Todo authentication temporarily unavailable' };
+    }
+    if (auth.kind !== 'authenticated') {
+      ctx.status = 401;
+      return { message: 'Unauthorized' };
+    }
+    // Mirror the Cloud Run GlobalGuard rule for /api/todo*.
+    if (!hasPermission(auth.user, 'TODO:USE')) {
+      ctx.status = 403;
+      return {
+        success: false, code: 'PERMISSION_DENIED', required: 'TODO:USE',
+        message: 'Access Denied: You do not have permission',
+        message_cn: '权限不足：您没有操作该功能的权限'
+      };
+    }
+    try {
+      return asLegacyJson(await repository.ownerTodos(auth.user, ctx.query || {}));
+    } catch (error) {
+      if (error instanceof TypeError) {
+        ctx.status = 400;
+        return { message: 'Invalid Todo query' };
+      }
+      console.error('todo-read-query-error', error?.name || 'Error');
+      ctx.status = 503;
+      return { message: 'Todo list temporarily unavailable' };
+    }
+  });
+
   // Authenticated profile read: caller must supply a signed JWT backed by
   // a live MongoDB Session. No claimed roles or user IDs are trusted.
   for (const [path, getter] of [
