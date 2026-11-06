@@ -77,3 +77,14 @@ Limits: 48 MiB staging memory, 60 MiB uncompressed data, 50,000 documents,
 512 KiB per document and 40 seconds by default. Oversized backups fail
 explicitly; no partial backup is represented as complete. Test production
 and restore into a truly isolated empty database before enabling cutover.
+
+
+## Separate phase budgets (2026-11-07)
+
+A 40-second total budget remained too short even after R2 transfers moved out
+of the transaction. Now MongoDB snapshot reads have a separate **50-second**
+limit (under the normal 60-second MongoDB transaction lifetime) and the entire
+backup, including R2 uploads, has a **120-second** limit. This does not extend
+the database transaction to 120 seconds. A sanitized stage and numeric counters
+cross the Durable Object RPC boundary for actionable diagnostics without
+exposing private document values or raw connection strings.

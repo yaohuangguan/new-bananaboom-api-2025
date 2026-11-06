@@ -8,7 +8,8 @@ const MAX_STAGED_BYTES = 48 * 1024 * 1024;
 const UPLOAD_CONCURRENCY = 4;
 const MAX_BACKUP_BYTES = 60 * 1024 * 1024;
 const MAX_DOCUMENTS = 50000;
-const MAX_RUNTIME_MS = 40000;
+const MAX_RUNTIME_MS = 120000;
+const MAX_SNAPSHOT_MS = 50000;
 const encoder = new TextEncoder();
 
 async function sha256(bytes) {
@@ -32,7 +33,8 @@ export function classifyBackupFailure(error) {
     'Document too large for safe export': 'single-document-limit',
     'Backup exceeded size limit': 'total-size-limit',
     'Private backup R2 binding missing': 'missing-r2-binding',
-    'Backup exceeded memory staging limit': 'memory-staging-limit'
+    'Backup exceeded memory staging limit': 'memory-staging-limit',
+    'Backup exceeded snapshot time limit': 'snapshot-runtime-limit'
   };
   if (Object.hasOwn(known, message)) return known[message];
   if (/transaction|snapshot|writeconflict/i.test(message)) return 'mongodb-transaction';
@@ -47,6 +49,19 @@ export function classifyBackupFailure(error) {
 function logBackupDiagnostic(stage, error, docs = 0, bytes = 0, parts = 0, elapsedMs = 0) {
   console.error('db-backup-diagnostic', stage, classifyBackupFailure(error),
     {docs, bytes, parts, elapsedMs});
+}
+
+// Encodes only a stage, whitelisted failure reason and aggregate counters.
+// This crosses the Durable Object RPC boundary without exposing raw errors.
+export function parseBackupDiagnostic(error) {
+  const m = String(error?.message || '').match(
+    /ORION_BACKUP_DIAG\|(snapshot|r2-chunks|manifest)\|([A-Za-z0-9_-]{1,80})\|(\d{1,8})\|(\d{1,12})\|(\d{1,8})\|(\d{1,8})/
+  );
+  return m ? {
+    stage:m[1], reason:m[2],
+    documents:Number(m[3]), bytes:Number(m[4]),
+    parts:Number(m[5]), elapsedMs:Number(m[6])
+  } : null;
 }
 
 export function validateBackupManifest(manifest) {
@@ -85,6 +100,8 @@ export async function createDatabaseBackup({
   now = () => new Date(),
   randomId = () => crypto.randomUUID(),
   maxRuntimeMs = MAX_RUNTIME_MS,
+  maxSnapshotMs = MAX_SNAPSHOT_MS,
+  clock = () => Date.now(),
   maxTotalBytes = MAX_BACKUP_BYTES,
   maxStagedBytes = MAX_STAGED_BYTES,
   maxDocuments = MAX_DOCUMENTS
@@ -92,11 +109,15 @@ export async function createDatabaseBackup({
   if (!bucket || typeof bucket.put !== 'function') {
     throw new Error('Private backup R2 binding missing');
   }
-  const started = Date.now();
+  const started = clock();
   const snapshotAt = now().toISOString();
   const prefix = 'db-backups/' + snapshotAt.replace(/[:]/g, '-') + '-' + randomId().slice(0, 8);
-  const deadline = () => {
-    if (Date.now() - started > maxRuntimeMs) {
+  const deadline = (inSnapshot = false) => {
+    const elapsed = clock() - started;
+    if (inSnapshot && elapsed > maxSnapshotMs) {
+      throw new Error('Backup exceeded snapshot time limit');
+    }
+    if (elapsed > maxRuntimeMs) {
       throw new Error('Backup exceeded runtime limit');
     }
   };
@@ -142,7 +163,7 @@ export async function createDatabaseBackup({
         totals: { documents: 0, bytes: 0, parts: 0 }
       };
       for (const name of collections) {
-        deadline();
+        deadline(true);
         const collection = db.collection(name);
         const rawIndexes = indexesByCollection.get(name) || [];
         const col = {
@@ -175,7 +196,7 @@ export async function createDatabaseBackup({
         };
         const cursor = collection.find({}, { session, batchSize: 100 }).sort({ _id: 1 });
         for await (const doc of cursor) {
-          deadline();
+          deadline(true);
           if (++totalDocuments > maxDocuments) throw new Error('Backup exceeded document limit');
           const line = EJSON.stringify(doc, { relaxed: false }) + '\n';
           const length = encoder.encode(line).byteLength;
@@ -246,7 +267,7 @@ export async function createDatabaseBackup({
   } catch (error) {
     logBackupDiagnostic(stage, error,
       snapshot?.totalDocuments || 0, snapshot?.totalBytes || 0,
-      uploaded.length, Date.now() - started);
+      uploaded.length, clock() - started);
     // An ambiguous manifest PUT might have written successfully. Remove its
     // marker first; if that fails, retain the chunks so marker never dangles.
     let markerRemoved = true;
@@ -257,7 +278,14 @@ export async function createDatabaseBackup({
     if (markerRemoved) {
       await Promise.allSettled(uploaded.map((key) => bucket.delete(key)));
     }
-    throw error;
+    const reason = classifyBackupFailure(error);
+    const elapsed = Math.max(0, Math.round(clock() - started));
+    throw new Error([
+      'ORION_BACKUP_DIAG', stage, reason,
+      snapshot?.totalDocuments || 0,
+      snapshot?.totalBytes || 0,
+      uploaded.length, elapsed
+    ].join('|'));
   }
 }
 
