@@ -48,6 +48,30 @@ export function createApp(repository = mongoRepository, options = {}) {
   });
   app.get('/api/projects', async () => asLegacyJson(await repository.publicProjects()));
   app.get('/api/photos', async () => asLegacyJson(await repository.publicPhotos()));
+  app.get('/api/comments/reply/:id', async (ctx) => {
+    const id = ctx.params.id;
+    if (!/^[a-f0-9]{24}$/i.test(id)) {
+      ctx.status = 404;
+      return {message:'Not found'};
+    }
+    ctx.set('Cache-Control','no-store');
+    const comments = await repository.publicComments(id,true);
+    if (!comments) {
+      ctx.status = 404;
+      return {message:'Not found'};
+    }
+    return asLegacyJson(comments);
+  });
+  app.get('/api/comments/:id', async (ctx) => {
+    const id = ctx.params.id;
+    if (!/^[a-f0-9]{24}$/i.test(id)) {
+      ctx.status = 404;
+      return {message:'Not found'};
+    }
+    ctx.set('Cache-Control','no-store');
+    return asLegacyJson(await repository.publicComments(id,false));
+  });
+
   for (const [path, list] of [['/api/resumes', false], ['/api/resumes/list', true]]) {
     app.get(path, async (ctx) => {
       const user = ctx.query.user;
