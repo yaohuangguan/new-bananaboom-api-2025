@@ -18,6 +18,8 @@ PROFILE_READ_CUTOVER = "0"
 TODO_READ_CUTOVER = "0"
 # Footprint map/history GET read-only canary; all writes remain legacy.
 FOOTPRINT_READ_CUTOVER = "0"
+# Private by-ID detail GET; fail closed on owner-check failure. Google-only excluded.
+FOOTPRINT_DETAIL_CUTOVER = "0"
 # 0: old Cloud Run PDF, explicit x-orion-pdf-canary: 1 tests new Browser Run.
 # Switch to 1 only after a production PDF is generated and inspected.
 PDF_BROWSER_CUTOVER = "1"

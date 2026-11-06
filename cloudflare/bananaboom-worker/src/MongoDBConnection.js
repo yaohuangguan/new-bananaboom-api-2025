@@ -7,7 +7,7 @@ import { dispatchTodoReminders } from './todoReminders.js';
 import { createDatabaseBackup } from './databaseBackup.js';
 import { getPublicComments } from './commentReads.js';
 import { getOwnerProfile, getOwnerAiStatus } from './ownerProfile.js';
-import { readOwnerFootprints } from './footprintReads.js';
+import { readOwnerFootprints, readOwnerFootprint } from './footprintReads.js';
 import { listOwnerTodos } from './todoReads.js';
 
 /**
@@ -153,6 +153,11 @@ export class MongoDBConnection extends DurableObject {
     return JSON.parse(JSON.stringify(rows.map((resume) => ({
       ...resume, user: user?.email || (user ? resume.user : null)
     }))));
+  }
+
+  async ownerFootprintDetail(user, id) {
+    await this.client.connect();
+    return readOwnerFootprint(this.client.db(), user, id);
   }
 
   async ownerFootprints(user, query) {

@@ -97,6 +97,48 @@ export function createApp(repository = mongoRepository, options = {}) {
     });
   }
 
+  // Footprint detail read. Missing and foreign records both produce 404.
+  app.get('/api/footprints/:id', async (ctx) => {
+    ctx.set('Cache-Control', 'private, no-store');
+    const id = ctx.params.id;
+    if (!/^[a-f0-9]{24}$/i.test(id)) {
+      ctx.status = 404;
+      return { msg: 'Not Found' };
+    }
+    if (!extractLegacyToken(ctx.headers)) {
+      ctx.status = 401;
+      return { message: 'Unauthorized' };
+    }
+    let auth;
+    try {
+      auth = await authenticateLegacyRequest(ctx.headers, repository, await secretProvider());
+    } catch (error) {
+      console.error('footprint-detail-auth-failure', error?.name || 'Error');
+      ctx.status = 503;
+      return { message: 'Footprint authentication unavailable' };
+    }
+    if (auth.kind !== 'authenticated') {
+      ctx.status = 401;
+      return { message: 'Unauthorized' };
+    }
+    if (!hasPermission(auth.user, 'FOOTPRINT:USE')) {
+      ctx.status = 403;
+      return { success: false, code: 'PERMISSION_DENIED', required: 'FOOTPRINT:USE' };
+    }
+    try {
+      const item = await repository.ownerFootprintDetail(auth.user, id);
+      if (!item) {
+        ctx.status = 404;
+        return { msg: 'Not Found' };
+      }
+      return asLegacyJson(item);
+    } catch (error) {
+      console.error('footprint-detail-query-failure', error?.name || 'Error');
+      ctx.status = 503;
+      return { message: 'Footprint detail unavailable' };
+    }
+  });
+
   // Footprint list + visited-map stats: verified JWT, live Session, and
   // the legacy FOOTPRINT:USE permission. All mutations remain Cloud Run.
   app.get('/api/footprints', async (ctx) => {

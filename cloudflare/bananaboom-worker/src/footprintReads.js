@@ -68,3 +68,19 @@ export async function readOwnerFootprints(db, owner, rawQuery = {}) {
     data
   }));
 }
+
+
+/**
+ * Detail access is denied unless BOTH document ID and user match the live
+ * MongoDB Session owner; no administrator bypass or public-by-ID read.
+ */
+export async function readOwnerFootprint(db, owner, rawId) {
+  const userId = String(owner?.id || '');
+  if (!OBJECT_ID.test(userId) || !OBJECT_ID.test(String(rawId || ''))) {
+    throw new TypeError('Invalid footprint detail identity');
+  }
+  const item = await db.collection('footprints').findOne({
+    _id: new ObjectId(rawId), user: new ObjectId(userId)
+  });
+  return item ? JSON.parse(JSON.stringify(hydrateLegacyDefaults(item))) : null;
+}
