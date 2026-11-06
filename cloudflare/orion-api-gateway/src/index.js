@@ -157,6 +157,23 @@ export function isTodoListReadCandidate(method, path, search = '', headers = {},
   return Boolean(cutover || get('x-orion-todo-read-canary') === '1');
 }
 
+export function isFootprintReadCandidate(method, path, search = '', headers = {}, cutover = false) {
+  if (method !== 'GET' || path !== '/api/footprints') return false;
+  const get = (key) => typeof headers?.get === 'function'
+    ? headers.get(key) : headers?.[key] || headers?.[key.toLowerCase()] || null;
+  const signed = get('x-auth-token') ||
+    get('authorization')?.startsWith('Bearer ') ||
+    /(?:^|;)\s*orion_session=/.test(get('cookie') || '');
+  if (!signed || get('x-google-auth')) return false;
+  const query = new URLSearchParams(search);
+  if ([...query.keys()].some(key => key !== 'status') ||
+      query.getAll('status').length > 1) return false;
+  if (query.has('status') && !['visited', 'planned'].includes(query.get('status'))) {
+    return false;
+  }
+  return Boolean(cutover || get('x-orion-footprint-read-canary') === '1');
+}
+
 export function shouldRouteToCoreWorker(method, path, search = '', headers = {}) {
   if (method !== 'GET') return false;
   if (path === '/api/audit/worker-events') {
@@ -585,7 +602,11 @@ export default {
     const todoRead = isTodoListReadCandidate(
       request.method, pathname, incomingUrl.search, request.headers,
       String(env.TODO_READ_CUTOVER || '0') === '1');
-    const routeToCore = likeWrite || articleWrite || profileRead || todoRead ? true : pathname === '/api/posts/private/posts'
+    const footprintRead = isFootprintReadCandidate(
+      request.method, pathname, incomingUrl.search, request.headers,
+      String(env.FOOTPRINT_READ_CUTOVER || '0') === '1');
+    const routeToCore = likeWrite || articleWrite || profileRead || todoRead || footprintRead
+      ? true : pathname === '/api/posts/private/posts'
       ? shouldRoutePrivateRead(request.method, pathname, incomingUrl.search, request.headers, rolloutPercent)
       : shouldRouteToCoreWorker(request.method, pathname, incomingUrl.search, request.headers);
 
@@ -599,6 +620,7 @@ export default {
         workerHeaders.delete('x-orion-article-write-canary');
         workerHeaders.delete('x-orion-profile-canary');
         workerHeaders.delete('x-orion-todo-read-canary');
+        workerHeaders.delete('x-orion-footprint-read-canary');
         const body = articleWrite ? request.body : undefined;
         const workerRequest = new Request(request.url, {
           method: request.method,

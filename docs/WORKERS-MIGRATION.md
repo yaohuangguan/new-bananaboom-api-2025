@@ -525,3 +525,19 @@ connection/refresh tokens are modified by this read-only stage.
   **Do not enable global cutover** until signed-in production JSON comparisons
   for regular and `super_admin` users succeed (including empty, filtered and
   paginated responses). Preserve Cloud Run rollback through that verification.
+
+
+## Phase 13: owner-scoped footprint map/history GET (2026-11-06)
+
+- Worker supports only GET /api/footprints for signed JWT + live Session +
+  FOOTPRINT:USE permission. Owner ObjectId comes from the trusted session, never
+  from client-supplied query/filter data. Only optional status=visited|planned.
+- Preserves location point list, visitDate descending order, model defaults
+  and visited location stats (countries/provinces/distinct cities).
+- If the selected owner's history exceeds 5,000 records, Worker deliberately
+  responds 503 so Gateway read-only fallback uses Cloud Run without truncating.
+- Gateway FOOTPRINT_READ_CUTOVER=0 by default; x-orion-footprint-read-canary: 1
+  opts in for authenticated parity checks. No GET-by-id, create, update, delete,
+  Google-only token or unrelated route is migrated.
+- Do not enable all-user cutover until authenticated JSON parity is confirmed
+  with visited/planned, mixed and empty histories. Retain Cloud Run fallback.

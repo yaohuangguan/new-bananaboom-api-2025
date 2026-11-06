@@ -97,6 +97,43 @@ export function createApp(repository = mongoRepository, options = {}) {
     });
   }
 
+  // Footprint list + visited-map stats: verified JWT, live Session, and
+  // the legacy FOOTPRINT:USE permission. All mutations remain Cloud Run.
+  app.get('/api/footprints', async (ctx) => {
+    ctx.set('Cache-Control', 'private, no-store');
+    if (!extractLegacyToken(ctx.headers)) {
+      ctx.status = 401;
+      return { message: 'Unauthorized' };
+    }
+    let auth;
+    try {
+      auth = await authenticateLegacyRequest(ctx.headers, repository, await secretProvider());
+    } catch (error) {
+      console.error('footprint-auth-failure', error?.name || 'Error');
+      ctx.status = 503;
+      return { message: 'Footprints authentication temporarily unavailable' };
+    }
+    if (auth.kind !== 'authenticated') {
+      ctx.status = 401;
+      return { message: 'Unauthorized' };
+    }
+    if (!hasPermission(auth.user, 'FOOTPRINT:USE')) {
+      ctx.status = 403;
+      return { success: false, code: 'PERMISSION_DENIED', required: 'FOOTPRINT:USE' };
+    }
+    try {
+      return asLegacyJson(await repository.ownerFootprints(auth.user, ctx.query || {}));
+    } catch (error) {
+      if (error instanceof TypeError) {
+        ctx.status = 400;
+        return { message: 'Invalid footprint query' };
+      }
+      console.error('footprints-read-failure', error?.name || 'Error');
+      ctx.status = 503;
+      return { message: 'Footprints temporarily unavailable' };
+    }
+  });
+
   // Todo reads use exactly the same JWT + live Session as private profile.
   // Mutation routes and the paused reminder scheduler remain unchanged.
   app.get('/api/todos', async (ctx) => {
