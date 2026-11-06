@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ObjectId } from 'mongodb';
-import { createDatabaseBackup, restoreBackupToEmptyDatabase, validateBackupManifest } from '../src/databaseBackup.js';
+import { createDatabaseBackup, restoreBackupToEmptyDatabase, validateBackupManifest, classifyBackupFailure } from '../src/databaseBackup.js';
 
 function bucket() {
   const map = new Map();
@@ -177,4 +177,14 @@ test('catalog queries must run outside transaction while document reads stay ins
   assert.deepEqual(manifest.collections[0].indexes, [
     {name:'email_1', key:{email:1}, unique:true}
   ]);
+});
+
+
+test('failure codes cannot echo secret-bearing raw messages', () => {
+  assert.equal(classifyBackupFailure(new Error('Backup exceeded runtime limit')), 'runtime-limit');
+  assert.equal(classifyBackupFailure(new Error('Backup exceeded document limit')), 'document-limit');
+  assert.equal(classifyBackupFailure(new Error('Backup exceeded size limit')), 'total-size-limit');
+  assert.equal(classifyBackupFailure(new Error('password=secret private note')), 'unknown-error');
+  assert.equal(classifyBackupFailure({codeName:'OperationNotSupportedInTransaction'}),
+    'mongodb-OperationNotSupportedInTransaction');
 });

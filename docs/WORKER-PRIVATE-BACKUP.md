@@ -52,3 +52,14 @@ returns the existing [DONE] JSON text marker used by the personal UI.
 
 If limits are exceeded, fail explicitly. Never skip collections and claim
 that a partial backup is complete.
+
+
+## Diagnostic-only remediation (2026-11-07)
+
+A real administrator backup canary continued to return 503 even after the
+catalog transaction fix was deployed. Production R2 cutover remains disabled.
+The backup runner now logs stage, a strictly whitelisted failure category and
+numeric document/byte/part/timing counters, without raw MongoDB/R2 errors or
+private values. Use the next controlled canary to identify the failure phase.
+Do not turn off the legacy backup before a completed private manifest and
+independent isolated restore both succeed.

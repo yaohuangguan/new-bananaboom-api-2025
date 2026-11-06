@@ -16,6 +16,34 @@ function safeCollection(name) {
   return /^[a-zA-Z0-9_.-]{1,120}$/.test(name) && !name.startsWith('system.');
 }
 
+
+// Only a whitelisted reason code, never raw MongoDB/R2 error messages.
+export function classifyBackupFailure(error) {
+  const message = String(error?.message || '');
+  const known = {
+    'No database collections to back up': 'empty-database',
+    'Case-insensitive collection names collide': 'collection-name-collision',
+    'Backup exceeded runtime limit': 'runtime-limit',
+    'Backup exceeded document limit': 'document-limit',
+    'Document too large for safe export': 'single-document-limit',
+    'Backup exceeded size limit': 'total-size-limit',
+    'Private backup R2 binding missing': 'missing-r2-binding'
+  };
+  if (Object.hasOwn(known, message)) return known[message];
+  if (/transaction|snapshot|writeconflict/i.test(message)) return 'mongodb-transaction';
+  if (/r2|bucket|upload|object storage/i.test(message)) return 'r2-operation';
+  if (/timed out|timeout|deadline/i.test(message)) return 'timeout';
+  if (/not authorized|permission|unauthorized/i.test(message)) return 'database-permissions';
+  const codeName = String(error?.codeName || '');
+  if (/^[A-Za-z0-9_]{1,64}$/.test(codeName)) return 'mongodb-' + codeName;
+  return 'unknown-error';
+}
+
+function logBackupDiagnostic(stage, error, docs = 0, bytes = 0, parts = 0, elapsedMs = 0) {
+  console.error('db-backup-diagnostic', stage, classifyBackupFailure(error),
+    {docs, bytes, parts, elapsedMs});
+}
+
 export function validateBackupManifest(manifest) {
   if (!manifest || manifest.format !== 'orion-mongo-ejson-ndjson-v1' ||
     !manifest.complete || !Array.isArray(manifest.collections) ||
@@ -61,7 +89,11 @@ export async function createDatabaseBackup({
   const started = Date.now();
   const snapshotAt = now().toISOString();
   const prefix = 'db-backups/' + snapshotAt.replace(/[:]/g, '-') + '-' + randomId().slice(0, 8);
-  const list = await db.listCollections({}, { nameOnly: false }).toArray();
+  const list = await db.listCollections({}, { nameOnly: false }).toArray()
+    .catch((error) => {
+      logBackupDiagnostic('collection-catalog', error);
+      throw error;
+    });
   const collections = list.map((v) => v.name)
     .filter(safeCollection).sort();
   const metadata = new Map(list.map((v) => [v.name, v]));
@@ -76,7 +108,10 @@ export async function createDatabaseBackup({
   const indexesByCollection = new Map(await Promise.all(collections.map(async (name) => {
     const collection = db.collection(name);
     return [name, collection.listIndexes ? await collection.listIndexes().toArray() : []];
-  })));
+  })).catch((error) => {
+    logBackupDiagnostic('index-catalog', error);
+    throw error;
+  }));
 
 
   const uploaded = [];
@@ -91,6 +126,7 @@ export async function createDatabaseBackup({
     totals: { documents: 0, bytes: 0, parts: 0 }
   };
 
+  let stage = 'snapshot';
   try {
     await client.withSession(async (session) => {
       await session.withTransaction(async () => {
@@ -162,6 +198,7 @@ export async function createDatabaseBackup({
       parts: uploaded.length
     };
     validateBackupManifest(manifest);
+    stage = 'manifest';
     const manifestKey = prefix + '/manifest.json';
     const manifestBytes = encoder.encode(JSON.stringify(manifest));
     await bucket.put(manifestKey, manifestBytes, {
@@ -177,6 +214,8 @@ export async function createDatabaseBackup({
       bytes: totalBytes
     };
   } catch (error) {
+    logBackupDiagnostic(stage, error, totalDocuments, totalBytes,
+      uploaded.length, Date.now() - started);
     // Incomplete backups never have a committed manifest. Remove any
     // accidentally uploaded chunks to avoid retention bloat and ambiguity.
     try { await Promise.all(uploaded.map((key) => bucket.delete(key))); } catch {}
