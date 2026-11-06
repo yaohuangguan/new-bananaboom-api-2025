@@ -137,6 +137,15 @@ export function shouldRouteToCoreWorker(method, path, search = '', headers = {})
     // No normal private routing without an explicit rollout decision.
     return shouldRoutePrivateRead(method, path, search, headers, 0);
   }
+  // Only public comment GETs, never comment writes or admin endpoints.
+  if (/^\/api\/comments\/[a-f0-9]{24}$/i.test(path) ||
+      /^\/api\/comments\/reply\/[a-f0-9]{24}$/i.test(path)) {
+    const get = (name) => typeof headers?.get === 'function'
+      ? headers.get(name) : headers?.[name] || headers?.[name.toLowerCase()] || null;
+    return !search && !get('x-auth-token') && !get('x-google-auth') &&
+      !get('authorization') &&
+      !/(?:^|;)\s*orion_session=/.test(get('cookie') || '');
+  }
   if (/^\/api\/posts\/likes\/[a-f\d]{24}$/i.test(path)) {
     return !hasLegacyCredentials(headers);
   }
@@ -403,6 +412,35 @@ export default {
 
     const limited = await enforceRateLimit(request, env, pathname);
     if (limited) return withSecurityHeaders(limited);
+
+    // Anonymous profile probes require no MongoDB lookup. The legacy
+    // middleware responds with precisely this 401 whenever no real auth
+    // carrier exists. Do not forward unrelated analytics/GAESA cookies.
+    if (request.method === 'GET' && pathname === '/api/users/profile' &&
+        !request.headers.get('x-auth-token') &&
+        !request.headers.get('x-google-auth') &&
+        !request.headers.get('authorization') &&
+        !/(?:^|;)\s*orion_session=/.test(request.headers.get('cookie') || '')) {
+      const response = withSecurityHeaders(new Response(JSON.stringify({
+        success: false,
+        message: 'Unauthorized: Please login first',
+        message_cn: '请先登录'
+      }), {
+        status: 401,
+        headers: {
+          'content-type': 'application/json; charset=utf-8',
+          'cache-control': 'no-store',
+          'x-bananaboom-origin': 'worker'
+        }
+      }));
+      const origin = corsOrigin(request);
+      if (origin) {
+        response.headers.set('access-control-allow-origin', origin);
+        response.headers.set('access-control-allow-credentials', 'true');
+        response.headers.append('vary', 'Origin');
+      }
+      return response;
+    }
 
     if (pathname === '/api/resumes/export-pdf' &&
         (env.PDF_BROWSER_CUTOVER === '1' ||

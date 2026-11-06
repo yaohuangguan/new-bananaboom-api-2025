@@ -5,6 +5,7 @@ import { deliverBarkOutbox, resolveBarkDestination } from './postOutbox.js';
 import { performArticleTransaction } from './articleTransaction.js';
 import { dispatchTodoReminders } from './todoReminders.js';
 import { createDatabaseBackup } from './databaseBackup.js';
+import { getPublicComments } from './commentReads.js';
 
 /**
  * A single Durable Object owns the MongoDB connection.
@@ -49,6 +50,11 @@ export class MongoDBConnection extends DurableObject {
 
   logs() {
     return this.#read('logs', { sort: { version: 1 } });
+  }
+
+  async publicComments(postId, reply = false) {
+    await this.client.connect();
+    return getPublicComments(this.client.db(), postId, { reply });
   }
 
   publicPhotos() {

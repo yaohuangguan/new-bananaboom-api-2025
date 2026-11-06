@@ -468,3 +468,22 @@ Authenticated or external callbacks are not changed. A pre-cutover JSON
 SHA-256 baseline for five real production requests was recorded locally
 for comparison after deployment. The baseline contains hashes only and
 is removed when verification finishes.
+
+## Phase 11: anonymous profile and public comments read migration
+
+2026-11-06 Cloud Run sample: most /api/users/profile requests returned
+the legacy anonymous 401. The Gateway now returns the same JSON 401
+without Cloud Run when there is no Authorization, X-Auth-Token,
+X-Google-Auth or orion_session cookie. Other cookies are not login.
+Authenticated/Google identity profile requests still use Cloud Run.
+
+Public GET /api/comments/:postId and GET /api/comments/reply/:commentId
+use fixed MongoDB Durable Object ObjectId queries. The adapter preserves
+historical comment and reply JSON shape, old _postid/_userid fallback,
+and public joined names/avatars. All comment writes and authenticated
+comment reads remain Cloud Run. Only exact 24-hex IDs and no query
+parameters route to Worker. On read failure, Gateway can safely fall
+back to Cloud Run.
+
+Four pre-cutover production JSON hashes were recorded, including one
+article with a historical reply; compare after deployment.
