@@ -8,7 +8,7 @@ import { createDatabaseBackup } from './databaseBackup.js';
 import { getPublicComments } from './commentReads.js';
 import { getOwnerProfile, getOwnerAiStatus } from './ownerProfile.js';
 import { createPasswordSession, revokePasswordSession } from './passwordSession.js';
-import { BrainReadError, brainAccessScopes, searchBrainMemories, readBrainMemory } from './brainRead.js';
+import { BrainReadError, safeBrainFailureKind, brainAccessScopes, searchBrainMemories, readBrainMemory } from './brainRead.js';
 import { readOwnerFootprints, readOwnerFootprint } from './footprintReads.js';
 import { listOwnerTodos } from './todoReads.js';
 
@@ -183,15 +183,18 @@ export class MongoDBConnection extends DurableObject {
   }
 
   async #brainResult(operation) {
-    await this.client.connect();
+    let stage='connect';
     try {
+      await this.client.connect();
+      stage='query';
       return { ok: true, data: await operation(this.client.db()) };
     } catch (error) {
-      // Known validation errors stay sanitized across Durable Object RPC.
+      // Only validated, safe error codes cross the Durable Object RPC.
       if (error instanceof BrainReadError) {
         return { ok: false, status: error.status, code: error.message };
       }
-      throw error;
+      return {ok:false,status:503,code:'KNOWLEDGE_SYNC_FAILED',
+        diagnostic:stage+'-'+safeBrainFailureKind(error)};
     }
   }
 

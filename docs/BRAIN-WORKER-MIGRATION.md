@@ -67,3 +67,36 @@ Repro (existing repository tooling supplies mongodb-memory-server):
 
 **Scope: keep Vercel frontend and all owner-written Express source folders.**
 Cloud Run retirement removes the deployed GCP service, not the historical code.
+
+## Production canary and Durable Object deployment sequencing
+
+On 2026-11-07, the first authenticated-read canary using a syntactically
+correct but nonexistent test credential returned 503. The Core Worker
+was deployed but the existing MongoDBConnection Durable Object instance
+had not adopted its new RPC methods. A zero-argument diagnostic ping
+returned a receiver-method-not-implemented error.
+
+Cloudflare Durable Objects deployments **defer code updates by default**
+(up to approximately 300 seconds as of the 2026-10-30 change). A
+one-off Core deployment using:
+
+    wrangler deploy --durable-objects-code-update-mode immediate
+
+restarted the DO isolate **without deleting its identity, SQLite
+storage, MongoDB collections, R2 objects or any user data**. The same
+invalid test credential then produced **401**, proving the DO implementation
+was active.
+
+This was a single-deployment override, not a persistent Wrangler setting.
+Immediate mode can interrupt in-flight DO operations, including backup.
+For subsequent RPC additions:
+
+1. Deploy DO methods before Gateway routing.
+2. Retain old methods until all prior Worker calls have drained.
+3. Wait for DO adoption (or use planned one-off immediate mode only when
+   safe) and verify with an authenticated or invalid-token canary.
+4. Only then cut over Gateway routes; preserve fail-closed 503 during RPC
+   version skew and never retry writes on legacy Cloud Run.
+
+Do not delete or re-create the production DO to solve version skew.
+Normal Brain MCP/OAuth/writes still remain on Cloud Run until full parity.

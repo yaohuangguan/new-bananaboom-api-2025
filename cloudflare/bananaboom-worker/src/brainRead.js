@@ -6,6 +6,20 @@ const TYPE_SET = new Set(['instruction','identity','career','project','preferenc
 export const BRAIN_MCP_RESOURCE = 'https://api.samyao.me/api/brain/sync/mcp';
 export const BRAIN_API_RESOURCE = 'https://api.samyao.me/api/brain/sync/v1';
 
+// Only fixed classifiers cross the DO RPC boundary or reach logs. Never
+// include raw messages, Mongo queries, token strings or request URL data.
+export function safeBrainFailureKind(error) {
+  const msg=String(error?.message || '');
+  if (msg.includes('is not a function')) return 'missing-function';
+  if (msg.includes('Cannot read properties of undefined')) return 'undefined-access';
+  if (msg.includes('Cannot read properties of null')) return 'null-access';
+  if (/crypto|subtle|digest/i.test(msg)) return 'crypto-runtime';
+  if (/RPC|Durable Object/i.test(msg)) return 'rpc-runtime';
+  if (/clone|serialize/i.test(msg)) return 'serialization';
+  if (/timeout|timed out|network/i.test(msg)) return 'database-io';
+  return 'other';
+}
+
 export class BrainReadError extends Error {
   constructor(code, status = 400) {
     super(code);
