@@ -30,15 +30,15 @@ flowchart TD
   CR --> AI
 ```
 
-Vercel `vercel.json` routes local `/api/*` to `https://api.samyao.me/api/*`. The public site is **not deployed to Pages yet**. The Gateway's `ORIGIN_URL` points to the old Cloud Run backend. The production Core Worker is deliberately not exposed under a public workers.dev route.
+Vercel `vercel.json` routes local `/api/*` to `https://api.samyao.me/api/*`. The public site **will remain on Vercel**; migrating its CDN is outside project scope. The Gateway's `ORIGIN_URL` points to the old Cloud Run backend. The production Core Worker is deliberately not exposed under a public workers.dev route.
 
 **Edge security:** explicit route ownership, rate limits, CORS and security headers, restrictive Worker Service Binding. Legacy `x-orion-edge-secret` protects the old origin; it is not a replacement for user JWT / session / RBAC. Write endpoints must be idempotent or fail closed, never dual-executed.
 
-## 2. Target deployment (TO-BE: NOT LIVE)
+## 2. Target backend deployment (TO-BE: NOT LIVE)
 
 ```mermaid
 flowchart TD
-  B["Browser / PWA"] --> P["Cloudflare Pages · samyao.me\nReact/Vite static build"]
+  B["Browser / PWA"] --> P["Vercel · samyao.me\nReact/Vite static build (KEEP)"]
   B --> G["Cloudflare API Worker · api.samyao.me"]
   B --> ID["Existing Google/Firebase identity"]
   G --> K["Core Workers · route handlers / RBAC"]
@@ -98,14 +98,14 @@ Backup is bounded: **48 MiB Worker staging**, 16 MiB per EJSON document, 50-seco
 | Media | Authenticated upload, R2 browsing, asset references, large image and file handling | Upload→reference→fetch→delete E2E, no public-private leak |
 | AI | Preserved AI apps and `/api/chat/ai`, streaming and provider credentials | SSE/streaming parity, provider failure handling, budget and secret protection |
 | Scheduling | Native Cron and notification outbox, paused Todo reminders | No duplicate/delayed flood; old GCP scheduler verified disabled |
-| Frontend hosting | Move current Vite/PWA app off Vercel to Pages | CSP, paths/rewrites, PWA service worker, static SEO routes, OAuth redirects |
+| Frontend (keep) | Keep Vercel, existing CDN, build, PWA, SEO and custom domain | Confirm all existing browser paths continue to work against the migrated Workers API |
 | GCP retirement | No necessary calls reach Cloud Run, all secrets/callbacks/cron migrated | Production zero-upstream observation + reversible shutdown drill |
 
 Retained functionality must be selected from **actual current frontend calls** and Second Brain clients, not only from Express route definitions. Categorize each API by method, authentication variant, owner permission, data collection, side effects, external callback, target Worker implementation, test and traffic status. Pay special attention to rare administrative functions and background jobs.
 
 ### Retirement gate: binary decision
 
-**PASS** only when every required route is Worker-owned or explicitly retired; authenticated and OAuth flows are proven; media and private CRUD E2E work; private R2 backups are restorable; native scheduled jobs are tested; UI and API no longer depend on Vercel/Cloud Run; monitoring confirms a representative **zero required Cloud Run traffic** period; and a rollback rehearsal succeeds.
+**PASS** only when every required route is Worker-owned or explicitly retired; authenticated and OAuth flows are proven; media and private CRUD E2E work; private R2 backups are restorable; native scheduled jobs are tested; UI continues on Vercel and the API no longer needs Cloud Run; monitoring confirms a representative **zero required Cloud Run traffic** period; and a rollback rehearsal succeeds.
 
 **FAIL today** because Cloud Run is still the default for several critical categories. A Cloudflare API custom domain or successful R2 backup **does not** change that verdict. Keep old Cloud Run service and recovery access until all gates pass.
 
@@ -120,4 +120,12 @@ node --test cloudflare/bananaboom-worker/tests/*.test.mjs
 node scripts/verifyorionr2restore.mjs db-backups/<manifest-id>/manifest.json
 ```
 
-**Current target:** Cloudflare Pages + API Gateway + Core Workers + Durable Objects + MongoDB + R2 + native Cron + preserved OAuth/MCP/provider integrations. **Status:** migration still in progress.
+**Current target:** Vercel frontend (unchanged) + Cloudflare API Gateway + Core Workers + Durable Objects + existing MongoDB + R2 + native Cron + preserved OAuth/MCP/provider integrations. **Status:** migration still in progress.
+
+## Explicit owner constraints (2026-11-07)
+
+- Keep the website on **Vercel**, including its global CDN, PWA and prerendering.
+- Migrate only the Cloud Run-dependent backend to Cloudflare Workers.
+- **Never delete the original Express server directories**; they were written by the owner. Preserve them in source control even after Cloud Run is safely decommissioned.
+- Do not declare completion until the production old-origin dependency metric is zero across used routes and infrequent callbacks, with a rollback drill.
+- Route inventory is generated by scripts/audit-orion-route-ownership.py and recorded in docs/LEGACY-ROUTE-INVENTORY.md. This is a static lower bound, not a traffic measurement.

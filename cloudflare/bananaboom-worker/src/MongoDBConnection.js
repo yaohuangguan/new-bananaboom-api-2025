@@ -7,6 +7,7 @@ import { dispatchTodoReminders } from './todoReminders.js';
 import { createDatabaseBackup } from './databaseBackup.js';
 import { getPublicComments } from './commentReads.js';
 import { getOwnerProfile, getOwnerAiStatus } from './ownerProfile.js';
+import { createPasswordSession, revokePasswordSession } from './passwordSession.js';
 import { readOwnerFootprints, readOwnerFootprint } from './footprintReads.js';
 import { listOwnerTodos } from './todoReads.js';
 
@@ -178,6 +179,20 @@ export class MongoDBConnection extends DurableObject {
   async ownerAiStatus(user) {
     await this.client.connect();
     return getOwnerAiStatus(this.client.db(), user);
+  }
+
+  async passwordSignIn(credentials) {
+    await this.client.connect();
+    return createPasswordSession(this.client.db(), credentials, {
+      legacy:this.env.SECRET_JWT,
+      next:this.env.ORION_JWT_NEXT_SECRET,
+      mode:this.env.ORION_JWT_SIGNING_MODE || 'legacy'
+    });
+  }
+
+  async passwordLogout(token) {
+    await this.client.connect();
+    return revokePasswordSession(this.client.db(), token);
   }
 
   async authorizeSession(token) {

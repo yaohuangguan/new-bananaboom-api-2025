@@ -83,6 +83,26 @@ export function isRetiredOrionFeature(path) {
     path === '/api/chat/private' || path.startsWith('/api/chat/private/');
 }
 
+// Privacy-safe classification of Cloud Run dependencies. Never log raw
+// URL paths, IDs, cookies, tokens, user identifiers, query strings or bodies.
+export function legacyUpstreamCategory(pathname) {
+  if (typeof pathname !== 'string') return 'other';
+  if (/^\/(?:authorize|token|register|revoke)(?:\/|$)|^\/\.well-known\/oauth-/.test(pathname) ||
+      /^\/api\/brain(?:\/|$)/.test(pathname)) return 'second-brain-mcp';
+  if (/^\/api\/(?:auth|users|roles|permissions|permission-requests)(?:\/|$)/.test(pathname)) {
+    return 'identity-and-rbac';
+  }
+  if (/^\/api\/(?:upload|photos|cloudinary)(?:\/|$)/.test(pathname)) return 'media';
+  if (/^\/api\/(?:ai|chat\/ai|debater|rpg|drawing|voice2map|reading)(?:\/|$)/.test(pathname)) {
+    return 'ai';
+  }
+  if (/^\/api\/(?:todo|todos|footprints|fitness|period|menu|comments|posts|projects|resumes|homepage|tags)(?:\/|$)/.test(pathname)) {
+    return 'personal-and-content';
+  }
+  if (/^\/api\/(?:cron|scheduler|backup|audit|external)(?:\/|$)/.test(pathname)) return 'operations';
+  return 'other';
+}
+
 function hasLegacyCredentials(headers) {
   const get = (name) => typeof headers?.get === 'function'
     ? headers.get(name) : headers?.[name] || headers?.[name.toLowerCase()] || null;
@@ -542,6 +562,53 @@ export default {
       return secured;
     }
 
+    const passwordAuthMutation = request.method === 'POST' &&
+      (pathname === '/api/users/signin' || pathname === '/api/users/logout') &&
+      !request.headers.get('x-google-auth') &&
+      (env.PASSWORD_AUTH_CUTOVER === '1' ||
+       request.headers.get('x-orion-password-worker-canary') === '1');
+    if (passwordAuthMutation) {
+      // A login may have already inserted a valid Session; never retry
+      // that write against Cloud Run on 5xx or network errors.
+      const authUnavailable = () => {
+        const response = withSecurityHeaders(new Response(JSON.stringify({
+          message:'Password authentication outcome unknown. Do not automatically retry.'
+        }), {status:503,headers:{'content-type':'application/json; charset=utf-8',
+          'cache-control':'no-store'}}));
+        const origin=corsOrigin(request);
+        if (origin) {
+          response.headers.set('access-control-allow-origin',origin);
+          response.headers.set('access-control-allow-credentials','true');
+          response.headers.append('vary','Origin');
+        }
+        return response;
+      };
+      let result;
+      try {
+        if (!env.BANANABOOM_CORE) return authUnavailable();
+        const headers=new Headers(request.headers);
+        for (const name of ['host','x-forwarded-host','x-orion-edge-secret',
+          'x-orion-password-worker-canary']) headers.delete(name);
+        result=await env.BANANABOOM_CORE.fetch(new Request(request.url,{
+          method:'POST',headers,body:request.body,duplex:'half',redirect:'manual'
+        }));
+      } catch (error) {
+        console.error('worker-password-auth-request-error',error?.name || 'Error');
+        return authUnavailable();
+      }
+      const response=result.status>=500?authUnavailable():withSecurityHeaders(result);
+      response.headers.set('cache-control','no-store');
+      response.headers.set('x-bananaboom-origin','worker');
+      response.headers.set('access-control-expose-headers','x-bananaboom-origin');
+      const origin=corsOrigin(request);
+      if (origin) {
+        response.headers.set('access-control-allow-origin',origin);
+        response.headers.set('access-control-allow-credentials','true');
+        response.headers.append('vary','Origin');
+      }
+      return response;
+    }
+
     const backupMigration = pathname === '/api/backup/database' &&
       request.method === 'POST' &&
       (env.BACKUP_R2_CUTOVER === '1' ||
@@ -760,6 +827,10 @@ export default {
       duplex: 'half'
     });
 
+    // Observes actual Cloud Run calls (including read fallbacks).
+    if (env.LEGACY_UPSTREAM_AUDIT === '1') {
+      console.info('orion-legacy-upstream', legacyUpstreamCategory(pathname), request.method);
+    }
     const response = await fetch(
       upstreamRequest,
       ttl > 0
