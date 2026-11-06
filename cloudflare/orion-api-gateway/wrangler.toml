@@ -25,7 +25,7 @@ FOOTPRINT_DETAIL_CUTOVER = "0"
 PDF_BROWSER_CUTOVER = "1"
 # Explicit canary for private R2 database backup; old mongodump stays until
 # real admin auth, manifest and isolated restore tests pass.
-BACKUP_R2_CUTOVER = "0"
+BACKUP_R2_CUTOVER = "1"
 
 [[routes]]
 pattern = "api.samyao.me"
