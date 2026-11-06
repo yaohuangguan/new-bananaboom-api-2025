@@ -27,6 +27,9 @@ function safeCollection(name) {
 // Only a whitelisted reason code, never raw MongoDB/R2 error messages.
 export function classifyBackupFailure(error) {
   const message = String(error?.message || '');
+  if (/^OrionExportedDocumentTooLarge:\d{1,12}$/.test(message)) {
+    return 'single-document-limit';
+  }
   const known = {
     'No database collections to back up': 'empty-database',
     'Case-insensitive collection names collide': 'collection-name-collision',
@@ -205,9 +208,9 @@ export async function createDatabaseBackup({
           const line = EJSON.stringify(doc, { relaxed: false }) + '\n';
           const length = encoder.encode(line).byteLength;
           if (length > maxSingleDocumentBytes) {
-            const error = new Error('Document too large for safe export');
-            error.exportedBytes = length;
-            throw error;
+            // The numeric encoded size survives MongoDB transaction rethrows
+            // even when custom Error object properties are discarded.
+            throw new Error('OrionExportedDocumentTooLarge:' + length);
           }
           if (totalBytes + length > maxTotalBytes) throw new Error('Backup exceeded size limit');
           if (totalBytes + length > maxStagedBytes) {
@@ -291,7 +294,9 @@ export async function createDatabaseBackup({
       snapshot?.totalDocuments || 0,
       snapshot?.totalBytes || 0,
       uploaded.length, elapsed,
-      Number.isSafeInteger(error?.exportedBytes) ? error.exportedBytes : 0
+      Number(String(error?.message || '').match(
+        /^OrionExportedDocumentTooLarge:(\d{1,12})$/
+      )?.[1] || 0)
     ].join('|'));
   }
 }
