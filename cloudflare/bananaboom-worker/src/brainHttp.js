@@ -1,4 +1,4 @@
-import { BRAIN_API_RESOURCE } from './brainRead.js';
+import { BRAIN_API_RESOURCE, safeBrainFailureKind } from './brainRead.js';
 
 // Protected endpoint implementations matching existing /api/brain/sync/v1
 // REST read semantics. The Gateway keeps all real traffic on Cloud Run until
@@ -25,6 +25,9 @@ function sendKnown(ctx,result) {
     Number.isInteger(status) && [400,401,403,404].includes(status)) {
     ctx.status=status;
     return {message:code};
+  }
+  if (result?.diagnostic && /^[a-z-]{3,90}$/.test(result.diagnostic)) {
+    console.error('brain-worker-rpc-diagnostic',result.diagnostic);
   }
   ctx.status=503;
   return {message:'KNOWLEDGE_SYNC_FAILED'};
@@ -60,7 +63,7 @@ export function registerBrainReadRoutes(app, repository, options={}) {
         auth.token,ctx.requestBody,BRAIN_API_RESOURCE);
       return sendKnown(ctx,result);
     } catch (error) {
-      console.error('brain-worker-search-error',error?.name || 'Error');
+      console.error('brain-worker-search-error',error?.name || 'Error',safeBrainFailureKind(error));
       ctx.status=503;
       return {message:'KNOWLEDGE_SYNC_FAILED'};
     }
@@ -73,7 +76,7 @@ export function registerBrainReadRoutes(app, repository, options={}) {
         auth.token,ctx.params.id,BRAIN_API_RESOURCE);
       return sendKnown(ctx,result);
     } catch (error) {
-      console.error('brain-worker-read-error',error?.name || 'Error');
+      console.error('brain-worker-read-error',error?.name || 'Error',safeBrainFailureKind(error));
       ctx.status=503;
       return {message:'KNOWLEDGE_SYNC_FAILED'};
     }

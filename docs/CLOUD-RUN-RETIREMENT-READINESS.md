@@ -111,3 +111,13 @@ and isolated Replica Set tests. BRAIN_READ_CUTOVER stays 0 and all normal MCP
 and sync_knowledge writes remain Cloud Run. Existing OAuth/PKCE/refresh,
 private encrypted blob storage and transaction parity remain blockers.
 See [BRAIN-WORKER-MIGRATION.md](BRAIN-WORKER-MIGRATION.md).
+
+## MongoDB Durable Object code-update caveat
+
+Cloudflare's October 2026 deferred Durable Object code updates can leave an
+active DO serving old RPC methods temporarily after a Worker deploy.
+Brain canary returned 503 on RPC method mismatch and returned the expected
+401 for a fake test token after one-off immediate Core deployment.
+Do not permanently force immediate updates: active backups may be disrupted.
+Deploy new DO APIs before Gateway cutover, verify adoption, and fail closed
+on version mismatch instead of bypassing owner validation.
