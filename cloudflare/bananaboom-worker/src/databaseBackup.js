@@ -1,7 +1,11 @@
 import { BSON } from 'mongodb';
 const { EJSON } = BSON;
 
-const CHUNK_MAX_BYTES = 512 * 1024;
+const CHUNK_MAX_BYTES = 2 * 1024 * 1024;
+const MAX_SINGLE_DOCUMENT_BYTES = 512 * 1024;
+// Keep a safety margin under the Cloudflare isolate memory budget.
+const MAX_STAGED_BYTES = 48 * 1024 * 1024;
+const UPLOAD_CONCURRENCY = 4;
 const MAX_BACKUP_BYTES = 60 * 1024 * 1024;
 const MAX_DOCUMENTS = 50000;
 const MAX_RUNTIME_MS = 40000;
@@ -27,7 +31,8 @@ export function classifyBackupFailure(error) {
     'Backup exceeded document limit': 'document-limit',
     'Document too large for safe export': 'single-document-limit',
     'Backup exceeded size limit': 'total-size-limit',
-    'Private backup R2 binding missing': 'missing-r2-binding'
+    'Private backup R2 binding missing': 'missing-r2-binding',
+    'Backup exceeded memory staging limit': 'memory-staging-limit'
   };
   if (Object.hasOwn(known, message)) return known[message];
   if (/transaction|snapshot|writeconflict/i.test(message)) return 'mongodb-transaction';
@@ -81,6 +86,7 @@ export async function createDatabaseBackup({
   randomId = () => crypto.randomUUID(),
   maxRuntimeMs = MAX_RUNTIME_MS,
   maxTotalBytes = MAX_BACKUP_BYTES,
+  maxStagedBytes = MAX_STAGED_BYTES,
   maxDocuments = MAX_DOCUMENTS
 }) {
   if (!bucket || typeof bucket.put !== 'function') {
@@ -89,22 +95,25 @@ export async function createDatabaseBackup({
   const started = Date.now();
   const snapshotAt = now().toISOString();
   const prefix = 'db-backups/' + snapshotAt.replace(/[:]/g, '-') + '-' + randomId().slice(0, 8);
+  const deadline = () => {
+    if (Date.now() - started > maxRuntimeMs) {
+      throw new Error('Backup exceeded runtime limit');
+    }
+  };
   const list = await db.listCollections({}, { nameOnly: false }).toArray()
     .catch((error) => {
       logBackupDiagnostic('collection-catalog', error);
       throw error;
     });
-  const collections = list.map((v) => v.name)
-    .filter(safeCollection).sort();
+  const collections = list.map((v) => v.name).filter(safeCollection).sort();
   const metadata = new Map(list.map((v) => [v.name, v]));
   if (new Set(collections.map((v) => v.toLowerCase())).size !== collections.length) {
     throw new Error('Case-insensitive collection names collide');
   }
   if (collections.length === 0) throw new Error('No database collections to back up');
 
-  // MongoDB forbids listIndexes inside a transaction. Capture the collection
-  // catalog before the first snapshot read; document data remains read
-  // consistently in the transaction that follows.
+  // MongoDB prohibits listIndexes inside transactions. Catalog/index metadata
+  // is captured before the first snapshot read; schema must be quiescent.
   const indexesByCollection = new Map(await Promise.all(collections.map(async (name) => {
     const collection = db.collection(name);
     return [name, collection.listIndexes ? await collection.listIndexes().toArray() : []];
@@ -113,95 +122,116 @@ export async function createDatabaseBackup({
     throw error;
   }));
 
-
-  const uploaded = [];
-  let totalBytes = 0;
-  let totalDocuments = 0;
-  const manifest = {
-    format: 'orion-mongo-ejson-ndjson-v1',
-    complete: true,
-    database: db.databaseName,
-    snapshotAt,
-    collections: [],
-    totals: { documents: 0, bytes: 0, parts: 0 }
-  };
-
   let stage = 'snapshot';
+  let snapshot;
+  let manifestKey;
+  const uploaded = [];
   try {
-    await client.withSession(async (session) => {
-      await session.withTransaction(async () => {
-        for (const name of collections) {
-          const collection = db.collection(name);
-          const rawIndexes = indexesByCollection.get(name) || [];
-          const col = {
-            name, count: 0, parts: [],
-            options: metadata.get(name)?.options || {},
-            indexes: rawIndexes.filter((idx) => idx.name !== '_id_')
-              .map(({ name: indexName, key, ...options }) => {
-                // MongoDB controls index version/ns; preserve the options
-                // needed to rebuild uniqueness, TTLs and partial indexes.
-                const kept = {};
-                for (const prop of [
-                  'unique', 'sparse', 'expireAfterSeconds', 'partialFilterExpression',
-                  'collation', 'weights', 'default_language', 'language_override',
-                  'wildcardProjection', 'hidden'
-                ]) if (options[prop] !== undefined) kept[prop] = options[prop];
-                return { name: indexName, key, ...kept };
-              })
-          };
-          manifest.collections.push(col);
-          let buffer = [];
-          let buffered = 0;
-          const flush = async () => {
-            if (!buffer.length) return;
-            const index = col.parts.length;
-            const key = prefix + '/' + name.toLowerCase() + '/' + String(index).padStart(5, '0') + '.ndjson';
-            const bytes = encoder.encode(buffer.join(''));
-            const hash = await sha256(bytes);
-            await bucket.put(key, bytes, {
-              httpMetadata: { contentType: 'application/x-ndjson' },
-              customMetadata: { sha256: hash, encoding: 'MongoDB Extended JSON (canonical)' }
-            });
-            uploaded.push(key);
-            col.parts.push({ key, bytes: bytes.byteLength, sha256: hash });
-            buffer = [];
-            buffered = 0;
-          };
-          const cursor = collection.find({}, {
-            session, batchSize: 100
-          }).sort({ _id: 1 });
-          for await (const doc of cursor) {
-            if (Date.now() - started > maxRuntimeMs) throw new Error('Backup exceeded runtime limit');
-            if (++totalDocuments > maxDocuments) throw new Error('Backup exceeded document limit');
-            const line = EJSON.stringify(doc, { relaxed: false }) + '\n';
-            const length = encoder.encode(line).byteLength;
-            if (length > CHUNK_MAX_BYTES) throw new Error('Document too large for safe export');
-            if (totalBytes + length > maxTotalBytes) throw new Error('Backup exceeded size limit');
-            if (buffered + length > CHUNK_MAX_BYTES) await flush();
-            buffer.push(line);
-            buffered += length;
-            totalBytes += length;
-            col.count++;
+    // MongoDB can automatically retry withTransaction. Keep every attempt
+    // local; do not make any R2 PUT inside the transaction callback.
+    snapshot = await client.withSession(async (session) => session.withTransaction(async () => {
+      const staged = [];
+      let totalBytes = 0;
+      let totalDocuments = 0;
+      const manifest = {
+        format: 'orion-mongo-ejson-ndjson-v1',
+        complete: true,
+        database: db.databaseName,
+        snapshotAt,
+        collections: [],
+        totals: { documents: 0, bytes: 0, parts: 0 }
+      };
+      for (const name of collections) {
+        deadline();
+        const collection = db.collection(name);
+        const rawIndexes = indexesByCollection.get(name) || [];
+        const col = {
+          name, count: 0, parts: [],
+          options: metadata.get(name)?.options || {},
+          indexes: rawIndexes.filter((idx) => idx.name !== '_id_')
+            .map(({ name: indexName, key, ...options }) => {
+              const kept = {};
+              for (const prop of [
+                'unique', 'sparse', 'expireAfterSeconds', 'partialFilterExpression',
+                'collation', 'weights', 'default_language', 'language_override',
+                'wildcardProjection', 'hidden'
+              ]) if (options[prop] !== undefined) kept[prop] = options[prop];
+              return { name: indexName, key, ...kept };
+            })
+        };
+        manifest.collections.push(col);
+        let buffer = [];
+        let buffered = 0;
+        const flush = async () => {
+          if (!buffer.length) return;
+          const key = prefix + '/' + name.toLowerCase() + '/' +
+            String(col.parts.length).padStart(5, '0') + '.ndjson';
+          const bytes = encoder.encode(buffer.join(''));
+          const hash = await sha256(bytes);
+          staged.push({ key, bytes, hash });
+          col.parts.push({ key, bytes: bytes.byteLength, sha256: hash });
+          buffer = [];
+          buffered = 0;
+        };
+        const cursor = collection.find({}, { session, batchSize: 100 }).sort({ _id: 1 });
+        for await (const doc of cursor) {
+          deadline();
+          if (++totalDocuments > maxDocuments) throw new Error('Backup exceeded document limit');
+          const line = EJSON.stringify(doc, { relaxed: false }) + '\n';
+          const length = encoder.encode(line).byteLength;
+          if (length > MAX_SINGLE_DOCUMENT_BYTES) {
+            throw new Error('Document too large for safe export');
           }
-          await flush();
+          if (totalBytes + length > maxTotalBytes) throw new Error('Backup exceeded size limit');
+          if (totalBytes + length > maxStagedBytes) {
+            throw new Error('Backup exceeded memory staging limit');
+          }
+          if (buffered + length > CHUNK_MAX_BYTES) await flush();
+          buffer.push(line);
+          buffered += length;
+          totalBytes += length;
+          col.count++;
         }
-      }, {
-        readConcern: { level: 'snapshot' },
-        writeConcern: { w: 'majority' },
-        readPreference: 'primary',
-        maxCommitTimeMS: 10000
-      });
-    });
-    manifest.totals = {
-      documents: totalDocuments,
-      bytes: totalBytes,
-      parts: uploaded.length
-    };
-    validateBackupManifest(manifest);
+        await flush();
+      }
+      manifest.totals = {
+        documents: totalDocuments,
+        bytes: totalBytes,
+        parts: staged.length
+      };
+      validateBackupManifest(manifest);
+      return { manifest, staged, totalDocuments, totalBytes };
+    }, {
+      readConcern: { level: 'snapshot' },
+      writeConcern: { w: 'majority' },
+      readPreference: 'primary',
+      maxCommitTimeMS: 10000
+    }));
+
+    // Commit must succeed before any R2 transfer.
+    stage = 'r2-chunks';
+    for (let i = 0; i < snapshot.staged.length; i += UPLOAD_CONCURRENCY) {
+      deadline();
+      const batch = snapshot.staged.slice(i, i + UPLOAD_CONCURRENCY);
+      const results = await Promise.allSettled(batch.map(async (part) => {
+        await bucket.put(part.key, part.bytes, {
+          httpMetadata: { contentType: 'application/x-ndjson' },
+          customMetadata: {
+            sha256: part.hash, encoding: 'MongoDB Extended JSON (canonical)'
+          }
+        });
+        uploaded.push(part.key);
+      }));
+      const failure = results.find((result) => result.status === 'rejected');
+      if (failure) throw failure.reason;
+      deadline();
+    }
+
+    // Publish a completed manifest only after all chunk PUTs are successful.
     stage = 'manifest';
-    const manifestKey = prefix + '/manifest.json';
-    const manifestBytes = encoder.encode(JSON.stringify(manifest));
-    await bucket.put(manifestKey, manifestBytes, {
+    deadline();
+    manifestKey = prefix + '/manifest.json';
+    await bucket.put(manifestKey, encoder.encode(JSON.stringify(snapshot.manifest)), {
       httpMetadata: { contentType: 'application/json' }
     });
     return {
@@ -209,16 +239,24 @@ export async function createDatabaseBackup({
       folder: prefix,
       manifestKey,
       totalFiles: uploaded.length + 1,
-      collections: manifest.collections.length,
-      documents: totalDocuments,
-      bytes: totalBytes
+      collections: snapshot.manifest.collections.length,
+      documents: snapshot.totalDocuments,
+      bytes: snapshot.totalBytes
     };
   } catch (error) {
-    logBackupDiagnostic(stage, error, totalDocuments, totalBytes,
+    logBackupDiagnostic(stage, error,
+      snapshot?.totalDocuments || 0, snapshot?.totalBytes || 0,
       uploaded.length, Date.now() - started);
-    // Incomplete backups never have a committed manifest. Remove any
-    // accidentally uploaded chunks to avoid retention bloat and ambiguity.
-    try { await Promise.all(uploaded.map((key) => bucket.delete(key))); } catch {}
+    // An ambiguous manifest PUT might have written successfully. Remove its
+    // marker first; if that fails, retain the chunks so marker never dangles.
+    let markerRemoved = true;
+    if (manifestKey) {
+      try { await bucket.delete(manifestKey); }
+      catch { markerRemoved = false; }
+    }
+    if (markerRemoved) {
+      await Promise.allSettled(uploaded.map((key) => bucket.delete(key)));
+    }
     throw error;
   }
 }
