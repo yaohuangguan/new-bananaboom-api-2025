@@ -1,5 +1,8 @@
 # Orion API Cloud Run retirement readiness
-Status 2026-11-06: NOT READY FOR CLOUD RUN SHUTDOWN.
+Status 2026-11-07: NOT READY FOR CLOUD RUN SHUTDOWN.
+Current and target diagrams: [ARCHITECTURE.md](ARCHITECTURE.md).
+The Cloudflare R2 database backup and résumé PDF are live; auth, MCP and
+other legacy route dependencies still prevent safe shutdown.
 
 ## Native Worker completed
 Public homepage, project, menu, tag and article GETs; selected private
@@ -12,13 +15,31 @@ cutover requires signed-in end-to-end verification.
 ## Still handled by Cloud Run
 - Legacy and Google sign-in, registration, password reset, roles/sessions,
   legacy OAuth, Vault OAuth and Second Brain sync/import/export/restore
-- Socket.IO group chat, private chat, presence and online notifications
+- Obsolete human chat/Socket.IO paths are blocked (410) at Gateway; the
+  legacy code still exists pending final resource retirement.
 - Upload, photos, R2 management and Cloudinary utilities
-- Backup and export using mongodump/Chromium/local filesystem
+- The old mongodump/PDF implementation remains in Cloud Run only as legacy
+  source/rollback; normal database backup and public résumé PDF already
+  use Cloudflare Worker/R2 and Browser Run respectively.
 - AI, reading, drawing, voice2map, debater and RPG features
 - Todo, fitness, period, footprints, comments and related CRUD
 - CMS write methods beyond articles: resume, projects, menus, tags, homepage
-- Stripe webhook/legacy subscriptions, cron/scheduler and external callbacks
+- Retired Stripe/human chat routes are blocked (410) at Gateway; remaining
+  native Cron migration and any external callbacks must still be audited.
+
+## Current architecture owner and hard stop
+
+The **single current route ownership source** is
+`cloudflare/orion-api-gateway/src/index.js` plus its `wrangler.toml`
+cutover flags. Only `BACKUP_R2_CUTOVER=1` and `PDF_BROWSER_CUTOVER=1`
+are globally cut over for these two flows. The other private route flags
+remain off. An implemented Worker handler alone is not acceptance.
+
+Critical path: live login/OAuth, Second Brain MCP and sync,
+owner-scoped personal CRUD, media uploading, AI/history streaming, native
+Todo Cron without duplicate reminders, and frontend move to Pages.
+Record a complete route/method/auth inventory and a representative zero-
+required-upstream observation period before the Cloud Run off switch.
 
 ## Runtime platform blocking factor
 Cloudflare 7199 account currently returns Unauthorized for wrangler
