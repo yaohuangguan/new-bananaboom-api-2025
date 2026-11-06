@@ -418,6 +418,46 @@ export default {
       return secured;
     }
 
+    const backupMigration = pathname === '/api/backup/database' &&
+      request.method === 'POST' &&
+      (env.BACKUP_R2_CUTOVER === '1' ||
+       request.headers.get('x-orion-backup-canary') === '1');
+    if (backupMigration) {
+      // No Cloud Run fallback after a backup starts. The first operation could
+      // have already uploaded a complete snapshot to private R2.
+      const fail = () => withSecurityHeaders(new Response(JSON.stringify({
+        message: 'Backup outcome unknown. Check the private R2 manifest.'
+      }), { status: 503, headers: {
+        'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store'
+      } }));
+      let result;
+      try {
+        if (!env.BANANABOOM_CORE) return fail();
+        const headers = new Headers(request.headers);
+        for (const key of ['host', 'x-forwarded-host', 'x-orion-edge-secret',
+          'x-orion-backup-canary']) headers.delete(key);
+        result = await env.BANANABOOM_CORE.fetch(new Request(request.url, {
+          method: 'POST',
+          headers,
+          // No client-supplied body is ever necessary for a full database backup.
+          redirect: 'manual'
+        }));
+      } catch (error) {
+        console.error('database-backup-binding-failed', error?.name || 'Error');
+        result = fail();
+      }
+      const response = withSecurityHeaders(result);
+      response.headers.set('cache-control', 'no-store');
+      response.headers.set('x-bananaboom-origin', 'worker');
+      const origin = corsOrigin(request);
+      if (origin) {
+        response.headers.set('access-control-allow-origin', origin);
+        response.headers.set('access-control-allow-credentials', 'true');
+        response.headers.append('vary', 'Origin');
+      }
+      return response;
+    }
+
     if (isRetiredOrionFeature(pathname)) {
       const response = withSecurityHeaders(new Response(JSON.stringify({
         message: 'This legacy chat or billing endpoint has been retired.'

@@ -292,6 +292,58 @@ export function createApp(repository = mongoRepository, options = {}) {
       : await repository.publicPosts(options));
   }));
 
+  // Database snapshots include passwords, sessions, OAuth tokens and private
+  // notes: accept only a CURRENT super_admin session. Nothing is downloaded
+  // through this endpoint; it only writes to a PRIVATE R2 binding.
+  app.post('/api/backup/database', async (ctx) => {
+    ctx.set('Cache-Control', 'no-store');
+    const origin = ctx.headers.origin;
+    const trustedOrigins = new Set([
+      'https://samyao.me', 'https://www.samyao.me',
+      'https://ps6.space', 'https://www.ps6.space',
+      'http://localhost:5173'
+    ]);
+    if (ctx.headers.cookie && (!origin || !trustedOrigins.has(origin))) {
+      ctx.status = 403;
+      return { message: 'Untrusted backup origin' };
+    }
+    if (!extractLegacyToken(ctx.headers)) {
+      ctx.status = 401;
+      return { message: 'Unauthorized' };
+    }
+    let auth;
+    try {
+      auth = await authenticateLegacyRequest(ctx.headers, repository, await secretProvider());
+    } catch (error) {
+      console.error('db-backup-auth-failure', error?.name || 'Error');
+      ctx.status = 503;
+      return { message: 'Backup authentication unavailable' };
+    }
+    if (auth.kind !== 'authenticated') {
+      ctx.status = 401;
+      return { message: 'Unauthorized' };
+    }
+    if (auth.user.role !== 'super_admin') {
+      ctx.status = 403;
+      return { message: 'Super admin required' };
+    }
+    try {
+      const result = await repository.backupDatabase();
+      ctx.set('Content-Type', 'text/plain; charset=utf-8');
+      return '[LOG] Database snapshot verified and saved to private R2\n' +
+        '[DONE] ' + JSON.stringify({
+          success: true, folder: result.folder,
+          totalFiles: result.totalFiles,
+          collections: result.collections, documents: result.documents,
+          manifestKey: result.manifestKey
+        }) + '\n';
+    } catch (error) {
+      console.error('db-backup-failed', error?.name || 'Error');
+      ctx.status = error?.message === 'BackupAlreadyRunning' ? 409 : 503;
+      return { message: 'Database backup incomplete. Existing backups are unchanged.' };
+    }
+  });
+
   // Worker CRUD outbox notifications are admin-only, even when the user
   // knows an event cursor. The Gateway forwards only legacy JWT carriers.
   app.get('/api/audit/worker-events', async (ctx) => {
