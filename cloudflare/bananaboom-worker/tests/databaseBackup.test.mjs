@@ -131,3 +131,50 @@ test('no empty or unsafe database names and invalid manifests', async () => {
     ...fakeSource({ users:[], USERS:[] }), bucket: bucket()
   }), /collide/);
 });
+
+
+test('catalog queries must run outside transaction while document reads stay inside', async () => {
+  let inTransaction = false, readsInTransaction = 0;
+  const source = fakeSource({
+    users: [{ _id: new ObjectId(), email: 'sample@invalid.test' }]
+  });
+  const originalCollection = source.db.collection;
+  source.db.collection = (name) => {
+    const col = originalCollection(name);
+    return {
+      ...col,
+      listIndexes: () => ({
+        toArray: async () => {
+          assert.equal(inTransaction, false, 'MongoDB forbids listIndexes in transactions');
+          return [
+            {name:'_id_', key:{_id:1}},
+            {name:'email_1', key:{email:1}, unique:true}
+          ];
+        }
+      }),
+      find: () => ({
+        sort: () => ({
+          async *[Symbol.asyncIterator]() {
+            assert.equal(inTransaction, true, 'data read must use consistent transaction');
+            readsInTransaction++;
+            yield { _id: new ObjectId(), email: 'sample@invalid.test' };
+          }
+        })
+      })
+    };
+  };
+  source.client.withSession = async (fn) => fn({
+    withTransaction: async (run) => {
+      inTransaction = true;
+      try { return await run(); } finally { inTransaction = false; }
+    }
+  });
+  const b = bucket();
+  const summary = await createDatabaseBackup({...source, bucket:b});
+  assert.equal(summary.success, true);
+  assert.equal(readsInTransaction, 1);
+  const manifest = JSON.parse(new TextDecoder().decode(b.map.get(summary.manifestKey)));
+  assert.deepEqual(manifest.collections[0].indexes, [
+    {name:'email_1', key:{email:1}, unique:true}
+  ]);
+});

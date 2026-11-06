@@ -22,6 +22,11 @@ R2 happen while the snapshot remains open. Backup aborts after 40 seconds,
 50k documents, 60 MiB uncompressed, or 512 KiB individual document, with no
 completed manifest. Incomplete chunks are deleted best effort. Cloudflare
 Workers Free CPU and MongoDB transaction expiration may be stricter.
+MongoDB forbids listIndexes in transactions, so index metadata is enumerated
+BEFORE the snapshot transaction. Regression test enforces this ordering. The
+first production canary on 2026-11-07 returned HTTP 503 before this fix;
+production retry and isolated restore are still required.
+
 Metadata/indexes are collected outside the document snapshot and require
 a quiescent schema for exact consistency.
 
