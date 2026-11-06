@@ -208,6 +208,10 @@ export async function createDatabaseBackup({
           const line = EJSON.stringify(doc, { relaxed: false }) + '\n';
           const length = encoder.encode(line).byteLength;
           if (length > maxSingleDocumentBytes) {
+            // The Durable Object tail logs this locally, before any error
+            // serialization can strip the numeric exported size. No content,
+            // collection name, document ID or credential is logged.
+            console.warn('orion-backup-ejson-size', length, maxSingleDocumentBytes);
             // The numeric encoded size survives MongoDB transaction rethrows
             // even when custom Error object properties are discarded.
             throw new Error('OrionExportedDocumentTooLarge:' + length);
