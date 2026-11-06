@@ -323,3 +323,39 @@ test('safe backup failure message transmits only recognized stage and counters',
   assert.equal(b.map.size,0);
   assert.equal(parseBackupDiagnostic(new Error('password=hidden')),null);
 });
+
+
+test('a >2 MiB canonical EJSON document forms a valid single oversized part',async()=>{
+  const large='Z'.repeat(2200*1024);
+  const b=bucket();
+  const result=await createDatabaseBackup({
+    ...fakeSource({brain:[{_id:new ObjectId(),content:large}]}),bucket:b
+  });
+  assert.equal(result.success,true);
+  assert.equal(result.documents,1);
+  const m=JSON.parse(new TextDecoder().decode(b.map.get(result.manifestKey)));
+  assert.equal(m.collections[0].parts.length,1);
+  assert.ok(m.collections[0].parts[0].bytes>2*1024*1024);
+  const dest=target();
+  const restored=await restoreBackupToEmptyDatabase({
+    bucket:b,manifestKey:result.manifestKey,targetDb:dest.db
+  });
+  assert.equal(restored.restored,1);
+  assert.equal(dest.rows.get('brain')[0].content,large);
+});
+
+test('oversized EJSON documents fail safely with numeric-only size diagnostic',async()=>{
+  const b=bucket();
+  await assert.rejects(createDatabaseBackup({
+    ...fakeSource({notes:[{_id:new ObjectId(),content:'secret private note'}]}),
+    bucket:b,maxSingleDocumentBytes:64
+  }),error=>{
+    const info=parseBackupDiagnostic(error);
+    assert.equal(info?.stage,'snapshot');
+    assert.equal(info?.reason,'single-document-limit');
+    assert.ok(info.exportedDocumentBytes>64);
+    assert.equal(String(error.message).includes('secret'),false);
+    return true;
+  });
+  assert.equal(b.map.size,0);
+});
