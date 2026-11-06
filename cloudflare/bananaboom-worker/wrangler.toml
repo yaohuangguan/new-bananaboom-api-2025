@@ -23,3 +23,9 @@ new_sqlite_classes = ["MongoDBConnection"]
 # Durable post-operation notifications. Worker-only scheduled invocation.
 [triggers]
 crons = ["* * * * *"]
+
+# Never bind this bucket to a public domain. Contains passwords, sessions,
+# access tokens and private notes in recoverable BSON-compatible form.
+[[r2_buckets]]
+binding = "BACKUP_BUCKET"
+bucket_name = "orion-private-db-backups"

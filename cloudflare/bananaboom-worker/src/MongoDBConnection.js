@@ -4,6 +4,7 @@ import { withProjectDefaults } from './projectDefaults.js';
 import { deliverBarkOutbox, resolveBarkDestination } from './postOutbox.js';
 import { performArticleTransaction } from './articleTransaction.js';
 import { dispatchTodoReminders } from './todoReminders.js';
+import { createDatabaseBackup } from './databaseBackup.js';
 
 /**
  * A single Durable Object owns the MongoDB connection.
@@ -14,6 +15,8 @@ export class MongoDBConnection extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
     this.barkUrl = env.BARK_URL;
+    this.backupBucket = env.BACKUP_BUCKET;
+    this.backupRunning = false;
     this.client = new MongoClient(env.MONGO_URI, {
       maxPoolSize: 1,
       minPoolSize: 0,
@@ -214,6 +217,23 @@ export class MongoDBConnection extends DurableObject {
         }
       };
     });
+  }
+
+  async backupDatabase() {
+    // R2 binding is private; DO RPC is accessible only from the authenticated
+    // Core Worker endpoint, not via the public worker URL.
+    if (this.backupRunning) throw new Error('BackupAlreadyRunning');
+    this.backupRunning = true;
+    try {
+      await this.client.connect();
+      return await createDatabaseBackup({
+        client: this.client,
+        db: this.client.db(),
+        bucket: this.backupBucket
+      });
+    } finally {
+      this.backupRunning = false;
+    }
   }
 
   async dispatchTodoReminders() {

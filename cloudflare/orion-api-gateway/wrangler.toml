@@ -13,7 +13,10 @@ ORIGIN_URL = "https://bananaboom-api-242273127238.asia-east1.run.app"
 ARTICLE_WRITE_CUTOVER = "0"
 # 0: old Cloud Run PDF, explicit x-orion-pdf-canary: 1 tests new Browser Run.
 # Switch to 1 only after a production PDF is generated and inspected.
-PDF_BROWSER_CUTOVER = "0"
+PDF_BROWSER_CUTOVER = "1"
+# Explicit canary for private R2 database backup; old mongodump stays until
+# real admin auth, manifest and isolated restore tests pass.
+BACKUP_R2_CUTOVER = "0"
 
 [[routes]]
 pattern = "api.samyao.me"
