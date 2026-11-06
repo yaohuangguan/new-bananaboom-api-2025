@@ -33,7 +33,7 @@ flowchart TD
 | Database `POST /api/backup/database` | Gateway → Core → MongoDB snapshot → private R2 | **Production cutover complete** |
 | Public résumé PDF | Gateway Browser Run; `PDF_BROWSER_CUTOVER=1` | Cut over |
 | Login / registration / Google OAuth / sessions and admin writes | Mostly Cloud Run | **Blocking retirement** |
-| Second Brain REST + MCP | Native Mongo + official MCP SDK read-only canary; normal OAuth, sync writes and MCP stay on Cloud Run | **Not globally cut over** |
+| Second Brain REST + MCP | Native Mongo read, private R2 encrypted sync and OAuth grant/refresh code staged behind disabled canaries; normal traffic still Cloud Run | **Not globally cut over** |
 | Personal writes, R2 upload/asset management, AI tools/history | Cloud Run for unmigrated paths | **Blocking retirement** |
 | Todo reminders | Core Cron code exists but `TODO_REMINDERS_ENABLED=0`; old GCP job paused | **Not activated** |
 | Human chat and old Stripe checkout | Gateway returns HTTP 410; AI chat history is retained | Intentionally retired |
@@ -118,3 +118,9 @@ The next delivery should be treated as **one integrated Cloud Run retirement mil
 **Working inventory:** [docs/LEGACY-ROUTE-INVENTORY.md](docs/LEGACY-ROUTE-INVENTORY.md). Password login/logout has a Worker canary (global cutover still OFF); Google/Firebase and MCP OAuth remain legacy until E2E acceptance.
 
 **Second Brain:** [migration design](docs/BRAIN-WORKER-MIGRATION.md) documents read-only Worker canary, old-token compatibility, official MCP transport, tests and outstanding write/OAuth blockers. BRAIN_READ_CUTOVER remains 0.
+
+### Second Brain private-object and OAuth milestone (2026-11-07)
+
+Private originals have been copied **byte-for-byte** from the production GCS memory vault into the independent, non-public `orion-private-memory-vault` R2 bucket: **66/66 encrypted objects, 148,905 bytes, SHA-256 read-after-write verification**, zero GCS deletion, no production MongoDB writes. The Core Worker now has a staged, transactionally idempotent `sync_knowledge` implementation and legacy-compatible OAuth code/refresh grants. Test evidence: **Core 98 pass/1 skip; Gateway 70 pass; two real isolated MongoDB Replica Set tests pass**. **All new write, refresh and MCP write canary switches remain 0**; the original `BRAIN_STORAGE_KEY` is not installed in Core yet, so no production write/refresh has been tested or enabled. Old OAuth/MCP/knowledge writes remain on Cloud Run.
+
+Full scope, storage rollback and the required secure secret setup: [Second Brain write/OAuth migration](docs/BRAIN-WRITE-OAUTH-MIGRATION.md). Keep Vercel, historical Express source, GCS encrypted originals and current MongoDB data.

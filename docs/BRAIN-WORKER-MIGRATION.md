@@ -100,3 +100,7 @@ For subsequent RPC additions:
 
 Do not delete or re-create the production DO to solve version skew.
 Normal Brain MCP/OAuth/writes still remain on Cloud Run until full parity.
+
+## Write/OAuth follow-on (2026-11-07)
+
+Source-compatible encrypted `sync_knowledge` and PKCE/token-refresh grants are now staged, but all normal routing and related canaries remain **OFF**. A separate private R2 bucket received **66/66 existing encrypted GCS objects**, checked byte-for-byte. The original encryption secret has not yet been configured in Core; no production write or OAuth grant was tested. OAuth DCR/consent and restore still need work. See [BRAIN-WRITE-OAUTH-MIGRATION.md](BRAIN-WRITE-OAUTH-MIGRATION.md).

@@ -20,6 +20,8 @@ export const repository = {
   brainVaultSearch: async (token, input, resource) =>
     (await mongo()).brainVaultSearch(token, input, resource),
   brainVaultRead: async (token, id, resource) => (await mongo()).brainVaultRead(token, id, resource),
+  brainVaultSync: async (token, input, resource) => (await mongo()).brainVaultSync(token, input, resource),
+  brainOAuthTokenGrant: async input => (await mongo()).brainOAuthTokenGrant(input),
   publicResume: async (user) => (await mongo()).publicResume(user),
   publicResumeList: async (user) => (await mongo()).publicResumeList(user),
   publicProjects: async () => (await mongo()).publicProjects(),

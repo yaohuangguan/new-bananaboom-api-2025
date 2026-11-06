@@ -3,6 +3,7 @@ import { httpServerHandler } from 'cloudflare:node';
 import { createApp } from './app.js';
 import { repository } from './db.js';
 import { handleBrainMcpRequest } from './brainMcp.js';
+import { handleBrainOAuthToken } from './brainOAuthHttp.js';
 
 const app = createApp();
 await app.ready();
@@ -13,11 +14,18 @@ export { MongoDBConnection } from './MongoDBConnection.js';
 const nodeHandler = httpServerHandler(createServer(app.callback()));
 export default {
   fetch(request, env, ctx) {
+    if (new URL(request.url).pathname === '/token') {
+      return handleBrainOAuthToken(request,repository);
+    }
     // Official MCP SDK Web Standards transport; no Express/Node HTTP
     // bridge or new session IDs are needed in the read-only canary.
     if (new URL(request.url).pathname === '/api/brain/sync/mcp') {
       const origins=String(env.BRAIN_ALLOWED_ORIGINS || '').split(',').map(x=>x.trim()).filter(Boolean);
-      return handleBrainMcpRequest(request,repository,{allowedOrigins:origins});
+      return handleBrainMcpRequest(request,repository,{
+        allowedOrigins:origins,
+        enableWriteCanary:env.BRAIN_MCP_WRITE_CANARY === '1' &&
+          request.headers.get('x-orion-brain-write-canary') === '1'
+      });
     }
     return nodeHandler.fetch(request, env, ctx);
   },

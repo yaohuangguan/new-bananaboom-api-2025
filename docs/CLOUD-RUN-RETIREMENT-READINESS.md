@@ -121,3 +121,7 @@ Brain canary returned 503 on RPC method mismatch and returned the expected
 Do not permanently force immediate updates: active backups may be disrupted.
 Deploy new DO APIs before Gateway cutover, verify adoption, and fail closed
 on version mismatch instead of bypassing owner validation.
+
+## Second Brain encrypted originals and write/OAuth milestone
+
+The source GCS memory vault contained **66 encrypted objects / 148,905 bytes**; a separate *private* R2 bucket now holds all 66 with read-after-write SHA-256 parity, preserving GCS originals. Worker `sync_knowledge` transaction and OAuth authorization-code/refresh grants passed isolated Replica Set and HTTP tests. All normal traffic and canary flags still target Cloud Run because the original private encryption key has not been safely provisioned into Core and discovery/DCR/consent/import/export/restore plus authorized client acceptance remain. See [BRAIN-WRITE-OAUTH-MIGRATION.md](BRAIN-WRITE-OAUTH-MIGRATION.md). Never treat an encrypted-object copy as proof of restore without a controlled decryption check.
