@@ -54,3 +54,15 @@ replaced with fully parity-tested owner-scoped Worker methods, the original
 production implementation may still permit cross-user record-ID access.
 Treat this as a migration security gate; do not declare full Cloud Run
 retirement or ownership remediation complete from a Git merge alone.
+
+
+## Production R2 MongoDB backup verified (2026-11-07)
+
+Private R2 owner-authenticated snapshot and isolated restore succeeded:
+36 collections, 1,271 documents, 32 parts, 7,220,817 bytes; all chunk
+SHA-256 checks and 65 secondary-index checks passed.
+The Gateway now routes normal POST /api/backup/database to Core Worker by
+BACKUP_R2_CUTOVER=1, with NO retry to Cloud Run on a Worker failure.
+The old Cloud Run backup implementation may still exist as emergency fallback,
+but normal API Gateway traffic no longer uses it. Preserve Cloud Run for other
+routes and do not claim whole-service migration complete.

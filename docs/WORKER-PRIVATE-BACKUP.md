@@ -1,7 +1,10 @@
 # Orion private MongoDB to Cloudflare R2 backup
 
-Status: staged, pending real production owner-authenticated canary and independent
-R2 restore verification. Created 2026-11-06. Do not disable Cloud Run backup.
+Status: PRODUCTION VERIFIED 2026-11-07. Authenticated R2 canary, all private
+R2 chunk SHA-256 checks and independent isolated MongoDB restore PASSED.
+Gateway BACKUP_R2_CUTOVER=1 is now the intended default. Keep Cloud Run
+running for remaining non-backup legacy paths and rollback until retirement
+gates are complete.
 
 ## Private storage
 
@@ -17,15 +20,17 @@ Never copy these files to the public orion-assets bucket.
 
 ## Snapshot and caps
 
-A single snapshot read transaction spans all collections. Chunk uploads to
-R2 happen while the snapshot remains open. Backup aborts after 40 seconds,
-50k documents, 60 MiB uncompressed, or 16 MiB exported EJSON document, with no
-completed manifest. Incomplete chunks are deleted best effort. Cloudflare
+A single MongoDB snapshot read transaction spans all collections. Its
+document bytes are staged into bounded private Worker memory; R2 uploads
+happen ONLY AFTER that transaction commits. Budget: 50 seconds for snapshot,
+120 seconds for the entire operation, 50k documents, 48 MiB staged memory,
+60 MiB uncompressed, or 16 MiB per exported EJSON document; no complete
+manifest is written for a failed export. Incomplete chunks are deleted best effort. Cloudflare
 Workers Free CPU and MongoDB transaction expiration may be stricter.
 MongoDB forbids listIndexes in transactions, so index metadata is enumerated
 BEFORE the snapshot transaction. Regression test enforces this ordering. The
-first production canary on 2026-11-07 returned HTTP 503 before this fix;
-production retry and isolated restore are still required.
+first production canaries failed before these fixes; the later production
+canary and independent isolated restore both passed on 2026-11-07.
 
 Metadata/indexes are collected outside the document snapshot and require
 a quiescent schema for exact consistency.
@@ -35,7 +40,7 @@ a quiescent schema for exact consistency.
 POST /api/backup/database requires a verified current session and
 super_admin role; cookie sessions additionally require a trusted Origin.
 The Gateway supports explicit header x-orion-backup-canary: 1 with no unsafe
-Cloud Run fallback. BACKUP_R2_CUTOVER=0 by default. A successful call
+Cloud Run fallback. BACKUP_R2_CUTOVER=1 by default. A successful call
 returns the existing [DONE] JSON text marker used by the personal UI.
 
 ## Release gate
@@ -74,7 +79,7 @@ NDJSON parts to private R2 with four concurrent writes. The manifest is
 written LAST. Partial failure cleans up the manifest first.
 
 Limits: 48 MiB staging memory, 60 MiB uncompressed data, 50,000 documents,
-16 MiB per exported EJSON document and 40 seconds by default. Oversized backups fail
+16 MiB per exported EJSON document, 50s snapshot and 120s total. Oversized backups fail
 explicitly; no partial backup is represented as complete. Test production
 and restore into a truly isolated empty database before enabling cutover.
 
@@ -113,3 +118,30 @@ The Durable Object logs numeric size and cap directly at the overflow check,
 before MongoDB/RPC error propagation. Read only this safety metric in Cloudflare
 tail; no record contents or identifiers are logged. Keep the existing caps
 until actual sizes and memory safety are known.
+
+
+## Completed production acceptance: 2026-11-07
+
+Authenticated super_admin canary POST from samyao.me returned success with
+the following private manifest (no public bucket or plaintext artifact):
+
+- db-backups/2026-11-06T20-29-12.346Z-337dd4da/manifest.json
+- 36 MongoDB collections, 1,271 documents, 32 R2 NDJSON parts, 7,220,817
+  encoded bytes, plus one manifest object (33 objects total).
+- The independently authenticated Wrangler R2 read fetched all 32 actual
+  private objects and verified their exact byte sizes and SHA-256 digests.
+- A local ephemeral MongoDB Replica Set (127.0.0.1 only), in an empty
+  orion_restore_test_ database, successfully restored 1,271 documents into
+  36 collections and verified 65 secondary indexes by name.
+- The temporary database was dropped and process terminated. No production
+  MongoDB writes were performed. No private backup object was exported to
+  the public media bucket or persisted in the repository.
+- Reproducible verifier: scripts/verifyorionr2restore.mjs with a manifest
+  argument, using read-only Wrangler R2 CLI. It logs only aggregate counts
+  and never writes plaintext backup files.
+
+Gateway cutover is reversible with BACKUP_R2_CUTOVER=0 followed by Gateway
+deploy. Do not retire Cloud Run itself or disable unrelated old routes yet.
+A backup that exceeds the staging cap still fails closed; monitor dataset
+growth and use a separate safely provisioned backup runner if it exceeds
+these Worker limits.
