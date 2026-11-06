@@ -39,3 +39,18 @@ Do not delete the final Cloud Run service, its revisions or its image until:
 
 A Cloudflare Worker gateway is already in front of the service; that DOES
 NOT mean the legacy business process can be turned off.
+
+## Footprint record ownership hardening (2026-11-06)
+
+Legacy Express footprint detail GET, PUT and DELETE are now restricted to
+`{ _id, user: authenticatedUser.id }` in the source; updates and deletes
+use single, owner-scoped database operations, and missing/foreign records
+receive the same 404 response. Integration tests cover unauthorized IDs,
+legitimate owner operations, and successful audit persistence.
+
+**Source merge alone does not patch an already running Cloud Run revision.**
+Until a controlled Cloud Run revision is deployed, or these methods are
+replaced with fully parity-tested owner-scoped Worker methods, the original
+production implementation may still permit cross-user record-ID access.
+Treat this as a migration security gate; do not declare full Cloud Run
+retirement or ownership remediation complete from a Git merge alone.
