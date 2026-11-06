@@ -105,7 +105,8 @@ router.post('/', async (req, res) => {
 // ==========================================
 router.get('/:id', async (req, res) => {
   try {
-    const footprint = await Footprint.findById(req.params.id);
+    if (!req.user?.id) return res.status(401).json({ msg: 'Unauthorized' });
+    const footprint = await Footprint.findOne({ _id: req.params.id, user: req.user.id });
     if (!footprint) return res.status(404).json({ msg: 'Not Found' });
     res.json(footprint);
   } catch (err) {
@@ -133,7 +134,13 @@ router.put('/:id', async (req, res) => {
     if (status) updateFields.status = status;
     if (isHighlight !== undefined) updateFields.isHighlight = isHighlight;
 
-    const updatedFootprint = await Footprint.findByIdAndUpdate(req.params.id, { $set: updateFields }, { new: true });
+    if (!req.user?.id) return res.status(401).json({ msg: 'Unauthorized' });
+    const updatedFootprint = await Footprint.findOneAndUpdate(
+      { _id: req.params.id, user: req.user.id },
+      { $set: updateFields },
+      { new: true }
+    );
+    if (!updatedFootprint) return res.status(404).json({ msg: 'Not Found' });
 
     // 日志
     logOperation({
@@ -157,10 +164,11 @@ router.put('/:id', async (req, res) => {
 // ==========================================
 router.delete('/:id', async (req, res) => {
   try {
-    const footprint = await Footprint.findById(req.params.id);
+    if (!req.user?.id) return res.status(401).json({ msg: 'Unauthorized' });
+    const footprint = await Footprint.findOneAndDelete({
+      _id: req.params.id, user: req.user.id
+    });
     if (!footprint) return res.status(404).json({ msg: 'Not Found' });
-
-    await footprint.deleteOne();
 
     logOperation({
       operatorId: req.user.id,
