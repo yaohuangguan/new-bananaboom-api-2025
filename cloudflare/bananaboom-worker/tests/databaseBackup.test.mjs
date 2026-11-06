@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ObjectId } from 'mongodb';
-import { createDatabaseBackup, restoreBackupToEmptyDatabase, validateBackupManifest, classifyBackupFailure } from '../src/databaseBackup.js';
+import { createDatabaseBackup, restoreBackupToEmptyDatabase, validateBackupManifest, classifyBackupFailure, parseBackupDiagnostic } from '../src/databaseBackup.js';
 
 function bucket() {
   const map = new Map();
@@ -118,7 +118,7 @@ test('backup guard aborts oversized exports without committing manifest or leavi
   ] });
   await assert.rejects(createDatabaseBackup({
     ...source, bucket: b, maxDocuments: 1
-  }), /document limit/);
+  }), /document-limit/);
   assert.equal(b.map.size, 0);
 });
 
@@ -233,7 +233,7 @@ test('staging memory cap fails before any R2 PUT, without partial backup', async
   await assert.rejects(createDatabaseBackup({
     ...fakeSource({ users: [{_id:new ObjectId(), name:'large-memory-record'}] }),
     bucket:b, maxStagedBytes:1
-  }), /memory staging limit/);
+  }), /memory-staging-limit/);
   assert.equal(b.map.size, 0);
 });
 
@@ -249,7 +249,7 @@ test('failed concurrent chunk upload waits for all in-flight writes then cleans 
       users:[{_id:new ObjectId(),name:'Sam'}],
       posts:[{_id:new ObjectId(),title:'Private'}]
     }), bucket:b
-  }), /simulated upload interruption/);
+  }), /r2-operation/);
   assert.equal(b.map.size,0,'no chunks or false-complete manifest should remain');
 });
 
@@ -269,7 +269,57 @@ test('ambiguous manifest upload is removed before already uploaded chunks', asyn
   await assert.rejects(createDatabaseBackup({
     ...fakeSource({posts:[{_id:new ObjectId(),title:'A'}]}),
     bucket:b
-  }), /response lost/);
+  }), /unknown-error/);
   assert.equal(b.map.size,0);
   assert.ok(deletes[0].endsWith('/manifest.json'),'remove completion marker before chunks');
+});
+
+
+test('snapshot and R2 upload obey separate 50s and 120s budgets', async () => {
+  let elapsed = 0;
+  const source = fakeSource({users:[{_id:new ObjectId(),name:'safe'}]});
+  source.client.withSession = async (fn) => fn({
+    withTransaction: async (run) => {
+      const outcome=await run();
+      elapsed=45000;
+      return outcome;
+    }
+  });
+  const b=bucket();
+  const put=b.put;
+  b.put=async (key,bytes,options) => {
+    assert.equal(elapsed>=45000,true);
+    elapsed=65000;
+    return put(key,bytes,options);
+  };
+  const result=await createDatabaseBackup({
+    ...source,bucket:b,clock:()=>elapsed,
+    maxSnapshotMs:50000,maxRuntimeMs:120000
+  });
+  assert.equal(result.success,true);
+  assert.ok(b.map.has(result.manifestKey));
+});
+
+test('safe backup failure message transmits only recognized stage and counters',async()=>{
+  const source=fakeSource({users:[{_id:new ObjectId(),name:'secret'}]});
+  let elapsed=0;
+  source.client.withSession=async(fn)=>fn({
+    withTransaction:async(run)=>{
+      elapsed=60000;
+      return run();
+    }
+  });
+  const b=bucket();
+  await assert.rejects(createDatabaseBackup({
+    ...source,bucket:b,clock:()=>elapsed,maxSnapshotMs:50000,maxRuntimeMs:120000
+  }),error=>{
+    const safe=parseBackupDiagnostic(error);
+    assert.equal(safe?.stage,'snapshot');
+    assert.equal(safe?.reason,'snapshot-runtime-limit');
+    assert.equal(safe?.documents,0);
+    assert.equal(String(error.message).includes('secret'),false);
+    return true;
+  });
+  assert.equal(b.map.size,0);
+  assert.equal(parseBackupDiagnostic(new Error('password=hidden')),null);
 });

@@ -5,7 +5,7 @@ import { hydrateR2References } from '../../../utils/r2Reference.js';
 import { authenticateLegacyRequest, canReadPrivatePosts, extractLegacyToken, hasPermission } from './auth.js';
 import { normalizePostInput, redactPostWriteError } from './postWrites.js';
 import { requireMutationKey } from './articleTransaction.js';
-import { classifyBackupFailure } from './databaseBackup.js';
+import { classifyBackupFailure, parseBackupDiagnostic } from './databaseBackup.js';
 
 // Match legacy JSON serialization before applying its response hydration middleware.
 // Otherwise recursively traversing BSON ObjectId/Date would erase their values.
@@ -524,7 +524,9 @@ export function createApp(repository = mongoRepository, options = {}) {
           manifestKey: result.manifestKey
         }) + '\n';
     } catch (error) {
-      console.error('db-backup-failed', error?.name || 'Error', classifyBackupFailure(error));
+      const detail = parseBackupDiagnostic(error);
+      if (detail) console.error('db-backup-phase', detail);
+      else console.error('db-backup-failed', error?.name || 'Error', classifyBackupFailure(error));
       ctx.status = error?.message === 'BackupAlreadyRunning' ? 409 : 503;
       return { message: 'Database backup incomplete. Existing backups are unchanged.' };
     }
