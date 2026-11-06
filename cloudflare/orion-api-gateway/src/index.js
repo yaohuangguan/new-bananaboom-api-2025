@@ -675,6 +675,9 @@ export default {
         if (workerResponse.status < 500) {
           const secured = withSecurityHeaders(workerResponse);
           secured.headers.set('x-bananaboom-origin', 'worker');
+          // Browser profile verification requires the origin marker to be
+          // readable from samyao.me (a separate origin from api.samyao.me).
+          secured.headers.set('access-control-expose-headers', 'x-bananaboom-origin');
           if (pathname === '/api/posts/private/posts') {
             secured.headers.set('access-control-expose-headers', 'x-orion-private-canary-result, x-bananaboom-origin');
           }
