@@ -102,3 +102,12 @@ enough time to cover rarely used OAuth, MCP, administrative and scheduled jobs.
 ## Owner-scoped infrastructure decision
 
 The React/Vite frontend stays on Vercel and keeps its edge CDN and deployment pipeline. The final target replaces only Cloud Run execution with Cloudflare Workers. Historical owner-written Express code stays in Git, even after Cloud Run has no live traffic. PASSWORD_AUTH_CUTOVER remains 0 until real-user browser E2E parity; Google/Firebase and Second Brain OAuth cannot be dropped or silently re-authenticated.
+
+## Second Brain read-only canary (2026-11-07)
+
+The official MCP SDK Web Standards read transport and REST search/read use
+existing Brain credentials, permission and resource checks. They passed local
+and isolated Replica Set tests. BRAIN_READ_CUTOVER stays 0 and all normal MCP
+and sync_knowledge writes remain Cloud Run. Existing OAuth/PKCE/refresh,
+private encrypted blob storage and transaction parity remain blockers.
+See [BRAIN-WORKER-MIGRATION.md](BRAIN-WORKER-MIGRATION.md).

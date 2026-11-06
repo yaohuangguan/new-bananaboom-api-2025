@@ -33,7 +33,7 @@ flowchart TD
 | Database `POST /api/backup/database` | Gateway → Core → MongoDB snapshot → private R2 | **Production cutover complete** |
 | Public résumé PDF | Gateway Browser Run; `PDF_BROWSER_CUTOVER=1` | Cut over |
 | Login / registration / Google OAuth / sessions and admin writes | Mostly Cloud Run | **Blocking retirement** |
-| Second Brain API, sync/import/export/restore, MCP/OAuth | Legacy Cloud Run dependency remains | **Blocking retirement** |
+| Second Brain REST + MCP | Native Mongo + official MCP SDK read-only canary; normal OAuth, sync writes and MCP stay on Cloud Run | **Not globally cut over** |
 | Personal writes, R2 upload/asset management, AI tools/history | Cloud Run for unmigrated paths | **Blocking retirement** |
 | Todo reminders | Core Cron code exists but `TODO_REMINDERS_ENABLED=0`; old GCP job paused | **Not activated** |
 | Human chat and old Stripe checkout | Gateway returns HTTP 410; AI chat history is retained | Intentionally retired |
@@ -116,3 +116,5 @@ The next delivery should be treated as **one integrated Cloud Run retirement mil
 **Preserve original source:** Once Cloud Run is retired, leave the historical Express routes/models/services in Git. They are the owner-created codebase, not disposable migration debris. Only remove newly created temporary files or redundant deployed infrastructure.
 
 **Working inventory:** [docs/LEGACY-ROUTE-INVENTORY.md](docs/LEGACY-ROUTE-INVENTORY.md). Password login/logout has a Worker canary (global cutover still OFF); Google/Firebase and MCP OAuth remain legacy until E2E acceptance.
+
+**Second Brain:** [migration design](docs/BRAIN-WORKER-MIGRATION.md) documents read-only Worker canary, old-token compatibility, official MCP transport, tests and outstanding write/OAuth blockers. BRAIN_READ_CUTOVER remains 0.

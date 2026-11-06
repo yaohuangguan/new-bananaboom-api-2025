@@ -562,6 +562,73 @@ export default {
       return secured;
     }
 
+    // Brain read-only OAuth/MCP canary. Preserve all normal clients and
+    // existing refresh-token flows on Cloud Run. Never forward a missing
+    // or malformed vault token to an owner-scoped Worker operation.
+    const brainApiSearch = request.method === 'POST' &&
+      pathname === '/api/brain/sync/v1/search';
+    const brainApiRead = request.method === 'GET' &&
+      /^\/api\/brain\/sync\/v1\/memories\/[a-f0-9]{24}$/i.test(pathname);
+    const brainMcpCanary = request.method === 'POST' &&
+      pathname === '/api/brain/sync/mcp' &&
+      request.headers.get('x-orion-brain-read-canary') === '1';
+    const brainReadCutover = env.BRAIN_READ_CUTOVER === '1' &&
+      (brainApiSearch || brainApiRead);
+    const brainReadCanary = request.headers.get('x-orion-brain-read-canary') === '1' &&
+      (brainApiSearch || brainApiRead);
+    if (brainReadCutover || brainReadCanary || brainMcpCanary) {
+      const responseError = (status) => {
+        const response = withSecurityHeaders(new Response(JSON.stringify({
+          message: status === 401 ? 'CONNECTION_AUTH_REQUIRED' : 'KNOWLEDGE_SYNC_FAILED'
+        }), { status, headers: {
+          'content-type':'application/json; charset=utf-8','cache-control':'no-store'
+        }}));
+        if (status === 401 && brainMcpCanary) {
+          response.headers.set('www-authenticate',
+            'Bearer resource_metadata="https://api.samyao.me/.well-known/oauth-protected-resource/api/brain/sync/mcp"');
+        }
+        const origin=corsOrigin(request);
+        if (origin) {
+          response.headers.set('access-control-allow-origin',origin);
+          response.headers.set('access-control-allow-credentials','true');
+          response.headers.append('vary','Origin');
+        }
+        return response;
+      };
+      if (!/^Bearer ov_[A-Za-z0-9_-]{43}$/.test(
+        request.headers.get('authorization') || ''
+      )) return responseError(401);
+      try {
+        if (!env.BANANABOOM_CORE) return responseError(503);
+        const workerHeaders=new Headers(request.headers);
+        for (const name of ['host','x-forwarded-host','x-orion-edge-secret',
+          'x-orion-brain-read-canary','cookie','x-auth-token','x-google-auth'
+        ]) workerHeaders.delete(name);
+        const result=await env.BANANABOOM_CORE.fetch(new Request(request.url,{
+          method:request.method,headers:workerHeaders,
+          ...(request.method === 'POST' ? {body:request.body,duplex:'half'} : {}),
+          redirect:'manual'
+        }));
+        if (result.status >= 500) return responseError(503);
+        const secured=withSecurityHeaders(result);
+        secured.headers.set('x-bananaboom-origin','worker');
+        secured.headers.set('access-control-expose-headers','x-bananaboom-origin');
+        secured.headers.set('cache-control','private, no-store');
+        const origin=corsOrigin(request);
+        if (origin) {
+          secured.headers.set('access-control-allow-origin',origin);
+          secured.headers.set('access-control-allow-credentials','true');
+          secured.headers.append('vary','Origin');
+        }
+        return secured;
+      } catch (error) {
+        // Even read canaries must not silently bypass a failed authorization
+        // check by repeating the request against Cloud Run.
+        console.error('brain-worker-canary-failed',error?.name || 'Error');
+        return responseError(503);
+      }
+    }
+
     const passwordAuthMutation = request.method === 'POST' &&
       (pathname === '/api/users/signin' || pathname === '/api/users/logout') &&
       !request.headers.get('x-google-auth') &&
