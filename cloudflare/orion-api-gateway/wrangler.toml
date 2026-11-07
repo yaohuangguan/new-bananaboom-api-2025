@@ -47,6 +47,8 @@ BRAIN_OAUTH_TOKEN_CANARY = "0"
 BRAIN_METADATA_CUTOVER = "1"
 # Public REST OpenAPI spec; verify exact production parity before promotion.
 BRAIN_OPENAPI_CUTOVER = "1"
+# Fail-closed admin preflight for still-legacy photo mutations.
+PHOTO_WRITE_AUTH_GUARD = "1"
 BACKUP_R2_CUTOVER = "1"
 # Category/method-only Cloud Run upstream observation for retirement.
 # No paths, IDs, cookies, IPs, query strings, tokens or body data.

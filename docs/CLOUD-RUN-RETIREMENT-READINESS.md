@@ -286,3 +286,31 @@ requests to the Core Worker. A read-only failure falls back to the
 unchanged old Cloud Run specification; set this flag back to 0 for
 instant rollback. All access-token, OAuth, MCP, private knowledge
 and owner-scoped writes remain unchanged.
+
+
+## Gallery photo write authorization guard (2026-11-07)
+
+**Security gap identified:** the legacy `routes/photos.js` offers
+POST/PUT/DELETE photo gallery mutations without a route-local auth
+check, and `config/routeGuardMap.js` lacks matching `/api/photos`
+rules. Because `globalGuard` permits unmatched routes, writes
+arriving through the trusted Gateway would otherwise be unauthorized.
+
+The Gateway now requires `PHOTO_WRITE_AUTH_GUARD=1` (default set
+**ON**) for every photo POST/PUT/DELETE under `/api/photos`.
+It invokes a private Core service-binding preflight
+`/_internal/authorize-photos-write` with no body and no side effects,
+checking existing verified JWT, current live MongoDB Session and
+super_admin/wildcard permission. Invalid or revoked tokens receive
+401, ordinary users 403, Core errors 503; no Cloud Run write is
+allowed on any of those outcomes. Cookie requests enforce a trusted
+Origin for CSRF prevention. Valid admin writes are forwarded intact
+only once to the old Cloud Run API. Public gallery GET remains native
+Core and unaffected.
+
+Full new tests, entire Core and Gateway suites, and two Wrangler
+dry-run builds passed. The original Express gallery files and
+Vercel frontend remain untouched. The existing Cloud Run revision
+has `ORION_EDGE_SECRET` configured, which helps prevent direct-origin
+bypass. This preflight is a **security hotfix**, not a migration
+of photo CRUD off Cloud Run. See [photo guard](PHOTO-WRITE-AUTH-GUARD.md).
