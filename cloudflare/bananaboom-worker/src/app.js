@@ -113,6 +113,28 @@ export function createApp(repository = mongoRepository, options = {}) {
   });
   app.get('/api/projects', async () => asLegacyJson(await repository.publicProjects()));
   app.get('/api/photos', async () => asLegacyJson(await repository.publicPhotos()));
+  // GET comments are PUBLIC, but keep legacy strict JWT semantics:
+  // invalid or expired tokens must be rejected (401), valid signed tokens
+  // without an active session may read public comments as a guest.
+  async function optionalPublicCommentAuth(ctx) {
+    const token = extractLegacyToken(ctx.headers);
+    if (!token) return true;
+    let status;
+    try {
+      status = await authenticateLegacyRequest(
+        ctx.headers, repository, await secretProvider()
+      );
+    } catch (error) {
+      console.error('public-comments-auth-error',error?.name||'Error');
+      ctx.status=503;
+      return false;
+    }
+    if (status.kind === 'invalid') {
+      ctx.status=401;
+      return false;
+    }
+    return true;
+  }
   app.get('/api/comments/reply/:id', async (ctx) => {
     const id = ctx.params.id;
     if (!/^[a-f0-9]{24}$/i.test(id)) {
@@ -120,6 +142,9 @@ export function createApp(repository = mongoRepository, options = {}) {
       return {message:'Not found'};
     }
     ctx.set('Cache-Control','no-store');
+    if (!(await optionalPublicCommentAuth(ctx))) {
+      return {msg:ctx.status===401?'Token invalid':'Comments temporarily unavailable'};
+    }
     const comments = await repository.publicComments(id,true);
     if (!comments) {
       ctx.status = 404;
@@ -134,6 +159,9 @@ export function createApp(repository = mongoRepository, options = {}) {
       return {message:'Not found'};
     }
     ctx.set('Cache-Control','no-store');
+    if (!(await optionalPublicCommentAuth(ctx))) {
+      return {msg:ctx.status===401?'Token invalid':'Comments temporarily unavailable'};
+    }
     return asLegacyJson(await repository.publicComments(id,false));
   });
 
@@ -351,7 +379,10 @@ export function createApp(repository = mongoRepository, options = {}) {
       return Number.isSafeInteger(n) && n > 0 ? n : fallback;
     };
     const page = Math.min(parsedNumber(ctx.query.page, 1), 1000);
-    const limit = Math.min(parsedNumber(ctx.query.limit, 10), 50);
+    // Existing clients request limit=1000 to display the full public archive.
+    // The original Express route supports this; honour it instead of
+    // sending a valid read to Cloud Run or silently returning only 50.
+    const limit = Math.min(parsedNumber(ctx.query.limit, 10), 1000);
     const q = first(ctx.query.q);
     const tag = first(ctx.query.tag);
     if ((q && q.length > 100) || (tag && tag.length > 100)) {
