@@ -29,6 +29,7 @@ flowchart TD
 | Public homepage, posts, projects, tags, menu, photos, résumés | Gateway → Core for explicitly approved GET paths, with read-only fallback where implemented | Migrated subset |
 | Public comments GET / article likes, selected private post reads | Implemented Worker paths subject to routing and permission rules; verify per route | Partial |
 | Profile, Todo and footprint GET | Worker implementations exist; global cutover flags are `0`; explicit canaries only | **Not globally cut over** |
+| Todo owner CRUD, routine check and private detail | Owner/RBAC-scoped Worker + MongoDB transaction + idempotency code staged; normal writes still Cloud Run | **Canary OFF** |
 | Article create/update/delete | Transactional Worker implementation with idempotency; normal cutover flag `0` | **Not globally cut over** |
 | Database `POST /api/backup/database` | Gateway → Core → MongoDB snapshot → private R2 | **Production cutover complete** |
 | Public résumé PDF | Gateway Browser Run; `PDF_BROWSER_CUTOVER=1` | Cut over |
@@ -124,3 +125,25 @@ The next delivery should be treated as **one integrated Cloud Run retirement mil
 Private originals have been copied **byte-for-byte** from the production GCS memory vault into the independent, non-public `orion-private-memory-vault` R2 bucket: **66/66 encrypted objects, 148,905 bytes, SHA-256 read-after-write verification**, zero GCS deletion, no production MongoDB writes. The Core Worker now has a staged, transactionally idempotent `sync_knowledge` implementation and legacy-compatible OAuth code/refresh grants. Test evidence: **Core 98 pass/1 skip; Gateway 70 pass; two real isolated MongoDB Replica Set tests pass**. **All new write, refresh and MCP write canary switches remain 0**; the original `BRAIN_STORAGE_KEY` is not installed in Core yet, so no production write/refresh has been tested or enabled. Old OAuth/MCP/knowledge writes remain on Cloud Run.
 
 Full scope, storage rollback and the required secure secret setup: [Second Brain write/OAuth migration](docs/BRAIN-WRITE-OAUTH-MIGRATION.md). Keep Vercel, historical Express source, GCS encrypted originals and current MongoDB data.
+
+
+## GCS US region + Todo Worker milestones (2026-11-07)
+
+The **active** Cloud Run Second Brain encrypted-original GCS bucket is now
+`orion-brain-vault-us-242273127238` in **us-central1 / Standard**, eligible
+for Google's US Always Free 5 GB-month storage allowance. All **66
+ciphertext objects (148,905 bytes)** were copied from Taiwan and
+independently SHA-256 verified. The original Taiwan bucket remains as
+rollback and is **not yet deleted**; new Cloud Run revision is Ready
+and current encrypted-data access needs a final authorized read test.
+See [US GCS migration](docs/ORION-GCS-US-MIGRATION.md). The GCS→R2
+catch-up script now reads the active US bucket, not Taiwan.
+
+Owner-authenticated Todo **create/update/delete/routine check/detail**
+are staged on Core Worker with strict JWT + live Session, role/owner
+isolation, idempotent transactional writes, audit and family-scoped
+notifications. Core **102 pass/1 skip**, Gateway **76 pass**,
+isolated localhost MongoDB Replica Set tests passed. Production
+`TODO_WRITE_CANARY=0` and `TODO_DETAIL_READ_CUTOVER=0` still route
+normal traffic to Cloud Run. The browser and login E2E has not yet
+been performed. See [Todo Worker migration](docs/TODO-WORKER-MIGRATION.md).

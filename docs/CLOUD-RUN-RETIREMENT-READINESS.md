@@ -125,3 +125,36 @@ on version mismatch instead of bypassing owner validation.
 ## Second Brain encrypted originals and write/OAuth milestone
 
 The source GCS memory vault contained **66 encrypted objects / 148,905 bytes**; a separate *private* R2 bucket now holds all 66 with read-after-write SHA-256 parity, preserving GCS originals. Worker `sync_knowledge` transaction and OAuth authorization-code/refresh grants passed isolated Replica Set and HTTP tests. All normal traffic and canary flags still target Cloud Run because the original private encryption key has not been safely provisioned into Core and discovery/DCR/consent/import/export/restore plus authorized client acceptance remain. See [BRAIN-WRITE-OAUTH-MIGRATION.md](BRAIN-WRITE-OAUTH-MIGRATION.md). Never treat an encrypted-object copy as proof of restore without a controlled decryption check.
+
+
+## Active GCS moved to US free-tier region (2026-11-07)
+
+A private, uniform-IAM, public-access-prevention GCS Standard bucket
+`orion-brain-vault-us-242273127238` in `us-central1` now contains
+**66/66 byte-identical encrypted originals / 148,905 bytes**.
+The SHA-256 summary matches Taiwan and private R2. The original GCS
+HMAC service account has bucket-scoped `storage.objectUser` permission;
+the Cloud Run service was updated to the US bucket and returned Ready.
+Public endpoints, OAuth discovery and existing MCP search passed
+post-deploy smoke checks. However, authorized `getPrivate` decrypt
+and actual legacy write→read with the new bucket have **not** yet
+been exercised. The Taiwan bucket is retained pending rollback
+acceptance; the new bucket's free-tier eligibility alone does not
+guarantee zero cross-region operation or Cloud Run charges.
+See [GCS US migration](ORION-GCS-US-MIGRATION.md).
+
+## Todo owner mutations staged (2026-11-07)
+
+Core/DO now has owner-scoped Todo detail, create, update, delete and
+routine check with live RBAC, strict payloads and transactional audit
+plus idempotency receipts. Core suite **102 pass, 1 skip**; Gateway
+**76 pass**; isolated localhost MongoDB CRUD/concurrency/role
+tests passed. **TODO_WRITE_CANARY=0** and
+**TODO_DETAIL_READ_CUTOVER=0**: no normal production Todo mutation
+has been switched. User-facing browser E2E, large legacy-list parity,
+notification-test endpoint, and paused reminder Cron acceptance are
+still prerequisites. See [Todo Worker migration](TODO-WORKER-MIGRATION.md).
+
+**Retirement verdict remains FAIL**: many owner CRUD, AI and OAuth routes
+still require Cloud Run. Neither the US bucket move nor a successful
+Todo canary should be mistaken for shutting Cloud Run down.
