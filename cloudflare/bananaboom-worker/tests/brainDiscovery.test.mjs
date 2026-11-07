@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {
   brainDiscoveryDocument,handleBrainDiscovery,
-  DISCOVERY_AUTH_PATH,DISCOVERY_RESOURCE_PATH
+  DISCOVERY_AUTH_PATH,DISCOVERY_RESOURCE_PATH,BRAIN_OPENAPI_PATH
 } from '../src/brainDiscovery.js';
 
 const auth={

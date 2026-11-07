@@ -45,6 +45,8 @@ BRAIN_WRITE_CANARY = "0"
 BRAIN_OAUTH_TOKEN_CANARY = "0"
 # Public discovery JSON from Core. Canaries may verify parity before 1.
 BRAIN_METADATA_CUTOVER = "1"
+# Public REST OpenAPI spec; verify exact production parity before promotion.
+BRAIN_OPENAPI_CUTOVER = "0"
 BACKUP_R2_CUTOVER = "1"
 # Category/method-only Cloud Run upstream observation for retirement.
 # No paths, IDs, cookies, IPs, query strings, tokens or body data.

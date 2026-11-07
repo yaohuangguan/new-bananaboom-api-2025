@@ -254,3 +254,19 @@ Both operations are GET-only and read shared PUBLIC data. No authenticated
 comments or private article records become readable. Write paths are not
 changed. Worker 5xx on GET can safely fall back to Cloud Run during rollout;
 Cloud Run code and all existing auth mutations remain intact.
+
+
+## Public Second Brain OpenAPI documentation staged for Worker (2026-11-07)
+
+`GET /api/brain/sync/openapi.json` is PUBLIC and read-only (the
+authorization and token routes are separate). The original pure
+`vaultOpenApi(base)` function was imported directly into Core rather
+than duplicating 5 KB of access scopes and schemas. The Gateway canary
+`x-orion-brain-metadata-canary: 1` can request it from Core, while
+`BRAIN_OPENAPI_CUTOVER=0` leaves normal clients on legacy Cloud Run
+until production JSON parity and Worker response-origin checks pass.
+
+The two existing OAuth discovery documents remain on the already
+verified `BRAIN_METADATA_CUTOVER=1`. This OpenAPI change does NOT enable
+owner knowledge writes, OAuth refresh, MCP POST or a new permission.
+Revert `BRAIN_OPENAPI_CUTOVER` to 0 for a read-only rollback.
