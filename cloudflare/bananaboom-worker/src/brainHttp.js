@@ -19,10 +19,12 @@ function sendKnown(ctx,result) {
   const status=result?.status;
   const allowed = new Set([
     'INVALID_CONNECTION_TOKEN','BRAIN_PERMISSION_REQUIRED','INSUFFICIENT_SCOPE',
-    'INVALID_SYNC_INPUT','INVALID_ID','INVALID_QUERY','NOT_FOUND'
+    'INVALID_SYNC_INPUT','INVALID_ID','INVALID_QUERY','NOT_FOUND',
+    'EXPECTED_REVISION_REQUIRED','MEMORY_ID_REQUIRED',
+    'IDEMPOTENCY_CONFLICT','REVISION_CONFLICT'
   ]);
   if (typeof code === 'string' && allowed.has(code) &&
-    Number.isInteger(status) && [400,401,403,404].includes(status)) {
+    Number.isInteger(status) && [400,401,403,404,409].includes(status)) {
     ctx.status=status;
     return {message:code};
   }
@@ -68,6 +70,26 @@ export function registerBrainReadRoutes(app, repository, options={}) {
       return {message:'KNOWLEDGE_SYNC_FAILED'};
     }
   });
+  // Gateway keeps normal write traffic on Cloud Run. Only a separate
+  // opt-in write canary with an existing memory:write Bearer key reaches here.
+  app.post('/api/brain/sync/v1/sync',async ctx => {
+    const auth=authorize(ctx);
+    if (auth.error) return auth.error;
+    if (bodySize(ctx.requestBody) > 128*1024) {
+      ctx.status=413;
+      return {message:'INVALID_SYNC_INPUT'};
+    }
+    try {
+      const result=await repository.brainVaultSync(
+        auth.token,ctx.requestBody,BRAIN_API_RESOURCE);
+      return sendKnown(ctx,result);
+    } catch (error) {
+      console.error('brain-worker-write-error',error?.name||'Error',safeBrainFailureKind(error));
+      ctx.status=503;
+      return {message:'KNOWLEDGE_SYNC_FAILED'};
+    }
+  });
+
   app.get('/api/brain/sync/v1/memories/:id',async ctx => {
     const auth=authorize(ctx);
     if (auth.error) return auth.error;

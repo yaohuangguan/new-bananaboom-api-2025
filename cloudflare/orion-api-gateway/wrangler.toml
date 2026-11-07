@@ -32,6 +32,11 @@ PASSWORD_AUTH_CUTOVER = "0"
 # Only the token-authenticated Brain REST search/read paths can be globally
 # enabled in a later rollout. MCP remains canary-only until sync write parity.
 BRAIN_READ_CUTOVER = "0"
+# Read/write canaries are independent. Never promote without encrypted
+# object-store parity and real OAuth client acceptance.
+BRAIN_WRITE_CANARY = "0"
+# Existing OAuth/PKCE/refresh tokens stay on Cloud Run by default.
+BRAIN_OAUTH_TOKEN_CANARY = "0"
 BACKUP_R2_CUTOVER = "1"
 # Category/method-only Cloud Run upstream observation for retirement.
 # No paths, IDs, cookies, IPs, query strings, tokens or body data.

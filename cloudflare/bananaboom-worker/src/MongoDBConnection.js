@@ -9,6 +9,8 @@ import { getPublicComments } from './commentReads.js';
 import { getOwnerProfile, getOwnerAiStatus } from './ownerProfile.js';
 import { createPasswordSession, revokePasswordSession } from './passwordSession.js';
 import { BrainReadError, safeBrainFailureKind, brainAccessScopes, searchBrainMemories, readBrainMemory } from './brainRead.js';
+import { syncBrainKnowledge } from './brainVaultWrite.js';
+import { exchangeBrainOAuthToken, BrainOAuthGrantError } from './brainOAuthGrant.js';
 import { readOwnerFootprints, readOwnerFootprint } from './footprintReads.js';
 import { listOwnerTodos } from './todoReads.js';
 
@@ -22,6 +24,8 @@ export class MongoDBConnection extends DurableObject {
     super(ctx, env);
     this.barkUrl = env.BARK_URL;
     this.backupBucket = env.BACKUP_BUCKET;
+    this.brainVaultBucket = env.BRAIN_VAULT_BUCKET;
+    this.brainVaultEncryptionKey = env.BRAIN_STORAGE_KEY;
     this.backupRunning = false;
     this.client = new MongoClient(env.MONGO_URI, {
       maxPoolSize: 1,
@@ -208,6 +212,28 @@ export class MongoDBConnection extends DurableObject {
 
   brainVaultRead(token, id, resource) {
     return this.#brainResult(db => readBrainMemory(db, token, id, resource));
+  }
+
+  brainVaultSync(token, input, resource) {
+    return this.#brainResult(db => syncBrainKnowledge({
+      client:this.client,db,bucket:this.brainVaultBucket,
+      secret:this.brainVaultEncryptionKey
+    },token,input,resource));
+  }
+
+  async brainOAuthTokenGrant(input) {
+    try {
+      await this.client.connect();
+      return {ok:true,data:await exchangeBrainOAuthToken(
+        this.client,this.client.db(),input
+      )};
+    } catch(error) {
+      if(error instanceof BrainOAuthGrantError) {
+        return {ok:false,status:error.status,error:error.message};
+      }
+      console.error('brain-do-oauth-failed',error?.name||'Error');
+      return {ok:false,status:503,error:'temporarily_unavailable'};
+    }
   }
 
   async passwordSignIn(credentials) {

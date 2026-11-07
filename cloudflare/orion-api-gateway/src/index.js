@@ -562,6 +562,53 @@ export default {
       return secured;
     }
 
+    // One-off OAuth token grant canary. Normal authorization_code, refresh,
+    // DCR and PKCE sessions remain on Cloud Run. A failed Worker response
+    // is NEVER retried on Cloud Run: refresh rotation consumes a token once.
+    if (pathname === '/token' && request.method === 'POST' &&
+        env.BRAIN_OAUTH_TOKEN_CANARY === '1' &&
+        request.headers.get('x-orion-brain-oauth-canary') === '1') {
+      const unavailable=()=>{
+        const response=withSecurityHeaders(new Response(JSON.stringify({
+          error:'temporarily_unavailable'
+        }),{status:503,headers:{
+          'content-type':'application/json; charset=utf-8',
+          'cache-control':'no-store','pragma':'no-cache'
+        }}));
+        const origin=corsOrigin(request);
+        if(origin){
+          response.headers.set('access-control-allow-origin',origin);
+          response.headers.append('vary','Origin');
+        }
+        return response;
+      };
+      try {
+        if(!env.BANANABOOM_CORE) return unavailable();
+        const headers=new Headers(request.headers);
+        for(const name of ['host','x-forwarded-host','x-orion-edge-secret',
+          'x-orion-brain-oauth-canary','cookie','x-google-auth','x-auth-token'
+        ]) headers.delete(name);
+        const result=await env.BANANABOOM_CORE.fetch(new Request(request.url,{
+          method:'POST',headers,body:request.body,duplex:'half',redirect:'manual'
+        }));
+        if(result.status>=500) return unavailable();
+        const secured=withSecurityHeaders(result);
+        secured.headers.set('cache-control','no-store');
+        secured.headers.set('pragma','no-cache');
+        secured.headers.set('x-bananaboom-origin','worker');
+        secured.headers.set('access-control-expose-headers','x-bananaboom-origin');
+        const origin=corsOrigin(request);
+        if(origin){
+          secured.headers.set('access-control-allow-origin',origin);
+          secured.headers.append('vary','Origin');
+        }
+        return secured;
+      }catch(error){
+        console.error('brain-oauth-token-canary-failed',error?.name||'Error');
+        return unavailable();
+      }
+    }
+
     // Brain read-only OAuth/MCP canary. Preserve all normal clients and
     // existing refresh-token flows on Cloud Run. Never forward a missing
     // or malformed vault token to an owner-scoped Worker operation.
@@ -569,14 +616,20 @@ export default {
       pathname === '/api/brain/sync/v1/search';
     const brainApiRead = request.method === 'GET' &&
       /^\/api\/brain\/sync\/v1\/memories\/[a-f0-9]{24}$/i.test(pathname);
+    const brainWriteCanary = env.BRAIN_WRITE_CANARY === '1' &&
+      request.headers.get('x-orion-brain-write-canary') === '1';
+    const brainSyncCanary = brainWriteCanary &&
+      request.method === 'POST' &&
+      pathname === '/api/brain/sync/v1/sync';
     const brainMcpCanary = request.method === 'POST' &&
       pathname === '/api/brain/sync/mcp' &&
-      request.headers.get('x-orion-brain-read-canary') === '1';
+      (request.headers.get('x-orion-brain-read-canary') === '1' ||
+       brainWriteCanary);
     const brainReadCutover = env.BRAIN_READ_CUTOVER === '1' &&
       (brainApiSearch || brainApiRead);
     const brainReadCanary = request.headers.get('x-orion-brain-read-canary') === '1' &&
       (brainApiSearch || brainApiRead);
-    if (brainReadCutover || brainReadCanary || brainMcpCanary) {
+    if (brainReadCutover || brainReadCanary || brainMcpCanary || brainSyncCanary) {
       const responseError = (status) => {
         const response = withSecurityHeaders(new Response(JSON.stringify({
           message: status === 401 ? 'CONNECTION_AUTH_REQUIRED' : 'KNOWLEDGE_SYNC_FAILED'
@@ -602,8 +655,13 @@ export default {
         if (!env.BANANABOOM_CORE) return responseError(503);
         const workerHeaders=new Headers(request.headers);
         for (const name of ['host','x-forwarded-host','x-orion-edge-secret',
-          'x-orion-brain-read-canary','cookie','x-auth-token','x-google-auth'
+          'x-orion-brain-read-canary','x-orion-brain-write-canary',
+          'cookie','x-auth-token','x-google-auth'
         ]) workerHeaders.delete(name);
+        // Only the Gateway can opt an authorized MCP canary into writes.
+        if (brainMcpCanary && brainWriteCanary) {
+          workerHeaders.set('x-orion-brain-write-canary','1');
+        }
         const result=await env.BANANABOOM_CORE.fetch(new Request(request.url,{
           method:request.method,headers:workerHeaders,
           ...(request.method === 'POST' ? {body:request.body,duplex:'half'} : {}),
