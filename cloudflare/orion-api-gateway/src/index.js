@@ -635,11 +635,14 @@ export default {
     // credential. Shadow-test exact parity before switching normally.
     const discoveryPaths=new Set([
       '/.well-known/oauth-authorization-server',
-      '/.well-known/oauth-protected-resource/api/brain/sync/mcp'
+      '/.well-known/oauth-protected-resource/api/brain/sync/mcp',
+      '/api/brain/sync/openapi.json'
     ]);
     if(request.method==='GET' && !incomingUrl.search &&
        discoveryPaths.has(pathname) &&
-       (env.BRAIN_METADATA_CUTOVER === '1' ||
+       ((pathname==='/api/brain/sync/openapi.json'
+         ? env.BRAIN_OPENAPI_CUTOVER==='1'
+         : env.BRAIN_METADATA_CUTOVER==='1') ||
         request.headers.get('x-orion-brain-metadata-canary') === '1') &&
        env.BANANABOOM_CORE) {
       try {

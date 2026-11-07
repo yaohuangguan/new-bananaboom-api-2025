@@ -3,13 +3,16 @@
 // until independently accepted. Keep these documents byte-for-byte equivalent
 // to the existing @modelcontextprotocol/sdk mcpAuthRouter output.
 import { BRAIN_MCP_RESOURCE } from './brainRead.js';
+import { vaultOpenApi } from '../../../services/brain/openapi.js';
 
 const issuer='https://api.samyao.me/';
 const scopes=['memory:read','memory:write'];
 export const DISCOVERY_AUTH_PATH='/.well-known/oauth-authorization-server';
 export const DISCOVERY_RESOURCE_PATH='/.well-known/oauth-protected-resource/api/brain/sync/mcp';
+export const BRAIN_OPENAPI_PATH='/api/brain/sync/openapi.json';
 
 export function brainDiscoveryDocument(pathname) {
+  if(pathname===BRAIN_OPENAPI_PATH)return vaultOpenApi('https://api.samyao.me');
   if(pathname===DISCOVERY_AUTH_PATH)return {
     issuer,
     authorization_endpoint:issuer+'authorize',
@@ -37,7 +40,8 @@ export function handleBrainDiscovery(request) {
   const doc=brainDiscoveryDocument(url.pathname);
   if(!doc || request.method!=='GET' || url.search)return null;
   return Response.json(doc,{headers:{
-    'cache-control':'public, max-age=60',
+    'cache-control':url.pathname===BRAIN_OPENAPI_PATH
+      ? 'private, no-store':'public, max-age=60',
     'x-content-type-options':'nosniff',
     'referrer-policy':'no-referrer'
   }});
