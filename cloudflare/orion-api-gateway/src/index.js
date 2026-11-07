@@ -152,6 +152,27 @@ export function isAuthenticatedProfileCandidate(method, path, search = '', heade
   return cutover || get('x-orion-profile-canary') === '1';
 }
 
+export function isTodoWritePath(method, path) {
+  return (method === 'POST' && (
+    path === '/api/todos' ||
+    /^\/api\/todos\/done\/[a-f0-9]{24}$/i.test(path) ||
+    /^\/api\/todos\/routine\/[a-f0-9]{24}\/check$/i.test(path)
+  )) || (method === 'DELETE' &&
+    /^\/api\/todos\/[a-f0-9]{24}$/i.test(path));
+}
+
+export function isTodoDetailCandidate(method, path, search = '', headers = {}, cutover = false) {
+  if (method !== 'GET' || search ||
+    !/^\/api\/todos\/done\/[a-f0-9]{24}$/i.test(path)) return false;
+  const get = (key) => typeof headers?.get === 'function'
+    ? headers.get(key) : headers?.[key] || headers?.[key.toLowerCase()] || null;
+  const session = get('x-auth-token') ||
+    get('authorization')?.startsWith('Bearer ') ||
+    /(?:^|;)\s*orion_session=/.test(get('cookie') || '');
+  if (!session || get('x-google-auth')) return false;
+  return cutover || get('x-orion-todo-detail-canary') === '1';
+}
+
 export function isTodoListReadCandidate(method, path, search = '', headers = {}, cutover = false) {
   if (method !== 'GET' || path !== '/api/todos') return false;
   const get = (key) => typeof headers?.get === 'function'
@@ -459,6 +480,26 @@ function articleWriteFailure(request) {
     response.headers.set('access-control-allow-origin', origin);
     response.headers.set('access-control-allow-credentials', 'true');
     response.headers.append('vary', 'Origin');
+  }
+  return response;
+}
+
+function todoWorkerFailure(request, status = 503) {
+  // Write outcome may be unknown: do not replay the same mutation to Cloud Run.
+  const body = status === 401
+    ? {message:'Signed-in Todo session required'}
+    : {message:'Todo Worker operation unavailable or outcome unknown. Retry only with the same Idempotency-Key.'};
+  const response = withSecurityHeaders(new Response(JSON.stringify(body), {
+    status, headers:{
+      'content-type':'application/json; charset=utf-8',
+      'cache-control':'no-store'
+    }
+  }));
+  const origin=corsOrigin(request);
+  if(origin){
+    response.headers.set('access-control-allow-origin',origin);
+    response.headers.set('access-control-allow-credentials','true');
+    response.headers.append('vary','Origin');
   }
   return response;
 }
@@ -826,6 +867,26 @@ export default {
     const todoRead = isTodoListReadCandidate(
       request.method, pathname, incomingUrl.search, request.headers,
       String(env.TODO_READ_CUTOVER || '0') === '1');
+    // Strict opt-in for owner Todo mutations; an unknown result must never
+    // be sent again to the legacy Cloud Run origin.
+    const todoWrite = String(env.TODO_WRITE_CANARY || '0') === '1' &&
+      request.headers.get('x-orion-todo-write-canary') === '1' &&
+      isTodoWritePath(request.method, pathname);
+    const todoDetailCutover = String(env.TODO_DETAIL_READ_CUTOVER || '0') === '1';
+    const todoDetailRead = isTodoDetailCandidate(
+      request.method, pathname, incomingUrl.search, request.headers,
+      todoDetailCutover);
+    const todoDetailRequested = request.method === 'GET' &&
+      pathname.startsWith('/api/todos/done/') &&
+      (todoDetailCutover ||
+       request.headers.get('x-orion-todo-detail-canary') === '1');
+    if (todoWrite && (
+      incomingUrl.search || !hasLegacyCredentials(request.headers) ||
+      request.headers.get('x-google-auth')
+    )) return todoWorkerFailure(request,401);
+    if (todoDetailRequested && !todoDetailRead) {
+      return todoWorkerFailure(request,401);
+    }
     const footprintRead = isFootprintReadCandidate(
       request.method, pathname, incomingUrl.search, request.headers,
       String(env.FOOTPRINT_READ_CUTOVER || '0') === '1');
@@ -838,7 +899,8 @@ export default {
       // than let an alternate URL/auth form bypass the owner scope.
       return footprintDetailFailure(request, 401);
     }
-    const routeToCore = likeWrite || articleWrite || profileRead || todoRead || footprintRead || footprintDetailRead
+    const routeToCore = likeWrite || articleWrite || profileRead || todoRead ||
+      todoWrite || todoDetailRead || footprintRead || footprintDetailRead
       ? true : pathname === '/api/posts/private/posts'
       ? shouldRoutePrivateRead(request.method, pathname, incomingUrl.search, request.headers, rolloutPercent)
       : shouldRouteToCoreWorker(request.method, pathname, incomingUrl.search, request.headers);
@@ -853,9 +915,11 @@ export default {
         workerHeaders.delete('x-orion-article-write-canary');
         workerHeaders.delete('x-orion-profile-canary');
         workerHeaders.delete('x-orion-todo-read-canary');
+        workerHeaders.delete('x-orion-todo-write-canary');
+        workerHeaders.delete('x-orion-todo-detail-canary');
         workerHeaders.delete('x-orion-footprint-read-canary');
         workerHeaders.delete('x-orion-footprint-detail-canary');
-        const body = articleWrite ? request.body : undefined;
+        const body = (articleWrite || todoWrite) && request.method !== 'DELETE' ? request.body : undefined;
         const workerRequest = new Request(request.url, {
           method: request.method,
           headers: workerHeaders,
@@ -886,6 +950,10 @@ export default {
           }
           return redactPublicPostResponse(request, secured);
         }
+        if (todoWrite || todoDetailRead) {
+          console.error('Todo Worker denied/unavailable; not falling back to Cloud Run');
+          return todoWorkerFailure(request);
+        }
         if (footprintDetailRead) {
           console.error('Footprint detail owner validation failed; no Cloud Run fallback');
           return footprintDetailFailure(request);
@@ -905,6 +973,10 @@ export default {
         }
         console.error('BananaBoom Worker read returned', workerResponse.status, 'falling back to Cloud Run');
       } catch (error) {
+        if (todoWrite || todoDetailRead) {
+          console.error('Todo Worker exception; no replay',error?.name || 'Error');
+          return todoWorkerFailure(request);
+        }
         if (footprintDetailRead) {
           console.error('Footprint detail Core error; no Cloud Run fallback', error?.name || 'Error');
           return footprintDetailFailure(request);
@@ -923,6 +995,7 @@ export default {
       }
     }
 
+    if (todoWrite || todoDetailRead) return todoWorkerFailure(request);
     if (footprintDetailRead) return footprintDetailFailure(request); // Fail closed without core.
     if (articleWrite) return articleWriteFailure(request); // No core binding -> never replay.
     const originUrl = new URL(pathname + incomingUrl.search, env.ORIGIN_URL);
@@ -938,6 +1011,8 @@ export default {
     headers.delete('x-forwarded-host');
     headers.delete('x-orion-private-worker-canary');
     headers.delete('x-orion-article-write-canary');
+    headers.delete('x-orion-todo-write-canary');
+    headers.delete('x-orion-todo-detail-canary');
     headers.delete('x-orion-profile-canary');
     headers.delete('x-orion-footprint-read-canary');
     headers.delete('x-orion-footprint-detail-canary');

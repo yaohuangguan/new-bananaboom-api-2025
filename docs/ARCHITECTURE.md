@@ -68,6 +68,8 @@ Current `cloudflare/orion-api-gateway/wrangler.toml`:
 | `ARTICLE_WRITE_CUTOVER` | **0** | Regular article writes remain legacy; only explicit guarded canary may target Core |
 | `PROFILE_READ_CUTOVER` | **0** | Signed-in parity passed in admin browser, but default remains legacy |
 | `TODO_READ_CUTOVER` | **0** | Default remains legacy |
+| `TODO_DETAIL_READ_CUTOVER` | **0** | Authenticated owner-scoped Todo detail staged, explicit read canary only |
+| `TODO_WRITE_CANARY` | **0** | Todo create/update/check/delete uses MongoDB audit + idempotent transaction only under explicit guarded canary |
 | `FOOTPRINT_READ_CUTOVER` | **0** | Default remains legacy |
 | `FOOTPRINT_DETAIL_CUTOVER` | **0** | Default remains legacy |
 | `TODO_REMINDERS_ENABLED` | **0** (Core Worker) | Native Cron exists, Todo dispatch disabled |

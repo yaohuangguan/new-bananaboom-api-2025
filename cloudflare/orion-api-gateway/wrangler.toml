@@ -16,6 +16,10 @@ ARTICLE_WRITE_CUTOVER = "0"
 PROFILE_READ_CUTOVER = "0"
 # Authenticated Todo list GET only; keep writes and reminders unchanged.
 TODO_READ_CUTOVER = "0"
+# Owner-scoped Todo detail GET; only explicit authenticated canary until E2E.
+TODO_DETAIL_READ_CUTOVER = "0"
+# Mutation canary requires this server flag, idempotency key and session.
+TODO_WRITE_CANARY = "0"
 # Footprint map/history GET read-only canary; all writes remain legacy.
 FOOTPRINT_READ_CUTOVER = "0"
 # Private by-ID detail GET; fail closed on owner-check failure. Google-only excluded.

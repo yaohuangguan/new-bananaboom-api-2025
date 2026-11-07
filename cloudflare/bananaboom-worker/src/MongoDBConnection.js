@@ -13,6 +13,7 @@ import { syncBrainKnowledge } from './brainVaultWrite.js';
 import { exchangeBrainOAuthToken, BrainOAuthGrantError } from './brainOAuthGrant.js';
 import { readOwnerFootprints, readOwnerFootprint } from './footprintReads.js';
 import { listOwnerTodos } from './todoReads.js';
+import { mutateOwnerTodo, readOwnerTodo, TodoMutationError } from './todoMutations.js';
 
 /**
  * A single Durable Object owns the MongoDB connection.
@@ -174,6 +175,34 @@ export class MongoDBConnection extends DurableObject {
   async ownerTodos(user, query) {
     await this.client.connect();
     return listOwnerTodos(this.client.db(), user, query);
+  }
+
+  async todoMutate(user, input) {
+    try {
+      await this.client.connect();
+      return {ok:true,data:await mutateOwnerTodo({
+        client:this.client,db:this.client.db()
+      },user,input)};
+    }catch(error){
+      if(error instanceof TodoMutationError){
+        return {ok:false,code:error.message,status:error.status};
+      }
+      console.error('todo-do-write-error',error?.name||'Error');
+      return {ok:false,code:'TODO_UNAVAILABLE',status:503};
+    }
+  }
+
+  async todoDetail(user,id){
+    try {
+      await this.client.connect();
+      return {ok:true,data:await readOwnerTodo(this.client.db(),user,id)};
+    }catch(error){
+      if(error instanceof TodoMutationError){
+        return {ok:false,code:error.message,status:error.status};
+      }
+      console.error('todo-do-detail-error',error?.name||'Error');
+      return {ok:false,code:'TODO_UNAVAILABLE',status:503};
+    }
   }
 
   async ownerProfile(user) {

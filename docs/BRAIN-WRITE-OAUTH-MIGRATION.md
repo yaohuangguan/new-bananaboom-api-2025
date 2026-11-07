@@ -6,8 +6,13 @@ This is an incremental backend retirement milestone, **not** Cloud Run retiremen
 
 ## Real private encrypted originals: GCS → R2
 
-The production Brain vault uses a private GCS S3-compatible bucket:
-`gs://orion-memory-vault-242273127238` (host: `storage.googleapis.com`).
+The **historical** Brain vault source was a private GCS S3-compatible bucket:
+`gs://orion-memory-vault-242273127238` in Taiwan. On 2026-11-07 the
+active Cloud Run configuration was switched to
+`gs://orion-brain-vault-us-242273127238` in `US-CENTRAL1`, after all 66
+original encrypted objects were copied and SHA-256 verified. See
+[US GCS migration](ORION-GCS-US-MIGRATION.md). The host remains
+`storage.googleapis.com`.
 MongoDB stores references to encrypted original objects, not the original payload bytes. The existing encryption envelope is `ORIONV1` (scrypt + authenticated AES-256-GCM), keyed by `BRAIN_STORAGE_KEY`. Existing object keys are owner-scoped content hashes.
 
 Created a **separate, private** Cloudflare R2 bucket `orion-private-memory-vault`, not the public media or database backup bucket.
@@ -30,7 +35,7 @@ python3 scripts/backfill-orion-brain-gcs-to-r2.py
 python3 scripts/backfill-orion-brain-gcs-to-r2.py --commit
 ```
 
-The second command reads only encrypted bytes in local memory, checks exact GCS object key patterns, copies missing ciphertext objects, fetches each private R2 object back, checks length and SHA-256, aborts on a mismatched existing destination and rechecks the GCS listing. It does **not** decrypt data, log object names or owner IDs, overwrite/delete originals or edit MongoDB. Since Cloud Run is still live and may write more objects, **rerun this backfill before final cutover**.
+The second command reads only encrypted bytes from the **active US GCS bucket** in local memory, checks exact GCS object key patterns, copies missing ciphertext objects, fetches each private R2 object back, checks length and SHA-256, aborts on a mismatched existing destination and rechecks the GCS listing. It does **not** decrypt data, log object names or owner IDs, overwrite/delete originals or edit MongoDB. Since Cloud Run is still live and may write more objects, **rerun this backfill before final cutover**.
 
 Private bucket restrictions: **no public custom domain, no r2.dev URL, no public read credentials.** Keep GCS originals and their existing encryption key intact as rollback.
 

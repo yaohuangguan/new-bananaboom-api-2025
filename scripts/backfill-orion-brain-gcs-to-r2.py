@@ -9,7 +9,9 @@ in-memory streaming; no plaintext/ciphertext temporary files.
 import argparse, concurrent.futures, hashlib, os, re, subprocess, sys, threading, time
 from pathlib import Path
 
-SRC_BUCKET = 'orion-memory-vault-242273127238'
+# Active Cloud Run source has moved to the US Always Free region.
+# Never backfill only the historical Taiwan rollback bucket after this cutover.
+SRC_BUCKET = 'orion-brain-vault-us-242273127238'
 DST_BUCKET = 'orion-private-memory-vault'
 ROOT = Path(__file__).resolve().parents[1]
 GCLOUD = Path('/home/samyao/google-cloud-sdk/bin/gcloud')
