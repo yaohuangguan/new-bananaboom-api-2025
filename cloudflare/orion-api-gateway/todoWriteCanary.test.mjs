@@ -18,7 +18,7 @@ function env(worker,flags={}) {
     ...flags
   };
 }
-function request(path='/api/todos',options={}) {
+function request(path='/api/todo',options={}) {
   const method=options.method||'POST';
   return new Request(base+path,{
     method,
@@ -37,6 +37,12 @@ function request(path='/api/todos',options={}) {
 }
 
 test('Todo mutation route allowlist is narrow',()=>{
+  // index.js mounts Todo at singular '/api/todo'; every live method must
+  // be routable under that exact root, not just the old typo '/api/todos'.
+  assert.equal(isTodoWritePath('POST','/api/todo'),true);
+  assert.equal(isTodoWritePath('POST','/api/todo/done/'+taskId),true);
+  assert.equal(isTodoWritePath('POST','/api/todo/routine/'+taskId+'/check'),true);
+  assert.equal(isTodoWritePath('DELETE','/api/todo/'+taskId),true);
   assert.equal(isTodoWritePath('POST','/api/todos'),true);
   assert.equal(isTodoWritePath('POST','/api/todos/done/'+taskId),true);
   assert.equal(isTodoWritePath('POST','/api/todos/routine/'+taskId+'/check'),true);
@@ -47,9 +53,9 @@ test('Todo mutation route allowlist is narrow',()=>{
     ['GET','/api/todos'],['DELETE','/api/todos/invalid'],
     ['POST','/api/todos/favorites'],['PUT','/api/todos']
   ])assert.equal(isTodoWritePath(method,path),false);
-  assert.equal(isTodoDetailCandidate('GET','/api/todos/done/'+taskId,'',
+  assert.equal(isTodoDetailCandidate('GET','/api/todo/done/'+taskId,'',
     {cookie:'orion_session=fake','x-orion-todo-detail-canary':'1'}),true);
-  assert.equal(isTodoDetailCandidate('GET','/api/todos/done/'+taskId,'',
+  assert.equal(isTodoDetailCandidate('GET','/api/todo/done/'+taskId,'',
     {'x-orion-todo-detail-canary':'1'}),false);
 });
 
@@ -59,7 +65,7 @@ test('Normal Todo writes never switch unless server flag and canary both allow',
   globalThis.fetch=async()=>{old++;return Response.json({origin:'legacy'})};
   try{
     for(const flags of [{},{TODO_WRITE_CANARY:'1'}]){
-      const r=await gateway.fetch(request('/api/todos',{canary:!flags.TODO_WRITE_CANARY}),
+      const r=await gateway.fetch(request('/api/todo',{canary:!flags.TODO_WRITE_CANARY}),
         env({fetch:async()=>{core++;return Response.json({origin:'worker'})}},flags));
       assert.equal(r.status,200);
       assert.equal((await r.json()).origin,'legacy');
@@ -73,7 +79,7 @@ test('Todo write passes signed cookie and idempotency key once to Worker',async(
   let legacy=0,forwarded=0;
   globalThis.fetch=async()=>{legacy++;throw Error('Do not replay mutation')};
   try{
-    const original=request('/api/todos',{
+    const original=request('/api/todo',{
       canary:true,
       headers:{'x-orion-edge-secret':'spoofed'},
       body:{todo:'Synthetic todo'}
@@ -107,7 +113,7 @@ test('Todo writes fail closed on every 503, exception or missing Worker',async()
       {fetch:async()=>Response.json({internal:'sensitive'},{status:503})},
       {fetch:async()=>{throw Error('database lost')}}
     ]){
-      const r=await gateway.fetch(request('/api/todos',{canary:true}),
+      const r=await gateway.fetch(request('/api/todo',{canary:true}),
         env(worker,{TODO_WRITE_CANARY:'1'}));
       assert.equal(r.status,503);
       const output=await r.json();
@@ -124,12 +130,12 @@ test('Todo canary has strict auth, no alternate Google authentication bypass',as
   globalThis.fetch=async()=>{legacy++;return Response.json({origin:'legacy'})};
   try{
     const worker={fetch:async()=>{core++;return Response.json({origin:'worker'})}};
-    const missing=request('/api/todos',{
+    const missing=request('/api/todo',{
       canary:true,headers:{cookie:''}
     });
     const r=await gateway.fetch(missing,env(worker,{TODO_WRITE_CANARY:'1'}));
     assert.equal(r.status,401);
-    const google=request('/api/todos',{
+    const google=request('/api/todo',{
       canary:true,headers:{'x-google-auth':'some-other-identity'}
     });
     const denied=await gateway.fetch(google,env(worker,{TODO_WRITE_CANARY:'1'}));
@@ -148,13 +154,13 @@ test('Todo detail requires session during canary and will not bypass owner-check
       assert.equal(req.headers.get('x-orion-todo-detail-canary'),null);
       return Response.json({message:'owner validation unavailable'},{status:503});
     }};
-    const missing=request('/api/todos/done/'+taskId,{
+    const missing=request('/api/todo/done/'+taskId,{
       method:'GET',
       headers:{cookie:'','x-orion-todo-detail-canary':'1'}
     });
     const noAuth=await gateway.fetch(missing,env(worker));
     assert.equal(noAuth.status,401);
-    const withAuth=request('/api/todos/done/'+taskId,{
+    const withAuth=request('/api/todo/done/'+taskId,{
       method:'GET',
       headers:{'x-orion-todo-detail-canary':'1'}
     });

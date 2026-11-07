@@ -10,15 +10,15 @@ runtime for normal requests. No real user Todo was changed.
 
 | Method | Path | Legacy behavior mirrored |
 | --- | --- | --- |
-| `GET` | `/api/todos` | Existing paginated list Worker canary; unchanged |
-| `GET` | `/api/todos/done/:id` | Private populated task detail, now owner-scoped and authenticated in Worker |
-| `POST` | `/api/todos` | Create wish/routine, defaults, notifyUsers and recurrence, returns populated legacy list |
-| `POST` | `/api/todos/done/:id` | Update task/status/reminder, returns populated legacy list |
-| `POST` | `/api/todos/routine/:id/check` | Move a routine to its next timezone-aware scheduled run; no Bark send |
-| `DELETE` | `/api/todos/:id` | Delete owner/family-scoped task, returns `{success:true}` |
+| `GET` | `/api/todo` | Existing paginated list Worker canary; unchanged |
+| `GET` | `/api/todo/done/:id` | Private populated task detail, now owner-scoped and authenticated in Worker |
+| `POST` | `/api/todo` | Create wish/routine, defaults, notifyUsers and recurrence, returns populated legacy list |
+| `POST` | `/api/todo/done/:id` | Update task/status/reminder, returns populated legacy list |
+| `POST` | `/api/todo/routine/:id/check` | Move a routine to its next timezone-aware scheduled run; no Bark send |
+| `DELETE` | `/api/todo/:id` | Delete owner/family-scoped task, returns `{success:true}` |
 
 The staged Worker does **not** yet implement
-`POST /api/todos/routine/:id/test` (Bark/Socket test notification).
+`POST /api/todo/routine/:id/test` (Bark/Socket test notification).
 
 ### Security and failure isolation
 
@@ -42,7 +42,7 @@ The staged Worker does **not** yet implement
 - Mutations returned by Core as a 5xx, or whose result is unknown, are
   **never** replayed through Cloud Run. An end user/client must retry
   only with the **same** idempotency key after checking results.
-- Original `GET /api/todos/done/:id` lacked route-local auth. New Worker
+- Original `GET /api/todo/done/:id` lacked route-local auth. New Worker
   detail path always validates live session and owner scope. Normal detail
   traffic remains legacy until the production flag and browser E2E pass.
 

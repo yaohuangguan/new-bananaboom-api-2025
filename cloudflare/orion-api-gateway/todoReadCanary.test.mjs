@@ -8,6 +8,7 @@ const canary = new Headers({cookie:'orion_session=fake-jwt','x-orion-todo-read-c
 test('Todo canary is authenticated, read-only and narrowly query-scoped',()=>{
   assert.equal(isTodoListReadCandidate('GET','/api/todos','',signed,false),false);
   assert.equal(isTodoListReadCandidate('GET','/api/todos','',signed,true),true);
+  assert.equal(isTodoListReadCandidate('GET','/api/todo','',signed,true),true);
   assert.equal(isTodoListReadCandidate('GET','/api/todos','?page=2&limit=15&type=wish&keyword=coffee&isActive=true',canary,false),true);
   assert.equal(isTodoListReadCandidate('GET','/api/todos','',canary,false),true);
   for(const [method,path,search,headers] of [
