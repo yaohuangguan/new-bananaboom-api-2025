@@ -35,6 +35,7 @@ export const repository = {
   todoDetail: async (user, id) => (await mongo()).todoDetail(user, id),
   ownerFootprints: async (user, query) => (await mongo()).ownerFootprints(user, query),
   ownerFootprintDetail: async (user, id) => (await mongo()).ownerFootprintDetail(user, id),
+  footprintMutate: async (user, input) => (await mongo()).footprintMutate(user, input),
   ownerAiStatus: async (user) => (await mongo()).ownerAiStatus(user),
   privatePosts: async (options) => (await mongo()).privatePosts(options),
   pollPostWriteEvents: async (after, max) => (await mongo()).pollPostWriteEvents(after, max),
