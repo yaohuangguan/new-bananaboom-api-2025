@@ -180,3 +180,27 @@ Gateway has an explicit `x-orion-brain-metadata-canary: 1` path and
 `revoke`, consent and existing ChatGPT/Claude connections are
 **unchanged**, still on Cloud Run. Public metadata can be cut over
 independently after production exact-JSON parity is verified.
+
+
+### Live public OAuth discovery cutover (2026-11-07)
+
+Two **read-only, public** discovery documents were compared with the
+existing Cloud Run SDK through the production Gateway canary:
+authorization metadata had **12/12 matching JSON fields**, and MCP
+protected-resource metadata had **4/4 matching fields**. Both were
+explicitly verified to carry `x-bananaboom-origin: worker` on canary,
+while ordinary requests still carried legacy origin during comparison.
+
+On this evidence `BRAIN_METADATA_CUTOVER` was promoted to **1**,
+routing only GET requests without queries to these exact paths:
+
+- `/.well-known/oauth-authorization-server`
+- `/.well-known/oauth-protected-resource/api/brain/sync/mcp`
+
+No authorization codes, credentials, user knowledge, refresh tokens,
+DCR client registration or revocations were read or modified.
+`POST /token`, `/authorize`, `/register`, `/revoke` and the Second Brain
+API/MCP authenticated operations remain on Cloud Run. On a genuine
+Core metadata read failure, Gateway can safely retry the unchanged
+read-only Cloud Run SDK document. Revert the single `BRAIN_METADATA_CUTOVER`
+flag to `0` if production metadata behavior diverges.
