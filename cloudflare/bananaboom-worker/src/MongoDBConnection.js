@@ -12,6 +12,7 @@ import { BrainReadError, safeBrainFailureKind, brainAccessScopes, searchBrainMem
 import { syncBrainKnowledge } from './brainVaultWrite.js';
 import { exchangeBrainOAuthToken, BrainOAuthGrantError } from './brainOAuthGrant.js';
 import { readOwnerFootprints, readOwnerFootprint } from './footprintReads.js';
+import { mutateOwnerFootprint, FootprintMutationError } from './footprintMutations.js';
 import { listOwnerTodos } from './todoReads.js';
 import { mutateOwnerTodo, readOwnerTodo, TodoMutationError } from './todoMutations.js';
 
@@ -170,6 +171,21 @@ export class MongoDBConnection extends DurableObject {
   async ownerFootprints(user, query) {
     await this.client.connect();
     return readOwnerFootprints(this.client.db(), user, query);
+  }
+
+  async footprintMutate(user,input){
+    try{
+      await this.client.connect();
+      return {ok:true,data:await mutateOwnerFootprint({
+        client:this.client,db:this.client.db()
+      },user,input)};
+    }catch(error){
+      if(error instanceof FootprintMutationError){
+        return {ok:false,code:error.message,status:error.status};
+      }
+      console.error('footprint-do-write-unavailable',error?.name||'Error');
+      return {ok:false,code:'FOOTPRINT_UNAVAILABLE',status:503};
+    }
   }
 
   async ownerTodos(user, query) {

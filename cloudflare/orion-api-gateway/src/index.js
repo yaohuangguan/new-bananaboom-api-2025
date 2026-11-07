@@ -198,6 +198,12 @@ export function isTodoListReadCandidate(method, path, search = '', headers = {},
   return Boolean(cutover || get('x-orion-todo-read-canary') === '1');
 }
 
+export function isFootprintWritePath(method,path) {
+  return (method === 'POST' && path === '/api/footprints') ||
+    (['PUT','DELETE'].includes(method) &&
+     /^\/api\/footprints\/[a-f0-9]{24}$/i.test(path));
+}
+
 export function isFootprintReadCandidate(method, path, search = '', headers = {}, cutover = false) {
   if (method !== 'GET' || path !== '/api/footprints') return false;
   const get = (key) => typeof headers?.get === 'function'
@@ -494,6 +500,24 @@ function todoWorkerFailure(request, status = 503) {
       'content-type':'application/json; charset=utf-8',
       'cache-control':'no-store'
     }
+  }));
+  const origin=corsOrigin(request);
+  if(origin){
+    response.headers.set('access-control-allow-origin',origin);
+    response.headers.set('access-control-allow-credentials','true');
+    response.headers.append('vary','Origin');
+  }
+  return response;
+}
+
+function footprintWriteFailure(request,status=503) {
+  // The first request could have committed. NEVER replay on Cloud Run.
+  const msg=status===401?'Signed-in footprint session required':
+    status===428?'Idempotency-Key required for Worker mutation':
+    'Footprint outcome unknown. Check your data and retry only with the same Idempotency-Key.';
+  const response=withSecurityHeaders(new Response(JSON.stringify({msg}),{
+    status,headers:{'content-type':'application/json; charset=utf-8',
+      'cache-control':'no-store'}
   }));
   const origin=corsOrigin(request);
   if(origin){
@@ -928,6 +952,20 @@ export default {
     const footprintRead = isFootprintReadCandidate(
       request.method, pathname, incomingUrl.search, request.headers,
       String(env.FOOTPRINT_READ_CUTOVER || '0') === '1');
+    // Public request canary alone must NEVER enable a user-record mutation.
+    const footprintWrite = String(env.FOOTPRINT_WRITE_CANARY || '0') === '1' &&
+      request.headers.get('x-orion-footprint-write-canary') === '1' &&
+      isFootprintWritePath(request.method,pathname);
+    if(footprintWrite){
+      if(incomingUrl.search || request.headers.get('x-google-auth') ||
+         !hasLegacyCredentials(request.headers)) {
+        return footprintWriteFailure(request,401);
+      }
+      if(!/^[A-Za-z0-9:_-]{8,128}$/.test(
+        request.headers.get('idempotency-key')||'')) {
+        return footprintWriteFailure(request,428);
+      }
+    }
     const footprintDetailCutover = String(env.FOOTPRINT_DETAIL_CUTOVER || '0') === '1';
     const footprintDetailRead = isFootprintDetailCandidate(
       request.method, pathname, incomingUrl.search, request.headers, footprintDetailCutover);
@@ -938,7 +976,7 @@ export default {
       return footprintDetailFailure(request, 401);
     }
     const routeToCore = likeWrite || articleWrite || profileRead || todoRead ||
-      todoWrite || todoDetailRead || footprintRead || footprintDetailRead
+      todoWrite || todoDetailRead || footprintRead || footprintDetailRead || footprintWrite
       ? true : pathname === '/api/posts/private/posts'
       ? shouldRoutePrivateRead(request.method, pathname, incomingUrl.search, request.headers, rolloutPercent)
       : shouldRouteToCoreWorker(request.method, pathname, incomingUrl.search, request.headers);
@@ -957,7 +995,8 @@ export default {
         workerHeaders.delete('x-orion-todo-detail-canary');
         workerHeaders.delete('x-orion-footprint-read-canary');
         workerHeaders.delete('x-orion-footprint-detail-canary');
-        const body = (articleWrite || todoWrite) && request.method !== 'DELETE' ? request.body : undefined;
+        workerHeaders.delete('x-orion-footprint-write-canary');
+        const body = (articleWrite || todoWrite || footprintWrite) && request.method !== 'DELETE' ? request.body : undefined;
         const workerRequest = new Request(request.url, {
           method: request.method,
           headers: workerHeaders,
@@ -992,6 +1031,10 @@ export default {
           console.error('Todo Worker denied/unavailable; not falling back to Cloud Run');
           return todoWorkerFailure(request);
         }
+        if(footprintWrite) {
+          console.error('Footprint write failed; no Cloud Run replay');
+          return footprintWriteFailure(request);
+        }
         if (footprintDetailRead) {
           console.error('Footprint detail owner validation failed; no Cloud Run fallback');
           return footprintDetailFailure(request);
@@ -1015,6 +1058,10 @@ export default {
           console.error('Todo Worker exception; no replay',error?.name || 'Error');
           return todoWorkerFailure(request);
         }
+        if(footprintWrite) {
+          console.error('Footprint write exception; no Cloud Run replay',error?.name||'Error');
+          return footprintWriteFailure(request);
+        }
         if (footprintDetailRead) {
           console.error('Footprint detail Core error; no Cloud Run fallback', error?.name || 'Error');
           return footprintDetailFailure(request);
@@ -1034,6 +1081,7 @@ export default {
     }
 
     if (todoWrite || todoDetailRead) return todoWorkerFailure(request);
+    if(footprintWrite) return footprintWriteFailure(request);
     if (footprintDetailRead) return footprintDetailFailure(request); // Fail closed without core.
     if (articleWrite) return articleWriteFailure(request); // No core binding -> never replay.
     const originUrl = new URL(pathname + incomingUrl.search, env.ORIGIN_URL);
@@ -1054,6 +1102,7 @@ export default {
     headers.delete('x-orion-profile-canary');
     headers.delete('x-orion-footprint-read-canary');
     headers.delete('x-orion-footprint-detail-canary');
+    headers.delete('x-orion-footprint-write-canary');
     headers.delete('x-orion-pdf-canary');
 
     const ttl = cacheTtlFor(request, pathname);

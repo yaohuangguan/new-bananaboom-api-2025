@@ -204,3 +204,24 @@ API/MCP authenticated operations remain on Cloud Run. On a genuine
 Core metadata read failure, Gateway can safely retry the unchanged
 read-only Cloud Run SDK document. Revert the single `BRAIN_METADATA_CUTOVER`
 flag to `0` if production metadata behavior diverges.
+
+
+## Owner-scoped Footprint writes staged (2026-11-07)
+
+New Cloudflare Core/DO handlers for the existing
+`POST /api/footprints`, `PUT /api/footprints/:id` and
+`DELETE /api/footprints/:id` preserve the existing Mongo collection
+and legacy JSON responses. All writes enforce live signed user Session,
+`FOOTPRINT:USE`, record-owner equality, field allowlists and request
+origin; record/audit/idempotency receipt commit atomically. Gateway
+canary `FOOTPRINT_WRITE_CANARY=0` remains disabled. The backend test
+suite reports Core **109 pass / 1 skip**, Gateway **85 pass**; a
+real isolated localhost Mongo Replica Set verified cross-owner denial,
+concurrent same-key writes, audit consistency and revocation. Two
+Wrangler dry-run builds passed. **No production user footprint write
+was performed.** See [Footprint Worker migration](FOOTPRINT-WRITE-MIGRATION.md).
+
+The existing Cloud Run deployment must independently be verified to
+contain the owner-scoped source fix before deleting the legacy
+route. Until real user/browser parity and stable idempotency keys
+are confirmed, it remains a Cloud Run dependency.
