@@ -154,16 +154,16 @@ export function isAuthenticatedProfileCandidate(method, path, search = '', heade
 
 export function isTodoWritePath(method, path) {
   return (method === 'POST' && (
-    path === '/api/todos' ||
-    /^\/api\/todos\/done\/[a-f0-9]{24}$/i.test(path) ||
-    /^\/api\/todos\/routine\/[a-f0-9]{24}\/check$/i.test(path)
+    path === '/api/todo' || path === '/api/todos' ||
+    /^\/api\/todos?\/done\/[a-f0-9]{24}$/i.test(path) ||
+    /^\/api\/todos?\/routine\/[a-f0-9]{24}\/check$/i.test(path)
   )) || (method === 'DELETE' &&
-    /^\/api\/todos\/[a-f0-9]{24}$/i.test(path));
+    /^\/api\/todos?\/[a-f0-9]{24}$/i.test(path));
 }
 
 export function isTodoDetailCandidate(method, path, search = '', headers = {}, cutover = false) {
   if (method !== 'GET' || search ||
-    !/^\/api\/todos\/done\/[a-f0-9]{24}$/i.test(path)) return false;
+    !/^\/api\/todos?\/done\/[a-f0-9]{24}$/i.test(path)) return false;
   const get = (key) => typeof headers?.get === 'function'
     ? headers.get(key) : headers?.[key] || headers?.[key.toLowerCase()] || null;
   const session = get('x-auth-token') ||
@@ -174,7 +174,7 @@ export function isTodoDetailCandidate(method, path, search = '', headers = {}, c
 }
 
 export function isTodoListReadCandidate(method, path, search = '', headers = {}, cutover = false) {
-  if (method !== 'GET' || path !== '/api/todos') return false;
+  if (method !== 'GET' || !['/api/todo','/api/todos'].includes(path)) return false;
   const get = (key) => typeof headers?.get === 'function'
     ? headers.get(key) : headers?.[key] || headers?.[key.toLowerCase()] || null;
   const session = get('x-auth-token') ||
@@ -603,6 +603,44 @@ export default {
       return secured;
     }
 
+    // Public OAuth discovery is immutable metadata, not a grant or a
+    // credential. Shadow-test exact parity before switching normally.
+    const discoveryPaths=new Set([
+      '/.well-known/oauth-authorization-server',
+      '/.well-known/oauth-protected-resource/api/brain/sync/mcp'
+    ]);
+    if(request.method==='GET' && !incomingUrl.search &&
+       discoveryPaths.has(pathname) &&
+       (env.BRAIN_METADATA_CUTOVER === '1' ||
+        request.headers.get('x-orion-brain-metadata-canary') === '1') &&
+       env.BANANABOOM_CORE) {
+      try {
+        const headers=new Headers(request.headers);
+        for(const name of ['host','x-forwarded-host','x-orion-edge-secret',
+          'x-orion-brain-metadata-canary','authorization','cookie',
+          'x-auth-token','x-google-auth'
+        ])headers.delete(name);
+        const result=await env.BANANABOOM_CORE.fetch(new Request(request.url,{
+          method:'GET',headers,redirect:'manual'
+        }));
+        if(result.status===200) {
+          const response=withSecurityHeaders(result);
+          response.headers.set('x-bananaboom-origin','worker');
+          response.headers.set('access-control-expose-headers','x-bananaboom-origin');
+          const origin=corsOrigin(request);
+          if(origin){
+            response.headers.set('access-control-allow-origin',origin);
+            response.headers.append('vary','Origin');
+          }
+          return response;
+        }
+        // GET discovery is safe to retry on the unchanged Cloud Run SDK.
+        console.error('brain-discovery-worker-status',result.status);
+      }catch(error){
+        console.error('brain-discovery-worker-failed',error?.name||'Error');
+      }
+    }
+
     // One-off OAuth token grant canary. Normal authorization_code, refresh,
     // DCR and PKCE sessions remain on Cloud Run. A failed Worker response
     // is NEVER retried on Cloud Run: refresh rotation consumes a token once.
@@ -877,7 +915,7 @@ export default {
       request.method, pathname, incomingUrl.search, request.headers,
       todoDetailCutover);
     const todoDetailRequested = request.method === 'GET' &&
-      pathname.startsWith('/api/todos/done/') &&
+      /^\/api\/todos?\/done\//.test(pathname) &&
       (todoDetailCutover ||
        request.headers.get('x-orion-todo-detail-canary') === '1');
     if (todoWrite && (

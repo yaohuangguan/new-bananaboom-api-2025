@@ -34,7 +34,7 @@ test('Todo mutation routes require a verified existing JWT and live RBAC',async 
     todoDetail:async()=>{invoked++;return {ok:true,data:{_id:task,todo:'Synthetic'}}}
   };
   const base=await listen(repo,t);
-  const post=(headers)=>fetch(base+'/api/todos',{
+  const post=(headers)=>fetch(base+'/api/todo',{
     method:'POST',headers:{origin:'https://samyao.me',
       'content-type':'application/json','idempotency-key':'create-key-001',
       ...headers},
@@ -50,9 +50,9 @@ test('Todo mutation routes require a verified existing JWT and live RBAC',async 
   assert.equal(r.status,200);
   assert.deepEqual(await r.json(),[]);
   assert.equal(invoked,1);
-  r=await fetch(base+'/api/todos/done/'+task);
+  r=await fetch(base+'/api/todo/done/'+task);
   assert.equal(r.status,401);
-  r=await fetch(base+'/api/todos/done/'+task,{
+  r=await fetch(base+'/api/todo/done/'+task,{
     headers:{'x-auth-token':token,origin:'https://samyao.me'}
   });
   assert.equal(r.status,200);
@@ -70,7 +70,7 @@ test('Todo write accepts cookie only from first-party trusted Origin',async t=>{
     todoMutate:async()=>{mutations++;return {ok:true,data:{success:true}}}
   };
   const base=await listen(repo,t);
-  const url=base+'/api/todos/done/'+task;
+  const url=base+'/api/todo/done/'+task;
   const headers={
     'content-type':'application/json',
     'idempotency-key':'update-key-001',
@@ -97,7 +97,7 @@ test('Todo RBAC denial and known 404/409/428 errors are not retried',async t=>{
     todoMutate:async()=>{throw Error('should not execute');}
   };
   const base=await listen(repo,t);
-  const r=await fetch(base+'/api/todos',{
+  const r=await fetch(base+'/api/todo',{
     method:'POST',headers:{origin:'https://samyao.me',
       'x-auth-token':token,'content-type':'application/json',
       'idempotency-key':'create-key-001'},
@@ -120,7 +120,7 @@ test('Todo operation reports safe idempotency errors and never exposes details',
     todoMutate:async()=>messages[index++]
   };
   const base=await listen(repo,t);
-  const invoke=()=>fetch(base+'/api/todos',{
+  const invoke=()=>fetch(base+'/api/todo',{
     method:'POST',
     headers:{origin:'https://samyao.me','x-auth-token':token,
       'content-type':'application/json','idempotency-key':'create-key-001'},

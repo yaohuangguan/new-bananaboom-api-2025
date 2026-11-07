@@ -86,11 +86,7 @@ export function registerTodoMutationRoutes(app,repository,secretProvider){
     }
   };
 
-  app.post('/api/todos',ctx=>operation(ctx,'create'));
-  app.post('/api/todos/done/:id',ctx=>operation(ctx,'update'));
-  app.post('/api/todos/routine/:id/check',ctx=>operation(ctx,'check'));
-  app.delete('/api/todos/:id',ctx=>operation(ctx,'delete'));
-  app.get('/api/todos/done/:id',async ctx=>{
+  const detail = async ctx=>{
     const principal=await getPrincipal(ctx,repository,secretProvider);
     if(!principal)return {message:ctx.status===403?'Forbidden':'Unauthorized'};
     try{
@@ -101,5 +97,13 @@ export function registerTodoMutationRoutes(app,repository,secretProvider){
       ctx.status=503;
       return {message:'Todo detail temporarily unavailable'};
     }
-  });
+  };
+  // '/api/todo' is the ACTUAL legacy mount (index.js), not '/api/todos'.
+  for(const prefix of ['/api/todo','/api/todos']){
+    app.post(prefix,ctx=>operation(ctx,'create'));
+    app.post(prefix+'/done/:id',ctx=>operation(ctx,'update'));
+    app.post(prefix+'/routine/:id/check',ctx=>operation(ctx,'check'));
+    app.delete(prefix+'/:id',ctx=>operation(ctx,'delete'));
+    app.get(prefix+'/done/:id',detail);
+  }
 }

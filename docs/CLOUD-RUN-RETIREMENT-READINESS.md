@@ -158,3 +158,25 @@ still prerequisites. See [Todo Worker migration](TODO-WORKER-MIGRATION.md).
 **Retirement verdict remains FAIL**: many owner CRUD, AI and OAuth routes
 still require Cloud Run. Neither the US bucket move nor a successful
 Todo canary should be mistaken for shutting Cloud Run down.
+
+
+## OAuth discovery and real Todo route correction (2026-11-07)
+
+Source inspection found that the original Express `index.js` mounts
+`routes/todo.js` at **`/api/todo`** (singular), while earlier staged
+Core/Gateway implementations and tests used `/api/todos`. Both mounts
+are now supported by Core and Gateway, with explicit contract tests
+that assert the ACTUAL legacy route. `TODO_WRITE_CANARY` and
+`TODO_DETAIL_READ_CUTOVER` remain **0**; this correction alone does
+not enable a production mutation. The plural alias remains only for
+compatibility, not as evidence of migration success.
+
+The two existing *public* Orion Brain OAuth discovery documents have
+also been implemented in native Core (no credential or MongoDB access):
+`/.well-known/oauth-authorization-server` and
+`/.well-known/oauth-protected-resource/api/brain/sync/mcp`.
+Gateway has an explicit `x-orion-brain-metadata-canary: 1` path and
+`BRAIN_METADATA_CUTOVER` flag. OAuth `authorize`, `token`, `register`,
+`revoke`, consent and existing ChatGPT/Claude connections are
+**unchanged**, still on Cloud Run. Public metadata can be cut over
+independently after production exact-JSON parity is verified.

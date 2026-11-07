@@ -241,7 +241,7 @@ export function createApp(repository = mongoRepository, options = {}) {
 
   // Todo reads use exactly the same JWT + live Session as private profile.
   // Mutation routes and the paused reminder scheduler remain unchanged.
-  app.get('/api/todos', async (ctx) => {
+  const todoList = async (ctx) => {
     ctx.set('Cache-Control', 'private, no-store');
     if (!extractLegacyToken(ctx.headers)) {
       ctx.status = 401;
@@ -279,7 +279,11 @@ export function createApp(repository = mongoRepository, options = {}) {
       ctx.status = 503;
       return { message: 'Todo list temporarily unavailable' };
     }
-  });
+  };
+  // Original Express mounts routes/todo.js at singular '/api/todo'.
+  // Retain the plural compatibility path but test the real production URL.
+  app.get('/api/todo', todoList);
+  app.get('/api/todos', todoList);
 
   // Authenticated profile read: caller must supply a signed JWT backed by
   // a live MongoDB Session. No claimed roles or user IDs are trusted.

@@ -4,6 +4,7 @@ import { createApp } from './app.js';
 import { repository } from './db.js';
 import { handleBrainMcpRequest } from './brainMcp.js';
 import { handleBrainOAuthToken } from './brainOAuthHttp.js';
+import { handleBrainDiscovery } from './brainDiscovery.js';
 
 const app = createApp();
 await app.ready();
@@ -14,6 +15,8 @@ export { MongoDBConnection } from './MongoDBConnection.js';
 const nodeHandler = httpServerHandler(createServer(app.callback()));
 export default {
   fetch(request, env, ctx) {
+    const discovered=handleBrainDiscovery(request);
+    if(discovered)return discovered;
     if (new URL(request.url).pathname === '/token') {
       return handleBrainOAuthToken(request,repository);
     }
