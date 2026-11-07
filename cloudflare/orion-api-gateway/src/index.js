@@ -198,6 +198,13 @@ export function isTodoListReadCandidate(method, path, search = '', headers = {},
   return Boolean(cutover || get('x-orion-todo-read-canary') === '1');
 }
 
+export function isLegacyPhotoWritePath(method,path) {
+  // Photo POST/PUT/DELETE are presently still served by Cloud Run.
+  // Protect the entire photo write namespace, including malformed IDs.
+  return ['POST','PUT','DELETE'].includes(method) &&
+    (path === '/api/photos' || path.startsWith('/api/photos/'));
+}
+
 export function isFootprintWritePath(method,path) {
   return (method === 'POST' && path === '/api/footprints') ||
     (['PUT','DELETE'].includes(method) &&
@@ -514,6 +521,25 @@ function todoWorkerFailure(request, status = 503) {
   return response;
 }
 
+function photoWriteAuthorizationFailure(request,status=503) {
+  const body={
+    message: status===401 ? 'Signed-in photo administrator required' :
+      status===403 ? 'Photo administrator permission required' :
+      'Photo authorization temporarily unavailable'
+  };
+  const response=withSecurityHeaders(new Response(JSON.stringify(body),{
+    status,headers:{'content-type':'application/json; charset=utf-8',
+      'cache-control':'private, no-store'}
+  }));
+  const origin=corsOrigin(request);
+  if(origin){
+    response.headers.set('access-control-allow-origin',origin);
+    response.headers.set('access-control-allow-credentials','true');
+    response.headers.append('vary','Origin');
+  }
+  return response;
+}
+
 function footprintWriteFailure(request,status=503) {
   // The first request could have committed. NEVER replay on Cloud Run.
   const msg=status===401?'Signed-in footprint session required':
@@ -587,6 +613,46 @@ export default {
 
     const limited = await enforceRateLimit(request, env, pathname);
     if (limited) return withSecurityHeaders(limited);
+
+    // Legacy Express does NOT map /api/photos writes to GlobalGuard, so
+    // its fail-open unmatched-route behavior could permit anonymous
+    // photo mutations. Before any Cloud Run photo mutation, demand a
+    // verified current admin Session via a private Core service binding.
+    const photoWrite=env.PHOTO_WRITE_AUTH_GUARD==='1' &&
+      isLegacyPhotoWritePath(request.method,pathname);
+    if(photoWrite){
+      // Authz check has no business side effects and never consumes body.
+      if(!hasLegacyCredentials(request.headers) ||
+         request.headers.get('x-google-auth') && !(
+           request.headers.get('x-auth-token') ||
+           request.headers.get('authorization')?.startsWith('Bearer ') ||
+           /(?:^|;)\s*orion_session=/.test(request.headers.get('cookie')||''))) {
+        return photoWriteAuthorizationFailure(request,401);
+      }
+      try{
+        if(!env.BANANABOOM_CORE)return photoWriteAuthorizationFailure(request);
+        const headers=new Headers(request.headers);
+        for(const name of ['host','x-forwarded-host','x-orion-edge-secret',
+          'content-length','content-type','transfer-encoding',
+          'x-orion-private-worker-canary','x-orion-password-worker-canary',
+          'x-orion-footprint-write-canary','x-orion-todo-write-canary']){
+          headers.delete(name);
+        }
+        const checkRequest=new Request(
+          new URL('/_internal/authorize-photos-write',request.url),{
+            method:'POST',headers,redirect:'manual'
+          }
+        );
+        const checked=await env.BANANABOOM_CORE.fetch(checkRequest);
+        if(checked.status!==204){
+          return photoWriteAuthorizationFailure(request,
+            [401,403].includes(checked.status)?checked.status:503);
+        }
+      }catch(error){
+        console.error('legacy-photo-write-preflight-error',error?.name||'Error');
+        return photoWriteAuthorizationFailure(request);
+      }
+    }
 
     // Anonymous profile probes require no MongoDB lookup. The legacy
     // middleware responds with precisely this 401 whenever no real auth

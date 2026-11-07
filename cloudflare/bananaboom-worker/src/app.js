@@ -9,6 +9,7 @@ import { classifyBackupFailure, parseBackupDiagnostic } from './databaseBackup.j
 import { registerBrainReadRoutes } from './brainHttp.js';
 import { registerTodoMutationRoutes } from './todoHttp.js';
 import { registerFootprintMutationRoutes } from './footprintHttp.js';
+import { registerPhotoWriteAuthorization } from './photoWriteAuthorization.js';
 import { legacyAuthCookie, passwordLoginInput } from './passwordSession.js';
 
 // Match legacy JSON serialization before applying its response hydration middleware.
@@ -42,6 +43,7 @@ export function createApp(repository = mongoRepository, options = {}) {
   registerBrainReadRoutes(app, repository, options.brainReadOptions || {});
   registerTodoMutationRoutes(app, repository, secretProvider);
   registerFootprintMutationRoutes(app, repository, secretProvider);
+  registerPhotoWriteAuthorization(app, repository, secretProvider);
   // Password session migration is behind an explicit Gateway flag/canary.
   // Do not alter live Firebase/Google or Second Brain OAuth sessions.
   const trustedAuthOrigins = new Set([
