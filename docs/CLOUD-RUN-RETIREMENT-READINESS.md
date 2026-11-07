@@ -270,3 +270,19 @@ The two existing OAuth discovery documents remain on the already
 verified `BRAIN_METADATA_CUTOVER=1`. This OpenAPI change does NOT enable
 owner knowledge writes, OAuth refresh, MCP POST or a new permission.
 Revert `BRAIN_OPENAPI_CUTOVER` to 0 for a read-only rollback.
+
+
+### Public Brain OpenAPI live cutover (2026-11-07)
+
+Production Gateway canary compared `GET /api/brain/sync/openapi.json`
+using Cloud Run and Core: both returned HTTP 200 with **exactly equal
+parsed JSON** (6 top-level fields and 3 paths), confirming the response
+origin header was `x-bananaboom-origin: worker` only for the Core canary.
+Aggregate canonical spec SHA-256 was
+`9853dab2d1fbd740e84fda31e0e36421a374df90c38d4a4556014de441af1774`.
+
+`BRAIN_OPENAPI_CUTOVER=1` now moves normal public API specification
+requests to the Core Worker. A read-only failure falls back to the
+unchanged old Cloud Run specification; set this flag back to 0 for
+instant rollback. All access-token, OAuth, MCP, private knowledge
+and owner-scoped writes remain unchanged.
