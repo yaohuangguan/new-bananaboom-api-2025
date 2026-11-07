@@ -254,9 +254,13 @@ export function shouldRouteToCoreWorker(method, path, search = '', headers = {})
       /^\/api\/comments\/reply\/[a-f0-9]{24}$/i.test(path)) {
     const get = (name) => typeof headers?.get === 'function'
       ? headers.get(name) : headers?.[name] || headers?.[name.toLowerCase()] || null;
-    return !search && !get('x-auth-token') && !get('x-google-auth') &&
-      !get('authorization') &&
-      !/(?:^|;)\s*orion_session=/.test(get('cookie') || '');
+    // Public comments are the same for guests and signed-in users.
+    // Core now checks optional JWT signatures + live Session, so invalid
+    // Bearer/cookie tokens get the legacy 401 rather than being bypassed.
+    // Google-only auth stays on legacy until identity parity is verified.
+    const authorization=get('authorization');
+    return !search && !get('x-google-auth') &&
+      (!authorization || authorization.startsWith('Bearer '));
   }
   if (/^\/api\/posts\/likes\/[a-f\d]{24}$/i.test(path)) {
     return !hasLegacyCredentials(headers);
@@ -289,7 +293,7 @@ export function shouldRouteToCoreWorker(method, path, search = '', headers = {})
   }
   if (path === '/api/posts') {
     if (['q', 'tag'].some((key) => query.get(key)?.length > 100)) return false;
-    for (const [key, max] of [['page', 1000], ['limit', 50]]) {
+    for (const [key, max] of [['page', 1000], ['limit', 1000]]) {
       const v = query.get(key);
       if (v !== null && (!/^\d+$/.test(v) || Number(v) < 1 || Number(v) > max)) return false;
     }

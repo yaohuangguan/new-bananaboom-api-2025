@@ -225,3 +225,32 @@ The existing Cloud Run deployment must independently be verified to
 contain the owner-scoped source fix before deleting the legacy
 route. Until real user/browser parity and stable idempotency keys
 are confirmed, it remains a Cloud Run dependency.
+
+
+## Native public reads expanded after production request audit (2026-11-07)
+
+A bounded Cloud Run request log sample (350 HTTP requests from last 48 hours)
+contained currently used Second Brain `POST /api/brain/sync/mcp`, OAuth
+`POST /token`, and profile requests. Thus Cloud Run **must remain on**.
+The sample is not a full traffic histogram, and may contain direct-origin
+access and automated traffic.
+
+Two already-defined PUBLIC read routes were reconciled with real clients:
+- `GET /api/posts?page=1&limit=1000` was historically rejected by
+  Gateway's overly narrow 50-item limit and fell back to Cloud Run.
+  Live data has **24 public posts**, so the existing Worker can return all
+  24 with original `perPage:1000` metadata. The public-only MongoDB filter
+  stays `isPrivate:false`, as before. The limit stays hard-bounded at 1000.
+- Existing `GET /api/comments/:postId` and
+  `GET /api/comments/reply/:commentId` now support signed-in clients in
+  Core. The previous Gateway switched only anonymous comments; legitimate
+  JWT-bearing readers fell back to Cloud Run. The Core verifies a carried
+  JWT's signature and expiry, then checks the live Session if one exists;
+  invalid/expired tokens get HTTP 401 (not an anonymous bypass) and a
+  valid JWT whose Session expired retains the legacy **public guest**
+  behavior. Google-only login continues through Cloud Run.
+
+Both operations are GET-only and read shared PUBLIC data. No authenticated
+comments or private article records become readable. Write paths are not
+changed. Worker 5xx on GET can safely fall back to Cloud Run during rollout;
+Cloud Run code and all existing auth mutations remain intact.

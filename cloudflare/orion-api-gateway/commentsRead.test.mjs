@@ -12,12 +12,17 @@ test('public comment GETs migrate and authentication/write paths remain on Cloud
     assert.equal(shouldRouteToCoreWorker('POST',path),false);
     assert.equal(shouldRouteToCoreWorker('PUT',path),false);
     assert.equal(shouldRouteToCoreWorker('GET',path,'?page=2'),false);
+    // Valid JWTs are now verified by Core; public comments are unchanged.
     for(const auth of [
       {'x-auth-token':'dummy'},
-      {'x-google-auth':'{}'},
       {authorization:'Bearer fake'},
       {cookie:'other=1; orion_session=signed'}
-    ]) assert.equal(shouldRouteToCoreWorker('GET',path,'',new Headers(auth)),false);
+    ]) assert.equal(shouldRouteToCoreWorker('GET',path,'',new Headers(auth)),true);
+    // Google-only callers still depend on Cloud Run authentication.
+    assert.equal(shouldRouteToCoreWorker('GET',path,'',
+      new Headers({'x-google-auth':'{}'})),false);
+    assert.equal(shouldRouteToCoreWorker('GET',path,'',
+      new Headers({authorization:'Basic xxx'})),false);
   }
   for(const path of ['/api/comments','/api/comments/not-an-id',
     '/api/comments/reply/not-an-id','/api/comments/admin/123',

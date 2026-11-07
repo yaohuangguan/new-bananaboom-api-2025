@@ -22,7 +22,9 @@ test('authenticated or invalid list requests remain on original Cloud Run', () =
   assert.equal(shouldRouteToCoreWorker('GET', '/api/tags', '?type=public'), true);
   assert.equal(shouldRouteToCoreWorker('GET', '/api/posts', '?page=2&limit=3&q=React'), true);
   assert.equal(shouldRouteToCoreWorker('GET', '/api/posts', '?page=-1'), false);
-  assert.equal(shouldRouteToCoreWorker('GET', '/api/posts', '?limit=500'), false);
+  assert.equal(shouldRouteToCoreWorker('GET', '/api/posts', '?limit=500'), true);
+  assert.equal(shouldRouteToCoreWorker('GET', '/api/posts', '?page=1&limit=1000'), true);
+  assert.equal(shouldRouteToCoreWorker('GET', '/api/posts', '?limit=1001'), false);
   assert.equal(shouldRouteToCoreWorker('POST', '/api/projects'), false);
   assert.equal(shouldRouteToCoreWorker('GET', '/api/posts/507f1f77bcf86cd799439011'), true);
 });
