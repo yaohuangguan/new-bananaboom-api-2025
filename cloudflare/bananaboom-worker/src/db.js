@@ -13,6 +13,7 @@ export const repository = {
   logs: async () => (await mongo()).logs(),
   publicPhotos: async () => (await mongo()).publicPhotos(),
   publicComments: async (id, reply) => (await mongo()).publicComments(id, reply),
+  commentMutate: async (user, token, input) => (await mongo()).commentMutate(user, token, input),
   backupDatabase: async () => (await mongo()).backupDatabase(),
   passwordSignIn: async (input) => (await mongo()).passwordSignIn(input),
   passwordLogout: async (token) => (await mongo()).passwordLogout(token),
