@@ -76,6 +76,14 @@ try {
   assert.equal(updated.reply.length,2);
   assert.equal(updated.__v,2);
 
+  const simultaneous=await Promise.all([
+    create(other,otherToken,'comment-concurrent-01',{content:'Parallel synthetic'}),
+    create(other,otherToken,'comment-concurrent-01',{content:'Parallel synthetic'})
+  ]);
+  assert.deepEqual(simultaneous[0],simultaneous[1]);
+  assert.equal(await db.collection('comments').countDocuments({}),2);
+  assert.equal(await db.collection('audit_logs').countDocuments({}),4);
+
   await assert.rejects(reply(owner,token,String(new ObjectId()),
     'comment-reply-missing',{content:'missing'}),e=>e.status===404);
   await assert.rejects(create(owner,otherToken,'forged-session-01',
@@ -85,8 +93,8 @@ try {
     {content:'denied'}),e=>e.status===401);
   await assert.rejects(create(owner,token,'comment-create-01',
     {content:'Synthetic comment'}),e=>e.status===401);
-  assert.equal(await db.collection('comments').countDocuments({}),1);
-  assert.equal(await db.collection('audit_logs').countDocuments({}),3);
+  assert.equal(await db.collection('comments').countDocuments({}),2);
+  assert.equal(await db.collection('audit_logs').countDocuments({}),4);
   console.log('PASS isolated Mongo replica: create/reply response parity, audit+receipt transaction, idempotency, reply version, no forged/revoked Session, 404');
   console.log('NO_PRODUCTION_COMMENTS_MODIFIED=true');
   await db.dropDatabase();
