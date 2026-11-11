@@ -6,6 +6,7 @@ import { performArticleTransaction } from './articleTransaction.js';
 import { dispatchTodoReminders } from './todoReminders.js';
 import { createDatabaseBackup } from './databaseBackup.js';
 import { getPublicComments } from './commentReads.js';
+import { mutateComment, CommentMutationError } from './commentMutations.js';
 import { getOwnerProfile, getOwnerAiStatus } from './ownerProfile.js';
 import { createPasswordSession, revokePasswordSession } from './passwordSession.js';
 import { BrainReadError, safeBrainFailureKind, brainAccessScopes, searchBrainMemories, readBrainMemory } from './brainRead.js';
@@ -66,6 +67,21 @@ export class MongoDBConnection extends DurableObject {
   async publicComments(postId, reply = false) {
     await this.client.connect();
     return getPublicComments(this.client.db(), postId, { reply });
+  }
+
+  async commentMutate(user, token, input) {
+    try {
+      await this.client.connect();
+      return {ok: true, data: await mutateComment({
+        client: this.client, db: this.client.db()
+      }, user, token, input)};
+    } catch (error) {
+      if (error instanceof CommentMutationError) {
+        return {ok: false, code: error.message, status: error.status};
+      }
+      console.error('comment-do-write-unavailable', error?.name || 'Error');
+      return {ok: false, code: 'COMMENT_UNAVAILABLE', status: 503};
+    }
   }
 
   publicPhotos() {

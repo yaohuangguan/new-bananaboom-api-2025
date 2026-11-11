@@ -205,6 +205,13 @@ export function isLegacyPhotoWritePath(method,path) {
     (path === '/api/photos' || path.startsWith('/api/photos/'));
 }
 
+// Explicitly migrated comment writes: only known legacy POST routes.
+export function isCommentWritePath(method, path) {
+  return method === 'POST' &&
+    (/^\/api\/comments\/[a-f0-9]{24}$/i.test(path) ||
+      /^\/api\/comments\/reply\/[a-f0-9]{24}$/i.test(path));
+}
+
 export function isFootprintWritePath(method,path) {
   return (method === 'POST' && path === '/api/footprints') ||
     (['PUT','DELETE'].includes(method) &&
@@ -534,6 +541,25 @@ function photoWriteAuthorizationFailure(request,status=503) {
   const origin=corsOrigin(request);
   if(origin){
     response.headers.set('access-control-allow-origin',origin);
+    response.headers.set('access-control-allow-credentials','true');
+    response.headers.append('vary','Origin');
+  }
+  return response;
+}
+
+function commentWriteFailure(request, status = 503) {
+  const message = status === 401 ? 'Signed-in comment session required' :
+    status === 428 ? 'Idempotency-Key required for comment mutation' :
+    'Comment outcome unknown. Check thread before retrying with the same Idempotency-Key.';
+  const response = withSecurityHeaders(new Response(JSON.stringify({message}), {
+    status, headers: {
+      'content-type': 'application/json; charset=utf-8',
+      'cache-control': 'private, no-store'
+    }
+  }));
+  const origin = corsOrigin(request);
+  if (origin) {
+    response.headers.set('access-control-allow-origin', origin);
     response.headers.set('access-control-allow-credentials','true');
     response.headers.append('vary','Origin');
   }
@@ -1022,6 +1048,19 @@ export default {
     if (todoDetailRequested && !todoDetailRead) {
       return todoWorkerFailure(request,401);
     }
+    const commentWrite = String(env.COMMENT_WRITE_CANARY || '0') === '1' &&
+      request.headers.get('x-orion-comment-write-canary') === '1' &&
+      isCommentWritePath(request.method, pathname);
+    if (commentWrite) {
+      if (incomingUrl.search || request.headers.get('x-google-auth') ||
+          !hasLegacyCredentials(request.headers)) {
+        return commentWriteFailure(request, 401);
+      }
+      if (!/^[A-Za-z0-9:_-]{8,128}$/.test(
+        request.headers.get('idempotency-key') || '')) {
+        return commentWriteFailure(request, 428);
+      }
+    }
     const footprintRead = isFootprintReadCandidate(
       request.method, pathname, incomingUrl.search, request.headers,
       String(env.FOOTPRINT_READ_CUTOVER || '0') === '1');
@@ -1049,7 +1088,7 @@ export default {
       return footprintDetailFailure(request, 401);
     }
     const routeToCore = likeWrite || articleWrite || profileRead || todoRead ||
-      todoWrite || todoDetailRead || footprintRead || footprintDetailRead || footprintWrite
+      todoWrite || todoDetailRead || footprintRead || footprintDetailRead || footprintWrite || commentWrite
       ? true : pathname === '/api/posts/private/posts'
       ? shouldRoutePrivateRead(request.method, pathname, incomingUrl.search, request.headers, rolloutPercent)
       : shouldRouteToCoreWorker(request.method, pathname, incomingUrl.search, request.headers);
@@ -1069,7 +1108,8 @@ export default {
         workerHeaders.delete('x-orion-footprint-read-canary');
         workerHeaders.delete('x-orion-footprint-detail-canary');
         workerHeaders.delete('x-orion-footprint-write-canary');
-        const body = (articleWrite || todoWrite || footprintWrite) && request.method !== 'DELETE' ? request.body : undefined;
+        workerHeaders.delete('x-orion-comment-write-canary');
+        const body = (articleWrite || todoWrite || footprintWrite || commentWrite) && request.method !== 'DELETE' ? request.body : undefined;
         const workerRequest = new Request(request.url, {
           method: request.method,
           headers: workerHeaders,
@@ -1100,6 +1140,10 @@ export default {
           }
           return redactPublicPostResponse(request, secured);
         }
+        if (commentWrite) {
+          console.error('Comment Worker write unknown; no Cloud Run replay');
+          return commentWriteFailure(request);
+        }
         if (todoWrite || todoDetailRead) {
           console.error('Todo Worker denied/unavailable; not falling back to Cloud Run');
           return todoWorkerFailure(request);
@@ -1127,6 +1171,10 @@ export default {
         }
         console.error('BananaBoom Worker read returned', workerResponse.status, 'falling back to Cloud Run');
       } catch (error) {
+        if (commentWrite) {
+          console.error('Comment Worker write unknown; no Cloud Run replay');
+          return commentWriteFailure(request);
+        }
         if (todoWrite || todoDetailRead) {
           console.error('Todo Worker exception; no replay',error?.name || 'Error');
           return todoWorkerFailure(request);
@@ -1153,6 +1201,7 @@ export default {
       }
     }
 
+    if (commentWrite) return commentWriteFailure(request);
     if (todoWrite || todoDetailRead) return todoWorkerFailure(request);
     if(footprintWrite) return footprintWriteFailure(request);
     if (footprintDetailRead) return footprintDetailFailure(request); // Fail closed without core.
@@ -1176,6 +1225,7 @@ export default {
     headers.delete('x-orion-footprint-read-canary');
     headers.delete('x-orion-footprint-detail-canary');
     headers.delete('x-orion-footprint-write-canary');
+    headers.delete('x-orion-comment-write-canary');
     headers.delete('x-orion-pdf-canary');
 
     const ttl = cacheTtlFor(request, pathname);
