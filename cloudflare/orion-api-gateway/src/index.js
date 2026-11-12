@@ -1,5 +1,6 @@
 import { redactPublicPostResponse } from './publicPostPrivacy.js';
 import { serveResumePdf } from './resumePdf.js';
+import { commentWritePolicy, selectCommentWrite } from './commentrouting.js';
 
 const ALLOWED_ORIGINS = new Set([
   'https://samyao.me',
@@ -1048,19 +1049,27 @@ export default {
     if (todoDetailRequested && !todoDetailRead) {
       return todoWorkerFailure(request,401);
     }
-    const commentWrite = String(env.COMMENT_WRITE_CANARY || '0') === '1' &&
-      request.headers.get('x-orion-comment-write-canary') === '1' &&
-      isCommentWritePath(request.method, pathname);
-    if (commentWrite) {
-      if (incomingUrl.search || request.headers.get('x-google-auth') ||
-          !hasLegacyCredentials(request.headers)) {
-        return commentWriteFailure(request, 401);
+    if (request.method === 'GET' && pathname === '/api/comments/write-policy') {
+      if (incomingUrl.search) return commentWriteFailure(request, 400);
+      const response = withSecurityHeaders(Response.json(
+        commentWritePolicy(request, env, hasLegacyCredentials(request.headers)),
+        {headers: {'cache-control': 'private, no-store'}}
+      ));
+      const origin = corsOrigin(request);
+      if (origin) {
+        response.headers.set('access-control-allow-origin', origin);
+        response.headers.set('access-control-allow-credentials', 'true');
+        response.headers.append('vary', 'Origin');
       }
-      if (!/^[A-Za-z0-9:_-]{8,128}$/.test(
-        request.headers.get('idempotency-key') || '')) {
-        return commentWriteFailure(request, 428);
-      }
+      return response;
     }
+    const commentSelection = isCommentWritePath(request.method, pathname)
+      ? selectCommentWrite(request, env, incomingUrl.search,
+        hasLegacyCredentials(request.headers)) : {worker: false};
+    if (commentSelection.status) {
+      return commentWriteFailure(request, commentSelection.status);
+    }
+    const commentWrite = commentSelection.worker;
     const footprintRead = isFootprintReadCandidate(
       request.method, pathname, incomingUrl.search, request.headers,
       String(env.FOOTPRINT_READ_CUTOVER || '0') === '1');
@@ -1109,6 +1118,7 @@ export default {
         workerHeaders.delete('x-orion-footprint-detail-canary');
         workerHeaders.delete('x-orion-footprint-write-canary');
         workerHeaders.delete('x-orion-comment-write-canary');
+        workerHeaders.delete('x-orion-comment-write-route');
         const body = (articleWrite || todoWrite || footprintWrite || commentWrite) && request.method !== 'DELETE' ? request.body : undefined;
         const workerRequest = new Request(request.url, {
           method: request.method,
@@ -1226,6 +1236,7 @@ export default {
     headers.delete('x-orion-footprint-detail-canary');
     headers.delete('x-orion-footprint-write-canary');
     headers.delete('x-orion-comment-write-canary');
+    headers.delete('x-orion-comment-write-route');
     headers.delete('x-orion-pdf-canary');
 
     const ttl = cacheTtlFor(request, pathname);
