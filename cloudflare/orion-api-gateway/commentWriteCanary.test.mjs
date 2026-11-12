@@ -15,6 +15,7 @@ const make=(path, extras={}, body={content:'Synthetic user comment'})=>new Reque
   headers:{
     origin:'https://samyao.me', 'x-auth-token':'synthetic-signed-jwt',
     'idempotency-key':'synthetic-comment-01', 'x-orion-comment-write-canary':'1',
+    'x-orion-comment-write-route':'worker',
     'content-type':'application/json',...extras
   },
   body:JSON.stringify(body)
@@ -40,7 +41,7 @@ test('Flag OFF makes arbitrary user canary header ineffective and strips it at l
     return Response.json({via:'legacy'});
   };
   try{
-    const response=await gateway.fetch(make('/api/comments/'+post),
+    const response=await gateway.fetch(make('/api/comments/'+post,{'x-orion-comment-write-route':'legacy'}),
       env({fetch:async()=>{worker++;return Response.json({via:'worker'})}}));
     assert.equal(response.status,200);
     assert.equal((await response.json()).via,'legacy');
@@ -59,6 +60,7 @@ test('Enabled comment and reply opt-in forward body and session to Core once',as
         count++;
         assert.equal(request.headers.get('x-orion-edge-secret'),null);
         assert.equal(request.headers.get('x-orion-comment-write-canary'),null);
+        assert.equal(request.headers.get('x-orion-comment-write-route'),null);
         assert.equal(request.headers.get('x-auth-token'),'synthetic-signed-jwt');
         assert.equal(request.headers.get('idempotency-key'),'synthetic-comment-01');
         assert.deepEqual(await request.json(),{content:'Synthetic user comment'});
