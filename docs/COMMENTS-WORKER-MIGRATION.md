@@ -1,6 +1,6 @@
 # Authenticated comment mutations — Worker migration
 
-Status: **2026-11-12, v2 route pinning implemented; live canary and default cutover not yet accepted**.
+Status: **2026-11-12, real authenticated canary accepted and handler-OFF rollback exercised; default promotion is prepared and awaiting its final authenticated check**.
 
 ## Routes and storage
 
@@ -40,3 +40,17 @@ For a routing rollback, set **only `COMMENT_WRITE_CUTOVER=0`**. New operations s
 Before this update, the full Core/Gateway suite passed **217 tests, 1 skipped** and the isolated localhost Mongo Replica Set test passed create/reply parity, atomic audit+receipt, concurrent idempotency, live owner/session checks, replay and revocation. This update adds route-pinning and rollback regression coverage. Live authenticated canary, deployment versions and default cutover must be recorded after actual execution.
 
 Cloud Run retirement is still **NOT READY**: identity/OAuth, Second Brain writes, other owner CRUD, media, AI, scheduling, older clients and required upstream traffic remain separate gates.
+
+## Real production acceptance — 2026-11-12
+
+The owner completed password login in an isolated browser profile. Gateway canary version `9ca1f11f-2460-415f-954b-54771c01c605` passed all of these against the real production API and MongoDB:
+
+- Drop a successful HTTP 200 at the browser response boundary, then safely retry its saved key.
+- Repeat/concurrently replay the same key with the same immutable response; changed content returns 409.
+- Create/reply and read back exactly one isolated synthetic comment plus one reply through Worker responses.
+- Filter the real audit API by the synthetic targets: exactly one create and one reply entry.
+- Reject unsigned writes and reject a saved real-session cookie after logout/revocation, including receipt replay.
+
+Core version was `044aa23d-34b2-43dd-a1a1-0a06dbbbaaf1`. Vercel production deployment `dpl_8uevhLakNZJzMr2CdxrBbm6ntQkT` serves frontend commit `af7c7da464e4165c32f0823e7a5d5992236ddbe0`. Production website/API smoke, direct-origin 403 protection and bundle-origin scan passed.
+
+After canary acceptance, the handler-OFF rollback rehearsal deployed Gateway `293ae833-adbf-4c78-ae30-6f7496e7ea3d`. Both comment controls returned to OFF, preserving all receipts. Default promotion must pass a new authenticated operation without a canary header before this milestone is called complete. Synthetic records and audit/receipts are retained in a random isolated thread as acceptance evidence; existing user records were not changed.

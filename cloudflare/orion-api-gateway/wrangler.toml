@@ -27,9 +27,9 @@ FOOTPRINT_READ_CUTOVER = "0"
 FOOTPRINT_WRITE_CANARY = "0"
 # Authenticated comment + reply POST staged; no client can activate alone.
 # Handler gate: retain for pinned Worker retries during a default-route rollback.
-COMMENT_WRITE_CANARY = "0"
+COMMENT_WRITE_CANARY = "1"
 # Select Worker only for new v2 client operations after real acceptance.
-COMMENT_WRITE_CUTOVER = "0"
+COMMENT_WRITE_CUTOVER = "1"
 FOOTPRINT_DETAIL_CUTOVER = "0"
 # 0: old Cloud Run PDF, explicit x-orion-pdf-canary: 1 tests new Browser Run.
 # Switch to 1 only after a production PDF is generated and inspected.
